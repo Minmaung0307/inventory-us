@@ -770,6 +770,119 @@ function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.cl
 function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); }
 
 /* =========================
+   Part B.5 — App renderer
+   ========================= */
+
+// Return the right view for the current route
+function safeView(route) {
+  switch ((route || 'home')) {
+    case 'home':       return viewHome();
+    case 'search':     return viewSearch();
+    case 'dashboard':  return viewDashboard();
+    case 'inventory':  return viewInventory();
+    case 'products':   return viewProducts();
+    case 'cogs':       return viewCOGS();
+    case 'tasks':      return viewTasks();
+    case 'settings':   return viewSettings();
+    case 'policy':
+    case 'license':
+    case 'setup':
+    case 'contact':
+    case 'guide':      return viewPage(route);
+    default:           return viewHome();
+  }
+}
+
+// Wire up interactions for whatever route is showing
+function wireRoute(route) {
+  // Topbar actions
+  document.getElementById('btnLogout')?.addEventListener('click', doLogout);
+  document.getElementById('btnHome')?.addEventListener('click', () => go('home'));
+
+  // Sidebar open/close
+  document.getElementById('burger')?.addEventListener('click', openSidebar);
+  document.getElementById('backdrop')?.addEventListener('click', closeSidebar);
+
+  // In-content navigation buttons like: <button data-go="inventory">
+  document.querySelectorAll('[data-go]').forEach(el => {
+    el.addEventListener('click', () => {
+      const r  = el.getAttribute('data-go');
+      const id = el.getAttribute('data-id');
+      if (r) {
+        go(r);
+        if (id) setTimeout(() => { try { scrollToRow(id); } catch(_) {} }, 80);
+      }
+    });
+  });
+
+  // Global helpers (search box, modals, image preview on phones)
+  hookSidebarInteractions();
+  ensureGlobalModals();
+  enableMobileImagePreview();
+
+  // Route-specific wiring
+  switch ((route || 'home')) {
+    case 'home':
+      wireHome();
+      break;
+    case 'dashboard':
+      wireDashboard();
+      wirePosts();       // posts live on the dashboard
+      break;
+    case 'inventory':
+      wireInventory();
+      break;
+    case 'products':
+      wireProducts();
+      break;
+    case 'cogs':
+      wireCOGS();
+      break;
+    case 'tasks':
+      wireTasks();
+      break;
+    case 'settings':
+      wireSettings();
+      break;
+    case 'contact':
+      wireContact();
+      break;
+    // policy/license/setup/guide/search need no extra wiring here
+  }
+}
+
+// Main app renderer (called after login or route changes)
+function renderApp() {
+  try {
+    // If there’s no session yet, show login instead of crashing
+    if (!session) { renderLogin(); return; }
+
+    const root = document.getElementById('root');
+    if (!root) return;
+
+    const route = currentRoute || 'home';
+
+    root.innerHTML = `
+      <div class="app">
+        ${renderSidebar(route)}
+        <div>
+          ${renderTopbar()}
+          <div class="main" id="main">
+            ${safeView(route)}
+          </div>
+        </div>
+      </div>
+    `;
+
+    wireRoute(route);
+  } catch (e) {
+    console.error('[renderApp] crash:', e);
+    notify(e?.message || 'Render failed', 'danger');
+    showRescue(e);
+  }
+}
+
+/* =========================
    Part C — Views (unchanged content except contact wiring exists)
    ========================= */
 // … (ALL the view/render/wiring code from the previous message remains the same) …
