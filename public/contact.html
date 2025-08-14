@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>Contact — Inventory</title>
+  <meta name="color-scheme" content="dark light" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+  <style>
+    /* keep this page clean inside the iframe */
+    .wrap{padding:12px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media (max-width:640px){ .row{grid-template-columns:1fr} }
+    .note{color:var(--muted);font-size:12px;margin-top:6px}
+  </style>
+</head>
+<body>
+  <script>
+    // Mirror parent theme if inside the app iframe
+    try {
+      const t = parent.document?.documentElement?.getAttribute('data-theme') || '';
+      if (t) document.documentElement.setAttribute('data-theme', t);
+    } catch {}
+  </script>
+
+  <div class="wrap">
+    <h3 style="margin:0 0 8px 0">Contact</h3>
+    <div class="grid">
+      <div class="row">
+        <input id="ct-name" class="input" placeholder="Your name" autocomplete="name">
+        <input id="ct-email" class="input" type="email" placeholder="Your email" autocomplete="email">
+      </div>
+      <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button>
+      </div>
+      <div id="ct-resp" class="note" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <!-- EmailJS (v4) -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <script>
+    // Replace with your own if needed. Using the values you shared:
+    const SERVICE_ID  = "service_z9tkmvr";
+    const TEMPLATE_ID = "template_q5q471f";
+    const PUBLIC_KEY  = "WT0GOYrL9HnDKvLUf";
+    const TO_EMAIL    = "minmaung0307@gmail.com"; // mailto fallback
+
+    emailjs.init(PUBLIC_KEY);
+
+    const $ = (s)=>document.querySelector(s);
+    const resp = $('#ct-resp');
+
+    $('#ct-send').addEventListener('click', async ()=>{
+      const name = $('#ct-name').value.trim();
+      const email= $('#ct-email').value.trim();
+      const msg  = $('#ct-msg').value.trim();
+
+      if (!name || !email || !msg){
+        resp.textContent = 'Please fill name, email, and a message.'; return;
+      }
+      resp.textContent = 'Sending…';
+
+      try{
+        await emailjs.send(SERVICE_ID, TEMPLATE_ID, {
+          from_name: name,
+          reply_to:  email,
+          message:   msg,
+          to_email:  TO_EMAIL
+        });
+        resp.textContent = 'Sent! We’ll get back to you soon.';
+        $('#ct-name').value=''; $('#ct-email').value=''; $('#ct-msg').value='';
+      }catch(e){
+        // Mailto fallback
+        resp.textContent = 'Could not send via EmailJS. Opening your email app…';
+        const subject = 'Contact from Inventory App';
+        const body = `From: ${name} <${email}>\n\n${msg}`;
+        window.location.href = `mailto:${encodeURIComponent(TO_EMAIL)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      }
+    });
+  </script>
+</body>
+</html>

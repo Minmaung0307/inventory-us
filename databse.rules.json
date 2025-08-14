@@ -1,0 +1,14 @@
+{
+  "rules": {
+    "tenants": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        "kv": {
+          "$key": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      }
+    }
+  }
+}

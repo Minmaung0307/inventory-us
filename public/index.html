@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <title>Inventory</title>
+  <meta name="theme-color" content="#0ea5a5"/>
+
+  <!-- App styles & icons -->
+  <link rel="stylesheet" href="/css/styles.css"/>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+
+  <!-- Tiny error banner so you can see failures on mobile -->
+  <script>
+    (function(){
+      function show(msg, cls){
+        var n=document.getElementById('notification'); if(!n)return;
+        n.textContent=msg; n.className='notification show '+(cls||'danger');
+        setTimeout(()=>{ n.className='notification'; }, 3000);
+      }
+      window.addEventListener('error', e=>show('Error: '+(e?.message||'Unknown')));
+      window.addEventListener('unhandledrejection', e=>show('Error: '+(e?.reason?.message||'Promise rejected')));
+    })();
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="notification" class="notification"></div>
+
+  <!-- Firebase v8 SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <!-- Your app (no query string; SW will cache this file) -->
+  <script defer src="/js/app.js"></script>
+
+  <!-- Register the service worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
+      });
+    }
+  </script>
+</body>
+</html>
