@@ -160,24 +160,39 @@ function resetIdleTimer(){
 ['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
 
 // --- Auth state --------------------------------------------------------------
+// ---- Local auto-login toggle ----
+const ALLOW_LOCAL_AUTOLOGIN = false;
+
 auth.onAuthStateChanged(async (user) => {
   console.log('[auth] onAuthStateChanged:', !!user, user?.email || '');
   try { await ensureSessionAndRender(user); }
-  catch (err) { console.error('[auth] ensureSessionAndRender crashed:', err); notify(err?.message || 'Render failed', 'danger'); showRescue(err); }
+  catch (err) {
+    console.error('[auth] ensureSessionAndRender crashed:', err);
+    notify(err?.message || 'Render failed', 'danger');
+    showRescue(err);
+  }
 });
 
 async function ensureSessionAndRender(user) {
   try {
     applyTheme();
 
-    // allow local session
+    // allow local session ONLY if the flag is true
     const stored = load('session', null);
-    if (!user && stored && stored.authMode === 'local') {
-      session = stored; resetIdleTimer(); currentRoute = load('_route','home'); renderApp(); return;
+    if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
+      session = stored;
+      resetIdleTimer();
+      currentRoute = load('_route','home');
+      renderApp();
+      return;
     }
 
     if (!user) {
-      session = null; save('session', null); if (idleTimer) clearTimeout(idleTimer); renderLogin(); return;
+      session = null;
+      save('session', null);
+      if (idleTimer) clearTimeout(idleTimer);
+      renderLogin();
+      return;
     }
 
     const email = (user.email || '').toLowerCase();
@@ -192,9 +207,16 @@ async function ensureSessionAndRender(user) {
       prof.role = 'admin'; save('users', users);
     }
 
-    session = { ...prof, authMode: 'firebase' }; save('session', session);
+    session = { ...prof, authMode: 'firebase' };
+    save('session', session);
 
-    try { if (cloud?.isOn?.()) { try{ await firebase.database().goOnline(); }catch{} try{ await cloud.pullAllOnce(); }catch{} try{ cloud.subscribeAll(); }catch{} } } catch {}
+    try {
+      if (cloud?.isOn?.()) {
+        try{ await firebase.database().goOnline(); }catch{}
+        try{ await cloud.pullAllOnce(); }catch{}
+        try{ cloud.subscribeAll(); }catch{}
+      }
+    } catch {}
 
     resetIdleTimer();
     currentRoute = load('_route', 'home');
@@ -419,10 +441,21 @@ const doSignIn = async () => {
 
 async function doLogout(){
   try { cloud?.disable?.(); } catch {}
-  await auth.signOut().catch(()=>{});
+  try { await auth.signOut(); } catch {}
+  if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
+  session = null;
   save('session', null);
+  currentRoute = 'home';
   notify('Signed out');
+  try { renderLogin(); } catch (e) { console.error(e); }
 }
+
+// async function doLogout(){
+//   try { cloud?.disable?.(); } catch {}
+//   await auth.signOut().catch(()=>{});
+//   save('session', null);
+//   notify('Signed out');
+// }
 
 // ---------- Sidebar + Topbar ----------
 function renderSidebar(active='home'){

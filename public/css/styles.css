@@ -245,3 +245,29 @@ body {
 .notification.ok    { border-color: var(--ok); }
 .notification.warn  { border-color: var(--warn); }
 .notification.danger{ border-color: var(--danger); }
+
+/* Make anchor-buttons look like buttons */
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none !important;
+  color: inherit !important;
+}
+
+/* Remove default blue/underline where we use icon links */
+.login a, .topbar a, .sidebar .socials-row a, .socials-compact a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Compact social icons in topbar (the row left of Home/Logout) */
+.socials-compact { display: flex; gap: 8px; align-items: center; }
+.socials-compact a {
+  display: inline-flex;
+  width: 32px; height: 32px;
+  align-items: center; justify-content: center;
+  border: 1px solid var(--card-border);
+  border-radius: 9999px;
+}
+.socials-compact a:hover { background: var(--hover); }
