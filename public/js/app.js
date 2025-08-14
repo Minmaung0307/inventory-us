@@ -407,59 +407,107 @@ function renderLogin() {
   const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
 
   // --- Sign in (supports demo local admin) ---
+  // const doSignIn = async () => {
+  //   const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
+  //   const pass  = document.getElementById('li-pass')?.value || '';
+
+  //   if (!email || !pass) { notify('Enter email & password', 'warn'); return; }
+
+  //   // Local demo admin (works even without Firebase)
+  //   if (email === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
+  //     const users = load('users', []);
+  //     let prof = users.find(u => (u.email||'').toLowerCase() === DEMO_ADMIN_EMAIL);
+  //     if (!prof) {
+  //       prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
+  //       users.push(prof); save('users', users);
+  //     }
+  //     session = { ...prof, authMode: 'local' };
+  //     save('session', session);
+  //     notify('Welcome, Admin (local mode)');
+  //     renderApp();
+  //     return;
+  //   }
+
+  //   // Normal Firebase email/password
+  //   try {
+  //     if (!navigator.onLine) throw new Error('You appear to be offline.');
+  //     await auth.signInWithEmailAndPassword(email, pass);
+  //     notify('Welcome!');
+  //     // Fallback render if needed
+  //     const started = Date.now();
+  //     const poll = setInterval(() => {
+  //       const rendered = !!document.querySelector('.app');
+  //       const timedOut = Date.now() - started > 2000;
+  //       if (rendered || timedOut) {
+  //         clearInterval(poll);
+  //         if (!rendered) {
+  //           try { ensureSessionAndRender(auth.currentUser); } catch (err) { console.error(err); notify(err?.message||'Render failed','danger'); }
+  //         }
+  //       }
+  //     }, 100);
+  //   } catch (e) {
+  //     const code = e?.code || '';
+  //     if (code === 'auth/user-not-found') {
+  //       notify('No account found. Use Create account to register.', 'warn');
+  //       openAuthModal('#m-signup');
+  //       $('#su-email').value = email;
+  //     } else if (code === 'auth/wrong-password') {
+  //       notify('Incorrect password. Try Forgot password.', 'danger');
+  //     } else if (code === 'auth/network-request-failed') {
+  //       notify('Network error: check your connection.', 'danger');
+  //     } else {
+  //       notify(e?.message || 'Login failed', 'danger');
+  //     }
+  //   }
+  // };
+
   const doSignIn = async () => {
-    const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
-    const pass  = document.getElementById('li-pass')?.value || '';
+  const email = (document.getElementById('li-email')?.value || '').trim();
+  const pass  = document.getElementById('li-pass')?.value || '';
+  const btn   = document.getElementById('btnLogin');
 
-    if (!email || !pass) { notify('Enter email & password', 'warn'); return; }
+  if (!email || !pass) { notify('Enter email & password','warn'); return; }
+  if (!navigator.onLine) { notify('You appear to be offline','warn'); return; }
 
-    // Local demo admin (works even without Firebase)
-    if (email === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
-      const users = load('users', []);
-      let prof = users.find(u => (u.email||'').toLowerCase() === DEMO_ADMIN_EMAIL);
-      if (!prof) {
-        prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
-        users.push(prof); save('users', users);
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = 'Signing in…';
+
+  try {
+    console.log('[auth] signInWithEmailAndPassword starting', email);
+    const cred = await auth.signInWithEmailAndPassword(email, pass);
+    console.log('[auth] signInWithEmailAndPassword OK:', cred.user?.uid);
+    notify('Welcome!');
+
+    // Fallback: force render if onAuthStateChanged is slow
+    setTimeout(() => {
+      const rendered = !!document.querySelector('.app');
+      if (!rendered) {
+        console.log('[auth] Fallback render -> ensureSessionAndRender');
+        try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); }
       }
-      session = { ...prof, authMode: 'local' };
-      save('session', session);
-      notify('Welcome, Admin (local mode)');
-      renderApp();
-      return;
-    }
+    }, 600);
 
-    // Normal Firebase email/password
-    try {
-      if (!navigator.onLine) throw new Error('You appear to be offline.');
-      await auth.signInWithEmailAndPassword(email, pass);
-      notify('Welcome!');
-      // Fallback render if needed
-      const started = Date.now();
-      const poll = setInterval(() => {
-        const rendered = !!document.querySelector('.app');
-        const timedOut = Date.now() - started > 2000;
-        if (rendered || timedOut) {
-          clearInterval(poll);
-          if (!rendered) {
-            try { ensureSessionAndRender(auth.currentUser); } catch (err) { console.error(err); notify(err?.message||'Render failed','danger'); }
-          }
-        }
-      }, 100);
-    } catch (e) {
-      const code = e?.code || '';
-      if (code === 'auth/user-not-found') {
-        notify('No account found. Use Create account to register.', 'warn');
-        openAuthModal('#m-signup');
-        $('#su-email').value = email;
-      } else if (code === 'auth/wrong-password') {
-        notify('Incorrect password. Try Forgot password.', 'danger');
-      } else if (code === 'auth/network-request-failed') {
-        notify('Network error: check your connection.', 'danger');
-      } else {
-        notify(e?.message || 'Login failed', 'danger');
-      }
-    }
-  };
+  } catch (e) {
+    const code = e?.code || '';
+    const message = e?.message || 'Login failed';
+
+    console.error('[auth] signIn error:', code, message);
+    const map = {
+      'auth/invalid-email': 'Invalid email format.',
+      'auth/user-disabled': 'This user is disabled.',
+      'auth/user-not-found': 'No account found for this email.',
+      'auth/wrong-password': 'Incorrect password.',
+      'auth/too-many-requests': 'Too many attempts. Try again later.',
+      'auth/operation-not-allowed': 'Email/password sign-in is disabled in this project.',
+      'auth/network-request-failed': 'Network error. Check your connection.'
+    };
+    notify(map[code] || message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+};
 
   // --- Signup (Firebase) ---
   const doSignup = async ()=>{
