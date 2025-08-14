@@ -927,13 +927,49 @@ function downloadCSV(filename, rows, headers) {
 }
 
 // Generic image upload helper (file -> dataURL -> set into text input)
+// Generic image upload helper (file -> dataURL -> set into text input) with resize/compress
 function attachImageUpload(fileInputSel, textInputSel){
-  const f = $(fileInputSel), t = $(textInputSel); if (!f || !t) return;
-  f.onchange = ()=>{
-    const file = f.files && f.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{ t.value = reader.result; };
-    reader.readAsDataURL(file);
+  const f = $(fileInputSel), t = $(textInputSel);
+  if (!f || !t) return;
+
+  f.onchange = async () => {
+    try {
+      const file = f.files && f.files[0]; if (!file) return;
+      if (!/^image\//i.test(file.type)) { notify('Please select an image file', 'warn'); return; }
+
+      // Read into a bitmap
+      const imgData = await file.arrayBuffer();
+      const blobUrl = URL.createObjectURL(new Blob([imgData], { type: file.type }));
+      const img = new Image();
+      img.src = blobUrl;
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+
+      // Compute scaled size
+      const maxSide = 1280;
+      let { width, height } = img;
+      if (width > maxSide || height > maxSide) {
+        const ratio = Math.min(maxSide / width, maxSide / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      // Draw to canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Export as JPEG (smaller than PNG) – tweak quality if needed
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+      URL.revokeObjectURL(blobUrl);
+
+      // Save to the target text box
+      t.value = dataUrl;
+      notify('Image ready', 'ok');
+    } catch (e) {
+      console.error('[image] resize/upload failed', e);
+      notify('Could not process image', 'danger');
+    }
   };
 }
 
@@ -1755,11 +1791,17 @@ window.addEventListener('online',  ()=> notify('Back online','ok'));
 window.addEventListener('offline', ()=> notify('You are offline','warn'));
 
 // Service Worker
+// Service Worker
 (function(){
   if (!('serviceWorker' in navigator)) return;
   const swUrl = 'service-worker.js';
-  const tryRegister = () => navigator.serviceWorker.register(swUrl).catch(err => console.warn('[sw] registration failed:', err));
-  fetch(swUrl, { method: 'HEAD' }).then(r => { if (!r.ok) return; if ('requestIdleCallback' in window) requestIdleCallback(tryRegister); else setTimeout(tryRegister, 500); }).catch(() => {});
+  const register = () => navigator.serviceWorker.register(swUrl)
+    .catch(err => console.warn('[sw] registration failed:', err));
+
+  // Probe with a GET that bypasses cache; then register
+  fetch(swUrl, { cache: 'no-store', method: 'GET' })
+    .then(r => { if (!r.ok) return; if ('requestIdleCallback' in window) requestIdleCallback(register); else setTimeout(register, 500); })
+    .catch(() => { /* still try to register */ register(); });
 })();
 
 // Part 6/6 — Boot

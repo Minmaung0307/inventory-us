@@ -1,50 +1,55 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="Inventory — simple stock & product manager." />
+  <meta name="color-scheme" content="light dark" />
+  <!-- Dynamic status bar colors for light/dark -->
+  <meta name="theme-color" content="#f7fafc" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0c1116" media="(prefers-color-scheme: dark)" />
+
+  <!-- PWA (optional but recommended) -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
   <title>Inventory</title>
 
-  <meta name="theme-color" content="#0ea5a5" />
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="mobile-web-app-capable" content="yes">
+  <!-- Icons (Remix Icon) -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" />
 
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" sizes="180x180">
-  <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
+  <!-- App styles -->
+  <link rel="stylesheet" href="styles.css" />
 
-  <link rel="stylesheet" href="css/styles.css" />
-  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+  <!-- Tiny inline fallback so it doesn’t flash unstyled while CSS loads -->
+  <style>
+    #root{min-height:100dvh;display:grid;place-items:center}
+    .boot{opacity:.7;font:14px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial}
+  </style>
 </head>
 <body>
-  <div id="root"></div>
+  <!-- App mount point -->
+  <div id="root">
+    <div class="boot">Loading…</div>
+  </div>
+
+  <!-- Toast / notifications (used by notify()) -->
   <div id="notification" class="notification"></div>
 
-  <!-- Firebase SDK v8 -->
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <noscript>
+    <div style="padding:14px;margin:20px;border:1px solid #ccc;border-radius:12px;font-family:system-ui">
+      This app requires JavaScript. Please enable it to continue.
+    </div>
+  </noscript>
 
-  <!-- EmailJS (optional) -->
-  <script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
+  <!-- Firebase v8 (order matters; all defer to keep parse fast but preserve order) -->
+  <script defer src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
-  <!-- Tiny error banner -->
-  <script>
-    (function(){
-      window.addEventListener('error', function(ev){
-        var n = document.getElementById('notification'); if (!n) return;
-        n.textContent = 'Error: ' + (ev && ev.message ? ev.message : 'Unknown');
-        n.className = 'notification show danger';
-      });
-      window.addEventListener('unhandledrejection', function(ev){
-        var n = document.getElementById('notification'); if (!n) return;
-        n.textContent = 'Error: ' + (ev && ev.reason && ev.reason.message ? ev.reason.message : 'Promise rejected');
-        n.className = 'notification show danger';
-      });
-    })();
-  </script>
-
-  <!-- App -->
-  <script defer src="js/app.js?v=dev8"></script>
+  <!-- Your app (contains SW registration and full UI) -->
+  <script defer src="app.js"></script>
 </body>
 </html>
