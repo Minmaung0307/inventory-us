@@ -4,7 +4,11 @@
    ========================= */
 
 // --- Firebase (v8) -----------------------------------------------------------
-// Using Firebase v8 namespaced SDK (see index.html script tags)
+// Import the functions you need from the SDKs you need
+// import { initializeApp } from "firebase/app";
+// import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -20,7 +24,9 @@ const firebaseConfig = {
   measurementId: "G-L6NRD0B1B6"
 };
 
-// Initialize Firebase (v8)
+// Initialize Firebase
+// const app = initializeApp(firebaseConfig);
+// const analytics = getAnalytics(app);
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
@@ -74,7 +80,6 @@ window._diags = function(){
     user: auth.currentUser ? { email: auth.currentUser.email, uid: auth.currentUser.uid } : null,
     route: currentRoute,
     hasSession: !!session,
-    hasWindowSession: !!window.session,
     hasAppEl: !!document.querySelector('.app'),
     role: session?.role,
     authMode: session?.authMode || 'firebase'
@@ -181,14 +186,6 @@ function canDelete(){ return ['admin'].includes(role()); }
 
 // --- Globals + seed ----------------------------------------------------------
 let session      = load('session', null);
-// NEW: keep session in global too and provide a setter
-window.session = session;
-function setSession(s) {
-  session = s;
-  window.session = s;
-  save('session', s);
-}
-
 let currentRoute = load('_route', 'home');
 let searchQuery  = load('_searchQ', '');
 
@@ -266,7 +263,7 @@ async function ensureSessionAndRender(user) {
     // NEW: allow "local admin session" even if not signed into Firebase
     const stored = load('session', null);
     if (!user && stored && stored.authMode === 'local') {
-      setSession(stored);
+      session = stored;
       resetIdleTimer();
       currentRoute = load('_route', 'home');
       renderApp();
@@ -274,7 +271,8 @@ async function ensureSessionAndRender(user) {
     }
 
     if (!user) {
-      setSession(null);
+      session = null;
+      save('session', null);
       if (idleTimer) clearTimeout(idleTimer);
       renderLogin();
       return;
@@ -302,7 +300,8 @@ async function ensureSessionAndRender(user) {
       save('users', users);
     }
 
-    setSession({ ...prof, authMode: 'firebase' });
+    session = { ...prof, authMode: 'firebase' };
+    save('session', session);
 
     try {
       if (cloud?.isOn?.()) {
@@ -407,53 +406,108 @@ function renderLogin() {
   const openAuthModal = (id)=>{ $('#mb-auth')?.classList.add('active'); $(id)?.classList.add('active'); };
   const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
 
+  // --- Sign in (supports demo local admin) ---
+  // const doSignIn = async () => {
+  //   const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
+  //   const pass  = document.getElementById('li-pass')?.value || '';
+
+  //   if (!email || !pass) { notify('Enter email & password', 'warn'); return; }
+
+  //   // Local demo admin (works even without Firebase)
+  //   if (email === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
+  //     const users = load('users', []);
+  //     let prof = users.find(u => (u.email||'').toLowerCase() === DEMO_ADMIN_EMAIL);
+  //     if (!prof) {
+  //       prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
+  //       users.push(prof); save('users', users);
+  //     }
+  //     session = { ...prof, authMode: 'local' };
+  //     save('session', session);
+  //     notify('Welcome, Admin (local mode)');
+  //     renderApp();
+  //     return;
+  //   }
+
+  //   // Normal Firebase email/password
+  //   try {
+  //     if (!navigator.onLine) throw new Error('You appear to be offline.');
+  //     await auth.signInWithEmailAndPassword(email, pass);
+  //     notify('Welcome!');
+  //     // Fallback render if needed
+  //     const started = Date.now();
+  //     const poll = setInterval(() => {
+  //       const rendered = !!document.querySelector('.app');
+  //       const timedOut = Date.now() - started > 2000;
+  //       if (rendered || timedOut) {
+  //         clearInterval(poll);
+  //         if (!rendered) {
+  //           try { ensureSessionAndRender(auth.currentUser); } catch (err) { console.error(err); notify(err?.message||'Render failed','danger'); }
+  //         }
+  //       }
+  //     }, 100);
+  //   } catch (e) {
+  //     const code = e?.code || '';
+  //     if (code === 'auth/user-not-found') {
+  //       notify('No account found. Use Create account to register.', 'warn');
+  //       openAuthModal('#m-signup');
+  //       $('#su-email').value = email;
+  //     } else if (code === 'auth/wrong-password') {
+  //       notify('Incorrect password. Try Forgot password.', 'danger');
+  //     } else if (code === 'auth/network-request-failed') {
+  //       notify('Network error: check your connection.', 'danger');
+  //     } else {
+  //       notify(e?.message || 'Login failed', 'danger');
+  //     }
+  //   }
+  // };
+
   const doSignIn = async () => {
-    const email = (document.getElementById('li-email')?.value || '').trim();
-    const pass  = document.getElementById('li-pass')?.value || '';
-    const btn   = document.getElementById('btnLogin');
+  const email = (document.getElementById('li-email')?.value || '').trim();
+  const pass  = document.getElementById('li-pass')?.value || '';
+  const btn   = document.getElementById('btnLogin');
 
-    if (!email || !pass) { notify('Enter email & password','warn'); return; }
-    if (!navigator.onLine) { notify('You appear to be offline','warn'); return; }
+  if (!email || !pass) { notify('Enter email & password','warn'); return; }
+  if (!navigator.onLine) { notify('You appear to be offline','warn'); return; }
 
-    btn.disabled = true;
-    const orig = btn.innerHTML;
-    btn.innerHTML = 'Signing in…';
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = 'Signing in…';
 
-    try {
-      console.log('[auth] signInWithEmailAndPassword starting', email);
-      const cred = await auth.signInWithEmailAndPassword(email, pass);
-      console.log('[auth] signInWithEmailAndPassword OK:', cred.user?.uid);
-      notify('Welcome!');
+  try {
+    console.log('[auth] signInWithEmailAndPassword starting', email);
+    const cred = await auth.signInWithEmailAndPassword(email, pass);
+    console.log('[auth] signInWithEmailAndPassword OK:', cred.user?.uid);
+    notify('Welcome!');
 
-      // Fallback: force render if onAuthStateChanged is slow
-      setTimeout(() => {
-        const rendered = !!document.querySelector('.app');
-        if (!rendered) {
-          console.log('[auth] Fallback render -> ensureSessionAndRender');
-          try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); }
-        }
-      }, 600);
+    // Fallback: force render if onAuthStateChanged is slow
+    setTimeout(() => {
+      const rendered = !!document.querySelector('.app');
+      if (!rendered) {
+        console.log('[auth] Fallback render -> ensureSessionAndRender');
+        try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); }
+      }
+    }, 600);
 
-    } catch (e) {
-      const code = e?.code || '';
-      const message = e?.message || 'Login failed';
+  } catch (e) {
+    const code = e?.code || '';
+    const message = e?.message || 'Login failed';
 
-      console.error('[auth] signIn error:', code, message);
-      const map = {
-        'auth/invalid-email': 'Invalid email format.',
-        'auth/user-disabled': 'This user is disabled.',
-        'auth/user-not-found': 'No account found for this email.',
-        'auth/wrong-password': 'Incorrect password.',
-        'auth/too-many-requests': 'Too many attempts. Try again later.',
-        'auth/operation-not-allowed': 'Email/password sign-in is disabled in this project.',
-        'auth/network-request-failed': 'Network error. Check your connection.'
-      };
-      notify(map[code] || message, 'danger');
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = orig;
-    }
-  };
+    console.error('[auth] signIn error:', code, message);
+    const map = {
+      'auth/invalid-email': 'Invalid email format.',
+      'auth/user-disabled': 'This user is disabled.',
+      'auth/user-not-found': 'No account found for this email.',
+      'auth/wrong-password': 'Incorrect password.',
+      'auth/too-many-requests': 'Too many attempts. Try again later.',
+      'auth/operation-not-allowed': 'Email/password sign-in is disabled in this project.',
+      'auth/network-request-failed': 'Network error. Check your connection.'
+    };
+    notify(map[code] || message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+};
 
   // --- Signup (Firebase) ---
   const doSignup = async ()=>{
@@ -467,6 +521,7 @@ function renderLogin() {
     try{
       if (!navigator.onLine) throw new Error('You appear to be offline.');
       await auth.createUserWithEmailAndPassword(email, pass);
+      // profile added in ensureSessionAndRender; also auto-promote super-admins
       try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
       notify('Account created — you are signed in');
       closeAuthModal();
@@ -505,7 +560,7 @@ async function doLogout(){
   try { cloud?.disable?.(); } catch {}
   await auth.signOut();
   // also clear local session (covers local admin mode)
-  setSession(null);
+  save('session', null);
   notify('Signed out');
 }
 
@@ -668,7 +723,7 @@ function hookSidebarInteractions(){
 
 // ---------- App shell / renderer ----------
 function renderApp(){
-  if (!session) { renderLogin(); return; }
+  if (!window.session) { renderLogin(); return; }
 
   const root = document.getElementById('root');
   const safeView = (route) => {
@@ -1129,7 +1184,7 @@ function viewInventory(){
                   it.stock <= it.threshold
                     ? (it.stock <= Math.max(1, Math.floor(it.threshold * 0.6)) ? 'tr-danger' : 'tr-warn')
                     : '';
-                return `<tr id="\${it.id}" class="${warnClass}">
+                return `<tr id="${it.id}" class="${warnClass}">
                   <td>
                     <div class="thumb-wrap">
                       ${
@@ -2242,7 +2297,7 @@ if (typeof window.scrollToRow !== 'function') {
 // First paint bootstrapping
 (function boot(){
   try {
-    if (typeof renderApp === 'function' && (session || window.session)) renderApp();
+    if (typeof renderApp === 'function' && window.session) renderApp();
     else if (typeof renderLogin === 'function') renderLogin();
   } catch(e){
     if (typeof notify === 'function') notify(e.message || 'Startup error','danger');
