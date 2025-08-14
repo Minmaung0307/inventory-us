@@ -9,29 +9,26 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
 
-  <!-- Manifest + icons -->
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" sizes="180x180">
   <link rel="icon" href="/icons/icon-192.png" sizes="192x192">
 
-  <!-- Styles -->
   <link rel="stylesheet" href="css/styles.css" />
   <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-
 </head>
 <body>
   <div id="root"></div>
   <div id="notification" class="notification"></div>
 
-  <!-- Firebase SDKs v8 (namespaced) -->
+  <!-- Firebase SDK v8 -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
-  <!-- EmailJS (optional). If you set your PUBLIC KEY in app.js contact section, it will send via EmailJS -->
+  <!-- EmailJS (optional) -->
   <script src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"></script>
 
-  <!-- Tiny error banner so mobile shows what failed -->
+  <!-- Tiny error banner -->
   <script>
     (function(){
       window.addEventListener('error', function(ev){
@@ -48,6 +45,6 @@
   </script>
 
   <!-- App -->
-  <script defer src="js/app.js?v=dev6"></script>
+  <script defer src="js/app.js?v=dev7"></script>
 </body>
 </html>

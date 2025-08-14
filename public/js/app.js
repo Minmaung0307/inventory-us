@@ -70,7 +70,7 @@ function applyTheme(){
 }
 applyTheme();
 
-// --- Cloud Sync (Realtime Database) ------------------------------------------
+// --- Cloud Sync --------------------------------------------------------------
 const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2'];
 const cloud = (function(){
   let liveRefs = [];
@@ -106,7 +106,7 @@ let session      = load('session', null);
 let currentRoute = load('_route', 'home');
 let searchQuery  = load('_searchQ', '');
 
-// built-in demo admin (local auth if you want it)
+// built-in demo admin (local auth fallback)
 const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
 const DEMO_ADMIN_PASS  = 'admin123';
 
@@ -114,7 +114,7 @@ const DEMO_ADMIN_PASS  = 'admin123';
   if (load('_seeded_v3', false)) {
     const users = load('users', []);
     if (!users.find(u => (u.email||'').toLowerCase() === DEMO_ADMIN_EMAIL)){
-      users.push({ name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' });
+      users.push({ name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:DEMO_ADMIN_PASS, img:'' });
       save('users', users);
     }
     return;
@@ -122,7 +122,7 @@ const DEMO_ADMIN_PASS  = 'admin123';
   const now = Date.now();
   save('users', [
     { name:'Admin',     username:'admin',     email:'admin@sushi.com',     contact:'', role:'admin',     password:'', img:'' },
-    { name:'Admin',     username:'admin',     email:DEMO_ADMIN_EMAIL,      contact:'', role:'admin',     password:'', img:'' },
+    { name:'Admin',     username:'admin',     email:DEMO_ADMIN_EMAIL,      contact:'', role:'admin',     password:DEMO_ADMIN_PASS, img:'' },
     { name:'Manager',   username:'manager',   email:'manager@sushi.com',   contact:'', role:'manager',   password:'', img:'' },
     { name:'Associate', username:'associate', email:'associate@sushi.com', contact:'', role:'associate', password:'', img:'' },
     { name:'Viewer',    username:'viewer',    email:'cashier@sushi.com',   contact:'', role:'user',      password:'', img:'' },
@@ -162,20 +162,15 @@ function resetIdleTimer(){
 // --- Auth state --------------------------------------------------------------
 auth.onAuthStateChanged(async (user) => {
   console.log('[auth] onAuthStateChanged:', !!user, user?.email || '');
-  try {
-    await ensureSessionAndRender(user);
-  } catch (err) {
-    console.error('[auth] ensureSessionAndRender crashed:', err);
-    notify(err?.message || 'Render failed', 'danger');
-    showRescue(err);
-  }
+  try { await ensureSessionAndRender(user); }
+  catch (err) { console.error('[auth] ensureSessionAndRender crashed:', err); notify(err?.message || 'Render failed', 'danger'); showRescue(err); }
 });
 
 async function ensureSessionAndRender(user) {
   try {
     applyTheme();
 
-    // allow local admin session if you enable the fallback below
+    // allow local session
     const stored = load('session', null);
     if (!user && stored && stored.authMode === 'local') {
       session = stored; resetIdleTimer(); currentRoute = load('_route','home'); renderApp(); return;
@@ -199,13 +194,7 @@ async function ensureSessionAndRender(user) {
 
     session = { ...prof, authMode: 'firebase' }; save('session', session);
 
-    try {
-      if (cloud?.isOn?.()) {
-        try { await firebase.database().goOnline(); } catch {}
-        try { await cloud.pullAllOnce(); } catch {}
-        try { cloud.subscribeAll(); } catch {}
-      }
-    } catch {}
+    try { if (cloud?.isOn?.()) { try{ await firebase.database().goOnline(); }catch{} try{ await cloud.pullAllOnce(); }catch{} try{ cloud.subscribeAll(); }catch{} } } catch {}
 
     resetIdleTimer();
     currentRoute = load('_route', 'home');
@@ -221,7 +210,53 @@ async function ensureSessionAndRender(user) {
 // SAFETY helpers
 if (!window.getCogs) window.getCogs = () => (typeof load === 'function' ? (load('cogs', []) || []) : []);
 
-// ===================== Part B — Login & Shell =====================
+/* =========================
+   Part B — Login & Shell
+   ========================= */
+
+// ---------- Local Auth helpers ----------
+function localLogin(email, pass){
+  const users = load('users', []);
+  const e = (email||'').toLowerCase();
+  // Always allow demo admin
+  if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
+    let u = users.find(x => (x.email||'').toLowerCase() === e);
+    if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
+    session = { ...u, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); return true;
+  }
+  // Regular local user match
+  const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
+  if (u2) { session = { ...u2, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); return true; }
+  return false;
+}
+
+function localSignup({name,email,pass}){
+  const e = (email||'').toLowerCase();
+  const users = load('users', []);
+  if (users.find(x => (x.email||'').toLowerCase() === e)) {
+    // If user already exists locally, just log them in if password matches
+    if (localLogin(email, pass)) return true;
+    notify('User already exists locally. Use Sign In.', 'warn');
+    return false;
+  }
+  const role = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
+  const u = { name: name || e.split('@')[0], username: e.split('@')[0], email: e, role, password: pass, img:'', contact:'' };
+  users.push(u); save('users', users);
+  session = { ...u, authMode: 'local' }; save('session', session);
+  notify('Account created (Local mode)'); renderApp(); return true;
+}
+
+function localResetPassword(email){
+  const e = (email||'').toLowerCase();
+  const users = load('users', []);
+  const i = users.findIndex(x => (x.email||'').toLowerCase() === e);
+  if (i < 0) return { ok:false, msg:'No local user found.' };
+  const temp = 'reset' + Math.floor(1000 + Math.random()*9000);
+  users[i].password = temp; save('users', users);
+  return { ok:true, temp };
+}
+
+// ---------- Login UI ----------
 function renderLogin() {
   const root = document.getElementById('root');
   root.innerHTML = `
@@ -241,6 +276,10 @@ function renderLogin() {
               <a id="link-forgot" href="#" style="text-decoration:none">Forgot password?</a>
               <a id="link-register" href="#" style="text-decoration:none">Create account</a>
             </div>
+
+            <div style="color:var(--muted);font-size:12px;margin-top:6px">
+              Tip: Local admin is <code>${DEMO_ADMIN_EMAIL}</code> / <code>${DEMO_ADMIN_PASS}</code>
+            </div>
           </div>
         </div>
       </div>
@@ -255,6 +294,7 @@ function renderLogin() {
           <input id="su-email" class="input" type="email" placeholder="Email" />
           <input id="su-pass" class="input" type="password" placeholder="Password" />
           <input id="su-pass2" class="input" type="password" placeholder="Confirm password" />
+          <div style="color:var(--muted);font-size:12px">If Firebase sign-up fails, we’ll create a local account.</div>
         </div>
         <div class="foot"><button class="btn" id="btnSignupDo"><i class="ri-user-add-line"></i> Sign up</button></div>
       </div>
@@ -265,55 +305,57 @@ function renderLogin() {
         <div class="head"><strong>Reset password</strong><button class="btn ghost" id="cl-reset">Close</button></div>
         <div class="body grid">
           <input id="fp-email" class="input" type="email" placeholder="Your email" />
+          <div style="color:var(--muted);font-size:12px">If Firebase reset fails, we’ll set a temporary local password for you.</div>
         </div>
-        <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset link</button></div>
+        <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset / Local reset</button></div>
       </div>
     </div>
   `;
 
-  // Sign in (Firebase-only; uncomment local fallback if desired)
+  const openAuthModal = (id)=>{ $('#mb-auth')?.classList.add('active'); $(id)?.classList.add('active'); };
+  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
+
+  // Sign in
   const doSignIn = async () => {
     const email = ($('#li-email')?.value || '').trim();
     const pass  = $('#li-pass')?.value || '';
     const btn   = $('#btnLogin');
     if (!email || !pass) { notify('Enter email & password','warn'); return; }
-    if (!navigator.onLine) { notify('You appear to be offline','warn'); return; }
 
     btn.disabled = true; const orig = btn.innerHTML; btn.innerHTML = 'Signing in…';
     try {
+      // Try Firebase first
       console.log('[auth] signInWithEmailAndPassword starting', email);
       await auth.signInWithEmailAndPassword(email, pass);
       notify('Welcome!');
-      setTimeout(() => {
-        if (!document.querySelector('.app')) try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); }
-      }, 600);
+      setTimeout(() => { if (!document.querySelector('.app')) try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); } }, 300);
     } catch (e) {
+      console.warn('[auth] Firebase sign-in failed; attempting local login', e?.code, e?.message);
+      // Fallback to Local
+      if (localLogin(email, pass)) return;
       const map = {
         'auth/invalid-email': 'Invalid email format.',
         'auth/user-disabled': 'This user is disabled.',
         'auth/user-not-found': 'No account found for this email.',
         'auth/wrong-password': 'Incorrect password.',
         'auth/too-many-requests': 'Too many attempts. Try again later.',
-        'auth/operation-not-allowed': 'Email/password sign-in is disabled in this project.',
+        'auth/operation-not-allowed': 'Email/password sign-in is disabled in this Firebase project.',
         'auth/network-request-failed': 'Network error. Check your connection.'
       };
       notify(map[e?.code] || e?.message || 'Login failed', 'danger');
-    } finally {
-      btn.disabled = false; btn.innerHTML = orig;
-    }
+    } finally { btn.disabled = false; btn.innerHTML = orig; }
   };
-
-  const openAuthModal = (id)=>{ $('#mb-auth')?.classList.add('active'); $(id)?.classList.add('active'); };
-  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
 
   $('#btnLogin')?.addEventListener('click', doSignIn);
   $('#li-pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
+
+  // Open/close signup + reset
   $('#link-forgot')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuthModal('#m-reset'); $('#fp-email').value = ($('#li-email')?.value||''); });
   $('#link-register')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuthModal('#m-signup'); $('#su-email').value = ($('#li-email')?.value||''); });
   $('#cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
   $('#cl-reset')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
 
-  // Signup + reset
+  // Signup (Firebase -> Local fallback)
   $('#btnSignupDo')?.addEventListener('click', async ()=>{
     const name  = ($('#su-name')?.value || '').trim();
     const email = ($('#su-email')?.value || '').trim().toLowerCase();
@@ -321,14 +363,21 @@ function renderLogin() {
     const pass2 = ($('#su-pass2')?.value || '');
     if (!email || !pass) return notify('Email and password are required','warn');
     if (pass !== pass2)  return notify('Passwords do not match','warn');
+
     try{
       await auth.createUserWithEmailAndPassword(email, pass);
       try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
       notify('Account created — you are signed in');
       closeAuthModal();
-    }catch(e){ notify(e?.message || 'Could not create account','danger'); }
+    }catch(e){
+      console.warn('[auth] Firebase signup failed; creating local account', e?.code, e?.message);
+      // Local fallback
+      localSignup({name, email, pass});
+      closeAuthModal();
+    }
   });
 
+  // Reset (Firebase -> Local fallback)
   $('#btnResetDo')?.addEventListener('click', async ()=>{
     const email = ($('#fp-email')?.value || '').trim().toLowerCase();
     if (!email) return notify('Enter your email','warn');
@@ -336,13 +385,19 @@ function renderLogin() {
       await auth.sendPasswordResetEmail(email);
       notify('Reset email sent — check your inbox','ok');
       closeAuthModal();
-    }catch(e){ notify(e?.message || 'Could not send reset email','danger'); }
+    }catch(e){
+      console.warn('[auth] Firebase reset failed; doing local reset', e?.code, e?.message);
+      const r = localResetPassword(email);
+      if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
+      else { notify('Reset failed: '+ (r.msg || e?.message || 'Unknown'), 'danger'); }
+      // keep modal open so they can read the temp password
+    }
   });
 }
 
 async function doLogout(){
   try { cloud?.disable?.(); } catch {}
-  await auth.signOut();
+  await auth.signOut().catch(()=>{});
   save('session', null);
   notify('Signed out');
 }
@@ -428,7 +483,7 @@ function renderTopbar(){
   `;
 }
 
-// delegated nav clicks + close sidebar on mobile so backdrop never blocks UI
+// delegated nav clicks + close sidebar on mobile
 document.addEventListener('click', (e)=>{
   const item = e.target.closest('.sidebar .item[data-route]');
   if (!item) return;
@@ -567,6 +622,16 @@ function renderApp(){
 
 function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); }
 function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); }
+
+/* =========================
+   Part C — Views (unchanged content except contact wiring exists)
+   ========================= */
+// … (ALL the view/render/wiring code from the previous message remains the same) …
+
+/* The rest of the file (Home, Search, Dashboard/Posts, Inventory, Products,
+   COGS, Tasks, Settings, Contact, Modals, SW boot, etc.) is unchanged from dev6.
+   Keep your existing dev6 sections below this point. For convenience, you can
+   paste the full dev6 body here if you prefer a single file. */
 
 // ===================== Part C — Home / Search / Dashboard / Posts =====================
 (function(){
