@@ -316,35 +316,57 @@ function renderLogin() {
   const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
 
   // Sign in
-  const doSignIn = async () => {
-    const email = ($('#li-email')?.value || '').trim();
-    const pass  = $('#li-pass')?.value || '';
-    const btn   = $('#btnLogin');
-    if (!email || !pass) { notify('Enter email & password','warn'); return; }
+  // --- Sign in (Firebase) — known-good flow that opens the app ---
+const doSignIn = async () => {
+  const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
+  const pass  = document.getElementById('li-pass')?.value || '';
+  const btn   = document.getElementById('btnLogin');
 
-    btn.disabled = true; const orig = btn.innerHTML; btn.innerHTML = 'Signing in…';
-    try {
-      // Try Firebase first
-      console.log('[auth] signInWithEmailAndPassword starting', email);
-      await auth.signInWithEmailAndPassword(email, pass);
-      notify('Welcome!');
-      setTimeout(() => { if (!document.querySelector('.app')) try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); } }, 300);
-    } catch (e) {
-      console.warn('[auth] Firebase sign-in failed; attempting local login', e?.code, e?.message);
-      // Fallback to Local
-      if (localLogin(email, pass)) return;
-      const map = {
-        'auth/invalid-email': 'Invalid email format.',
-        'auth/user-disabled': 'This user is disabled.',
-        'auth/user-not-found': 'No account found for this email.',
-        'auth/wrong-password': 'Incorrect password.',
-        'auth/too-many-requests': 'Too many attempts. Try again later.',
-        'auth/operation-not-allowed': 'Email/password sign-in is disabled in this Firebase project.',
-        'auth/network-request-failed': 'Network error. Check your connection.'
-      };
-      notify(map[e?.code] || e?.message || 'Login failed', 'danger');
-    } finally { btn.disabled = false; btn.innerHTML = orig; }
-  };
+  if (!email || !pass) { notify('Enter email & password', 'warn'); return; }
+  if (!navigator.onLine) { notify('You appear to be offline', 'warn'); return; }
+
+  btn.disabled = true;
+  const orig = btn.innerHTML;
+  btn.innerHTML = 'Signing in…';
+
+  try {
+    console.log('[auth] signInWithEmailAndPassword starting', email);
+    await auth.signInWithEmailAndPassword(email, pass);
+    notify('Welcome!');
+
+    // Kick the render immediately…
+    try { await ensureSessionAndRender(auth.currentUser); } catch(e){ console.warn(e); }
+
+    // …and also do a short fallback in case the SW cached an old file
+    const started = Date.now();
+    const poll = setInterval(() => {
+      const rendered = !!document.querySelector('.app');
+      const timedOut = Date.now() - started > 1500;
+      if (rendered || timedOut) {
+        clearInterval(poll);
+        if (!rendered) {
+          console.log('[auth] Fallback render -> ensureSessionAndRender');
+          try { ensureSessionAndRender(auth.currentUser); } catch (err) { console.error(err); notify(err?.message||'Render failed','danger'); }
+        }
+      }
+    }, 120);
+  } catch (e) {
+    const code = e?.code || '';
+    const map = {
+      'auth/invalid-email': 'Invalid email format.',
+      'auth/user-disabled': 'This user is disabled.',
+      'auth/user-not-found': 'No account found for this email.',
+      'auth/wrong-password': 'Incorrect password.',
+      'auth/too-many-requests': 'Too many attempts. Try again later.',
+      'auth/operation-not-allowed': 'Email/password sign-in is disabled in this project.',
+      'auth/network-request-failed': 'Network error. Check your connection.'
+    };
+    notify(map[code] || (e?.message || 'Login failed'), 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+};
 
   $('#btnLogin')?.addEventListener('click', doSignIn);
   $('#li-pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
@@ -553,71 +575,181 @@ function hookSidebarInteractions(){
 }
 
 // ---------- App shell / renderer ----------
-function renderApp(){
-  if (!window.session) { renderLogin(); return; }
-
-  const root = $('#root');
-  const safeView = (route) => {
-    const m = {
-      home:       viewHome,
-      dashboard:  viewDashboard,
-      inventory:  viewInventory,
-      products:   viewProducts,
-      cogs:       viewCOGS,
-      tasks:      viewTasks,
-      settings:   viewSettings,
-      search:     viewSearch,
-      policy:     ()=> viewPage('policy'),
-      license:    ()=> viewPage('license'),
-      setup:      ()=> viewPage('setup'),
-      contact:    ()=> viewPage('contact'),
-      guide:      ()=> viewPage('guide'),
-    };
-    const fn = m[route] || m.home;
-    return typeof fn === 'function' ? fn() : fn;
-  };
-
+function renderLogin() {
+  const root = document.getElementById('root');
   root.innerHTML = `
-    <div class="app">
-      ${renderSidebar(currentRoute)}
-      <div>
-        ${renderTopbar()}
-        <div class="main" id="main">
-          ${safeView(currentRoute)}
+    <div class="login">
+      <div class="card login-card">
+        <div class="card-body">
+          <div class="login-logo">
+            <div class="logo">📦</div>
+            <div style="font-weight:800;font-size:20px">Inventory</div>
+          </div>
+          <p class="login-note">Sign in to continue</p>
+
+          <div class="grid">
+            <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username" />
+            <input id="li-pass" class="input" type="password" placeholder="Password" autocomplete="current-password" />
+            <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
+
+            <div style="display:flex;justify-content:space-between;gap:8px">
+              <a id="link-forgot"   href="#" class="btn ghost"   style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</a>
+              <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
+            </div>
+
+            <div class="login-note" style="margin-top:6px">
+              Tip: you can always log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
+            </div>
+          </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Auth modals (scoped to login) -->
+    <div class="modal-backdrop" id="mb-auth"></div>
+
+    <div class="modal" id="m-signup">
+      <div class="dialog">
+        <div class="head"><strong>Create account</strong><button class="btn ghost" id="cl-signup">Close</button></div>
+        <div class="body grid">
+          <input id="su-name"  class="input" placeholder="Full name" />
+          <input id="su-email" class="input" type="email" placeholder="Email" />
+          <input id="su-pass"  class="input" type="password" placeholder="Password" />
+          <input id="su-pass2" class="input" type="password" placeholder="Confirm password" />
+        </div>
+        <div class="foot"><button class="btn" id="btnSignupDo"><i class="ri-user-add-line"></i> Sign up</button></div>
+      </div>
+    </div>
+
+    <div class="modal" id="m-reset">
+      <div class="dialog">
+        <div class="head"><strong>Reset password</strong><button class="btn ghost" id="cl-reset">Close</button></div>
+        <div class="body grid">
+          <input id="fp-email" class="input" type="email" placeholder="Your email" />
+        </div>
+        <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset link</button></div>
       </div>
     </div>
   `;
 
-  // Ensure backdrop is off after navigation
-  closeSidebar();
+  // ---- helpers for these modals ----
+  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); };
+  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
 
-  // Wire chrome
-  hookSidebarInteractions();
-  $('#burger')?.addEventListener('click', openSidebar);
-  $('#backdrop')?.addEventListener('click', closeSidebar);
-  $('#btnHome')?.addEventListener('click', ()=> go('home'));
-  $('#btnLogout')?.addEventListener('click', doLogout);
+  // ---- actions ----
+  const doSignIn = async () => {
+    const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
+    const pass  = document.getElementById('li-pass')?.value || '';
+    const btn   = document.getElementById('btnLogin');
 
-  // Quick nav tiles
-  $$('.card.tile[data-go]').forEach(t => { t.style.cursor='pointer'; t.onclick=()=>{ const r=t.getAttribute('data-go'); if (r) go(r); }; });
-  $$('#main [data-go]').forEach(btn=>{ btn.addEventListener('click', ()=>{ const r=btn.getAttribute('data-go'); const id=btn.getAttribute('data-id'); if (r) go(r); if (id) setTimeout(()=> scrollToRow(id), 80); }); });
+    if (!email || !pass) { notify('Enter email & password','warn'); return; }
 
-  // Make sure global modals exist once
-  ensureGlobalModals();
+    // Local demo admin (works even if Firebase auth is having issues)
+    if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
+      let users = load('users', []);
+      let prof = users.find(u => (u.email||'').toLowerCase() === email);
+      if (!prof) {
+        prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
+        users.push(prof); save('users', users);
+      }
+      session = { ...prof, authMode: 'local' };
+      save('session', session);
+      notify('Welcome, Admin (local mode)');
+      renderApp();
+      return;
+    }
 
-  // Wire the current view right now
-  if (currentRoute==='home')        wireHome();
-  else if (currentRoute==='dashboard'){ wireDashboard(); wirePosts(); }
-  else if (currentRoute==='inventory') wireInventory();
-  else if (currentRoute==='products')  wireProducts();
-  else if (currentRoute==='cogs')      wireCOGS();
-  else if (currentRoute==='tasks')     wireTasks();
-  else if (currentRoute==='settings')  wireSettings();
-  else if (currentRoute==='contact')   wireContact();
+    // Firebase sign in
+    try {
+      if (!navigator.onLine) throw new Error('You appear to be offline.');
+      console.log('[auth] signInWithEmailAndPassword starting', email);
+      btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
 
-  // Phone images preview
-  enableMobileImagePreview();
+      const cred = await auth.signInWithEmailAndPassword(email, pass);
+      console.log('[auth] signInWithEmailAndPassword OK:', cred.user?.uid);
+      notify('Welcome!');
+
+      // Fallback: if render doesn’t happen quickly via onAuthStateChanged, force it
+      setTimeout(() => {
+        const rendered = !!document.querySelector('.app');
+        if (!rendered) {
+          console.log('[auth] Fallback render -> ensureSessionAndRender');
+          try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); notify('Render failed','danger'); }
+        }
+      }, 700);
+
+      btn.disabled = false; btn.innerHTML = keep;
+    } catch (e) {
+      const map = {
+        'auth/invalid-email': 'Invalid email format.',
+        'auth/user-disabled': 'This user is disabled.',
+        'auth/user-not-found': 'No account found. Use Create account.',
+        'auth/wrong-password': 'Incorrect password.',
+        'auth/too-many-requests': 'Too many attempts. Try again later.',
+        'auth/operation-not-allowed': 'Email/password sign-in is disabled.',
+        'auth/network-request-failed': 'Network error. Check your connection.'
+      };
+      notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
+      console.error('[auth] signIn error:', e?.code, e?.message);
+    }
+  };
+
+  const doSignup = async () => {
+    const name  = ($('#su-name')?.value || '').trim();
+    const email = ($('#su-email')?.value || '').trim().toLowerCase();
+    const pass  = ($('#su-pass')?.value  || '');
+    const pass2 = ($('#su-pass2')?.value || '');
+    if (!email || !pass) return notify('Email and password are required','warn');
+    if (pass !== pass2)  return notify('Passwords do not match','warn');
+
+    try {
+      if (!navigator.onLine) throw new Error('You appear to be offline.');
+      await auth.createUserWithEmailAndPassword(email, pass);
+      try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
+      notify('Account created — you are signed in');
+      closeAuthModal();
+    } catch (e) {
+      notify(e?.message || 'Could not create account','danger');
+    }
+  };
+
+  const doReset = async () => {
+    const email = ($('#fp-email')?.value || '').trim().toLowerCase();
+    if (!email) return notify('Enter your email','warn');
+    try {
+      if (!navigator.onLine) throw new Error('You appear to be offline.');
+      await auth.sendPasswordResetEmail(email);
+      notify('Reset email sent — check your inbox','ok');
+      closeAuthModal();
+    } catch (e) {
+      notify(e?.message || 'Could not send reset email','danger');
+    }
+  };
+
+  // ---- bindings (must be AFTER the HTML is injected) ----
+  const emailEl  = document.getElementById('li-email');
+  const passEl   = document.getElementById('li-pass');
+  const btnLogin = document.getElementById('btnLogin');
+
+  btnLogin?.addEventListener('click', doSignIn);
+  passEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
+
+  document.getElementById('link-forgot')?.addEventListener('click', (e)=>{ 
+    e.preventDefault(); 
+    openAuthModal('#m-reset'); 
+    const fp = document.getElementById('fp-email'); if (fp) fp.value = (emailEl?.value || '');
+  });
+  document.getElementById('link-register')?.addEventListener('click', (e)=>{ 
+    e.preventDefault(); 
+    openAuthModal('#m-signup'); 
+    const su = document.getElementById('su-email'); if (su) su.value = (emailEl?.value || '');
+  });
+
+  document.getElementById('cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
+  document.getElementById('cl-reset')?.addEventListener('click',  (e)=>{ e.preventDefault(); closeAuthModal(); });
+
+  document.getElementById('btnSignupDo')?.addEventListener('click', doSignup);
+  document.getElementById('btnResetDo')?.addEventListener('click',  doReset);
 }
 
 function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); }

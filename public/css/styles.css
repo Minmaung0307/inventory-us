@@ -195,6 +195,15 @@ body {
 }
 .login-note { color: var(--muted); font-size: 13px; text-align: center; }
 
+/* Login screen link styling + disabled button */
+.login a {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 600;
+}
+.login a:hover { text-decoration: underline; }
+.btn[disabled] { opacity: .6; cursor: not-allowed; }
+
 /* Responsive */
 .backdrop { position: fixed; inset:0; background:rgba(0,0,0,.5); display:none; z-index:60; }
 .backdrop.active { display:block; }
