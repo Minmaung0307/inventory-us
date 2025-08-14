@@ -574,6 +574,18 @@ function hookSidebarInteractions(){
   });
 }
 
+function safeRenderApp(){
+  try {
+    if (typeof renderApp === 'function')      return renderApp();
+    if (typeof window.renderApp === 'function') return window.renderApp();
+    // last resort: reload to let boot run renderLogin/renderApp in order
+    location.reload();
+  } catch (e) {
+    console.error(e);
+    try { showRescue?.(e); } catch {}
+  }
+}
+
 // ---------- App shell / renderer ----------
 function renderLogin() {
   const root = document.getElementById('root');
@@ -598,14 +610,14 @@ function renderLogin() {
             </div>
 
             <div class="login-note" style="margin-top:6px">
-              Tip: you can always log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
+              Tip: you can log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Auth modals (scoped to login) -->
+    <!-- Auth modals -->
     <div class="modal-backdrop" id="mb-auth"></div>
 
     <div class="modal" id="m-signup">
@@ -632,11 +644,10 @@ function renderLogin() {
     </div>
   `;
 
-  // ---- helpers for these modals ----
   const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); };
   const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
 
-  // ---- actions ----
+  // ---------- Sign in ----------
   const doSignIn = async () => {
     const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
     const pass  = document.getElementById('li-pass')?.value || '';
@@ -644,7 +655,7 @@ function renderLogin() {
 
     if (!email || !pass) { notify('Enter email & password','warn'); return; }
 
-    // Local demo admin (works even if Firebase auth is having issues)
+    // Local demo admin (NO direct renderApp call here)
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
       let users = load('users', []);
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
@@ -655,7 +666,8 @@ function renderLogin() {
       session = { ...prof, authMode: 'local' };
       save('session', session);
       notify('Welcome, Admin (local mode)');
-      renderApp();
+      // ✅ This renders even without a Firebase user:
+      try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
       return;
     }
 
@@ -669,7 +681,7 @@ function renderLogin() {
       console.log('[auth] signInWithEmailAndPassword OK:', cred.user?.uid);
       notify('Welcome!');
 
-      // Fallback: if render doesn’t happen quickly via onAuthStateChanged, force it
+      // Fallback: if render doesn’t occur via onAuthStateChanged, force it
       setTimeout(() => {
         const rendered = !!document.querySelector('.app');
         if (!rendered) {
@@ -694,6 +706,7 @@ function renderLogin() {
     }
   };
 
+  // ---------- Sign up ----------
   const doSignup = async () => {
     const name  = ($('#su-name')?.value || '').trim();
     const email = ($('#su-email')?.value || '').trim().toLowerCase();
@@ -713,6 +726,7 @@ function renderLogin() {
     }
   };
 
+  // ---------- Reset password ----------
   const doReset = async () => {
     const email = ($('#fp-email')?.value || '').trim().toLowerCase();
     if (!email) return notify('Enter your email','warn');
@@ -726,7 +740,7 @@ function renderLogin() {
     }
   };
 
-  // ---- bindings (must be AFTER the HTML is injected) ----
+  // ---------- Bindings ----------
   const emailEl  = document.getElementById('li-email');
   const passEl   = document.getElementById('li-pass');
   const btnLogin = document.getElementById('btnLogin');
