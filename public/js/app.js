@@ -1,3 +1,4 @@
+// Part 1/6 — Core bootstrap, helpers, theme, cloud, storage, roles, seeds, router/idle, auth
 /* =========================
    Part A — Core bootstrap
    ========================= */
@@ -28,6 +29,8 @@ const notify = (msg, type='ok')=>{
 };
 const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } };
 const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
+function load(k, f){ return _lsGet(k, f); }
+function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 function setSession(s){ session = s; save('session', s); }
 
 // --- Rescue screen -----------------------------------------------------------
@@ -87,10 +90,6 @@ const cloud = (function(){
   function disable(){ setOn(false); unsubscribeAll(); }
   return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
 })();
-
-// --- Friendly save/load wrappers --------------------------------------------
-function load(k, f){ return _lsGet(k, f); }
-function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 
 // --- Roles & permissions ------------------------------------------------------
 const ROLES = ['user','associate','manager','admin'];
@@ -160,7 +159,6 @@ function resetIdleTimer(){
 ['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
 
 // --- Auth state --------------------------------------------------------------
-// ---- Local auto-login toggle ----
 const ALLOW_LOCAL_AUTOLOGIN = false;
 
 auth.onAuthStateChanged(async (user) => {
@@ -232,6 +230,7 @@ async function ensureSessionAndRender(user) {
 // SAFETY helpers
 if (!window.getCogs) window.getCogs = () => (typeof load === 'function' ? (load('cogs', []) || []) : []);
 
+// Part 2/6 — Login & shell (single renderLogin), local auth helpers, logout, sidebar/topbar, interactions
 /* =========================
    Part B — Login & Shell
    ========================= */
@@ -256,7 +255,6 @@ function localSignup({name,email,pass}){
   const e = (email||'').toLowerCase();
   const users = load('users', []);
   if (users.find(x => (x.email||'').toLowerCase() === e)) {
-    // If user already exists locally, just log them in if password matches
     if (localLogin(email, pass)) return true;
     notify('User already exists locally. Use Sign In.', 'warn');
     return false;
@@ -279,347 +277,6 @@ function localResetPassword(email){
 }
 
 // ---------- Login UI ----------
-function renderLogin() {
-  const root = document.getElementById('root');
-  root.innerHTML = `
-    <div class="login">
-      <div class="card login-card">
-        <div class="card-body">
-          <div class="login-logo"><div class="logo">📦</div></div>
-          <h2 style="text-align:center;margin:6px 0 2px">Inventory</h2>
-          <p class="login-note" style="text-align:center;color:var(--muted);margin-bottom:12px">Sign in to continue</p>
-
-          <div class="grid">
-            <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username" />
-            <input id="li-pass" class="input" type="password" placeholder="Password" autocomplete="current-password" />
-            <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
-
-            <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted)">
-              <a id="link-forgot" href="#" style="text-decoration:none">Forgot password?</a>
-              <a id="link-register" href="#" style="text-decoration:none">Create account</a>
-            </div>
-
-            <div style="color:var(--muted);font-size:12px;margin-top:6px">
-              Tip: Local admin is <code>${DEMO_ADMIN_EMAIL}</code> / <code>${DEMO_ADMIN_PASS}</code>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal-backdrop" id="mb-auth"></div>
-    <div class="modal" id="m-signup">
-      <div class="dialog">
-        <div class="head"><strong>Create account</strong><button class="btn ghost" id="cl-signup">Close</button></div>
-        <div class="body grid">
-          <input id="su-name" class="input" placeholder="Full name" />
-          <input id="su-email" class="input" type="email" placeholder="Email" />
-          <input id="su-pass" class="input" type="password" placeholder="Password" />
-          <input id="su-pass2" class="input" type="password" placeholder="Confirm password" />
-          <div style="color:var(--muted);font-size:12px">If Firebase sign-up fails, we’ll create a local account.</div>
-        </div>
-        <div class="foot"><button class="btn" id="btnSignupDo"><i class="ri-user-add-line"></i> Sign up</button></div>
-      </div>
-    </div>
-
-    <div class="modal" id="m-reset">
-      <div class="dialog">
-        <div class="head"><strong>Reset password</strong><button class="btn ghost" id="cl-reset">Close</button></div>
-        <div class="body grid">
-          <input id="fp-email" class="input" type="email" placeholder="Your email" />
-          <div style="color:var(--muted);font-size:12px">If Firebase reset fails, we’ll set a temporary local password for you.</div>
-        </div>
-        <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset / Local reset</button></div>
-      </div>
-    </div>
-  `;
-
-  const openAuthModal = (id)=>{ $('#mb-auth')?.classList.add('active'); $(id)?.classList.add('active'); };
-  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
-
-  // Sign in
-  // --- Sign in (Firebase) — known-good flow that opens the app ---
-const doSignIn = async () => {
-  const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
-  const pass  = document.getElementById('li-pass')?.value || '';
-  const btn   = document.getElementById('btnLogin');
-
-  if (!email || !pass) { notify('Enter email & password', 'warn'); return; }
-  if (!navigator.onLine) { notify('You appear to be offline', 'warn'); return; }
-
-  btn.disabled = true;
-  const orig = btn.innerHTML;
-  btn.innerHTML = 'Signing in…';
-
-  try {
-    console.log('[auth] signInWithEmailAndPassword starting', email);
-    await auth.signInWithEmailAndPassword(email, pass);
-    notify('Welcome!');
-
-    // Kick the render immediately…
-    try { await ensureSessionAndRender(auth.currentUser); } catch(e){ console.warn(e); }
-
-    // …and also do a short fallback in case the SW cached an old file
-    const started = Date.now();
-    const poll = setInterval(() => {
-      const rendered = !!document.querySelector('.app');
-      const timedOut = Date.now() - started > 1500;
-      if (rendered || timedOut) {
-        clearInterval(poll);
-        if (!rendered) {
-          console.log('[auth] Fallback render -> ensureSessionAndRender');
-          try { ensureSessionAndRender(auth.currentUser); } catch (err) { console.error(err); notify(err?.message||'Render failed','danger'); }
-        }
-      }
-    }, 120);
-  } catch (e) {
-    const code = e?.code || '';
-    const map = {
-      'auth/invalid-email': 'Invalid email format.',
-      'auth/user-disabled': 'This user is disabled.',
-      'auth/user-not-found': 'No account found for this email.',
-      'auth/wrong-password': 'Incorrect password.',
-      'auth/too-many-requests': 'Too many attempts. Try again later.',
-      'auth/operation-not-allowed': 'Email/password sign-in is disabled in this project.',
-      'auth/network-request-failed': 'Network error. Check your connection.'
-    };
-    notify(map[code] || (e?.message || 'Login failed'), 'danger');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = orig;
-  }
-};
-
-  $('#btnLogin')?.addEventListener('click', doSignIn);
-  $('#li-pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
-
-  // Open/close signup + reset
-  $('#link-forgot')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuthModal('#m-reset'); $('#fp-email').value = ($('#li-email')?.value||''); });
-  $('#link-register')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuthModal('#m-signup'); $('#su-email').value = ($('#li-email')?.value||''); });
-  $('#cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
-  $('#cl-reset')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
-
-  // Signup (Firebase -> Local fallback)
-  $('#btnSignupDo')?.addEventListener('click', async ()=>{
-    const name  = ($('#su-name')?.value || '').trim();
-    const email = ($('#su-email')?.value || '').trim().toLowerCase();
-    const pass  = ($('#su-pass')?.value || '');
-    const pass2 = ($('#su-pass2')?.value || '');
-    if (!email || !pass) return notify('Email and password are required','warn');
-    if (pass !== pass2)  return notify('Passwords do not match','warn');
-
-    try{
-      await auth.createUserWithEmailAndPassword(email, pass);
-      try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
-      notify('Account created — you are signed in');
-      closeAuthModal();
-    }catch(e){
-      console.warn('[auth] Firebase signup failed; creating local account', e?.code, e?.message);
-      // Local fallback
-      localSignup({name, email, pass});
-      closeAuthModal();
-    }
-  });
-
-  // Reset (Firebase -> Local fallback)
-  $('#btnResetDo')?.addEventListener('click', async ()=>{
-    const email = ($('#fp-email')?.value || '').trim().toLowerCase();
-    if (!email) return notify('Enter your email','warn');
-    try{
-      await auth.sendPasswordResetEmail(email);
-      notify('Reset email sent — check your inbox','ok');
-      closeAuthModal();
-    }catch(e){
-      console.warn('[auth] Firebase reset failed; doing local reset', e?.code, e?.message);
-      const r = localResetPassword(email);
-      if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
-      else { notify('Reset failed: '+ (r.msg || e?.message || 'Unknown'), 'danger'); }
-      // keep modal open so they can read the temp password
-    }
-  });
-}
-
-async function doLogout(){
-  try { cloud?.disable?.(); } catch {}
-  try { await auth.signOut(); } catch {}
-  if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
-  session = null;
-  save('session', null);
-  currentRoute = 'home';
-  notify('Signed out');
-  try { renderLogin(); } catch (e) { console.error(e); }
-}
-
-// async function doLogout(){
-//   try { cloud?.disable?.(); } catch {}
-//   await auth.signOut().catch(()=>{});
-//   save('session', null);
-//   notify('Signed out');
-// }
-
-// ---------- Sidebar + Topbar ----------
-function renderSidebar(active='home'){
-  const links = [
-    { route:'home',      icon:'ri-home-5-line',              label:'Home' },
-    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
-    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
-    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
-    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
-    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
-    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
-  ];
-  const pages = [
-    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
-    { route:'license', icon:'ri-copyright-line',          label:'License' },
-    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
-    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
-    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
-  ];
-  return `
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <div class="logo">📦</div>
-        <div class="title">Inventory</div>
-      </div>
-
-      <div class="search-wrap">
-        <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
-        <div id="searchResults" class="search-results"></div>
-      </div>
-
-      <h6>Menu</h6>
-      <nav class="nav">
-        ${links.map(l => `
-          <div class="item ${active===l.route?'active':''}" data-route="${l.route}">
-            <i class="${l.icon}"></i> <span>${l.label}</span>
-          </div>`).join('')}
-      </nav>
-
-      <h6>Links</h6>
-      <div class="links">
-        ${pages.map(p => `
-          <div class="item" data-route="${p.route}">
-            <i class="${p.icon}"></i> <span>${p.label}</span>
-          </div>`).join('')}
-      </div>
-
-      <h6>Social</h6>
-      <div class="socials-row">
-        <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-        <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-        <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-        <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
-        <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
-      </div>
-    </aside>
-  `;
-}
-
-function renderTopbar(){
-  const socialsCompact = `
-    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
-      <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-      <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-      <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-    </div>`;
-  return `
-    <div class="topbar">
-      <div class="left">
-        <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
-        <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
-      </div>
-      <div class="right">
-        ${socialsCompact}
-        <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
-        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
-      </div>
-    </div>
-    <div class="backdrop" id="backdrop"></div>
-  `;
-}
-
-// delegated nav clicks + close sidebar on mobile
-document.addEventListener('click', (e)=>{
-  const item = e.target.closest('.sidebar .item[data-route]');
-  if (!item) return;
-  const r = item.getAttribute('data-route');
-  if (r) { go(r); closeSidebar(); }
-});
-
-// close buttons in modals
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-close]');
-  if (!btn) return;
-  const id = btn.getAttribute('data-close');
-  if (id && typeof closeModal === 'function') { closeModal(id); }
-});
-
-// Sidebar search
-function hookSidebarInteractions(){
-  const input   = $('#globalSearch');
-  const results = $('#searchResults');
-  if (!input || !results) return;
-
-  let searchTimer;
-  const openResultsPage = (q)=>{
-    window.searchQuery = q; save && save('_searchQ', q);
-    if (window.currentRoute !== 'search') go('search'); else renderApp();
-  };
-
-  input.addEventListener('keydown', (e)=>{
-    if (e.key === 'Enter') {
-      const q = input.value.trim();
-      if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
-    }
-  });
-
-  input.addEventListener('input', () => {
-    clearTimeout(searchTimer);
-    const q = input.value.trim().toLowerCase();
-    if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
-    searchTimer = setTimeout(() => {
-      const indexData = buildSearchIndex();
-      const out = searchAll(indexData, q).slice(0, 12);
-      if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
-      results.innerHTML = out.map(r => `
-        <div class="result" data-route="${r.route}" data-id="${r.id||''}">
-          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
-        </div>`).join('');
-      results.classList.add('active');
-
-      results.querySelectorAll('.result').forEach(row => {
-        row.onclick = () => {
-          const r = row.getAttribute('data-route');
-          const id = row.getAttribute('data-id') || '';
-          const label = row.textContent.trim();
-          openResultsPage(label);
-          results.classList.remove('active'); input.value = ''; closeSidebar();
-          if (id) setTimeout(()=> scrollToRow(id), 80);
-        };
-      });
-    }, 120);
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!results.contains(e.target) && e.target !== input) {
-      results.classList.remove('active');
-    }
-  });
-}
-
-function safeRenderApp(){
-  try {
-    if (typeof renderApp === 'function')      return renderApp();
-    if (typeof window.renderApp === 'function') return window.renderApp();
-    // last resort: reload to let boot run renderLogin/renderApp in order
-    location.reload();
-  } catch (e) {
-    console.error(e);
-    try { showRescue?.(e); } catch {}
-  }
-}
-
-// ---------- App shell / renderer ----------
 function renderLogin() {
   const root = document.getElementById('root');
   root.innerHTML = `
@@ -688,7 +345,7 @@ function renderLogin() {
 
     if (!email || !pass) { notify('Enter email & password','warn'); return; }
 
-    // Local demo admin (NO direct renderApp call here)
+    // Local demo admin (render immediately — no Firebase user)
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
       let users = load('users', []);
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
@@ -699,8 +356,7 @@ function renderLogin() {
       session = { ...prof, authMode: 'local' };
       save('session', session);
       notify('Welcome, Admin (local mode)');
-      // ✅ This renders even without a Firebase user:
-      try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
+      renderApp(); // direct render
       return;
     }
 
@@ -769,7 +425,10 @@ function renderLogin() {
       notify('Reset email sent — check your inbox','ok');
       closeAuthModal();
     } catch (e) {
-      notify(e?.message || 'Could not send reset email','danger');
+      // Local fallback
+      const r = localResetPassword(email);
+      if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
+      else { notify(e?.message || 'Could not send reset email','danger'); }
     }
   };
 
@@ -799,14 +458,200 @@ function renderLogin() {
   document.getElementById('btnResetDo')?.addEventListener('click',  doReset);
 }
 
+async function doLogout(){
+  try { cloud?.disable?.(); } catch {}
+  try { await auth.signOut(); } catch {}
+  if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
+  session = null;
+  save('session', null);
+  currentRoute = 'home';
+  notify('Signed out');
+  try { renderLogin(); } catch (e) { console.error(e); }
+}
+
+// ---------- Sidebar + Topbar ----------
+function renderSidebar(active='home'){
+  const links = [
+    { route:'home',      icon:'ri-home-5-line',              label:'Home' },
+    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
+    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
+    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
+    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
+    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
+    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
+  ];
+  const pages = [
+    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
+    { route:'license', icon:'ri-copyright-line',          label:'License' },
+    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
+    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
+    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
+  ];
+  return `
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="logo">📦</div>
+        <div class="title">Inventory</div>
+      </div>
+
+      <div class="search-wrap">
+        <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+
+      <h6>Menu</h6>
+      <nav class="nav">
+        ${links.map(l => `
+          <div class="item ${active===l.route?'active':''}" data-route="${l.route}">
+            <i class="${l.icon}"></i> <span>${l.label}</span>
+          </div>`).join('')}
+      </nav>
+
+      <h6>Links</h6>
+      <div class="links">
+        ${pages.map(p => `
+          <div class="item" data-route="${p.route}">
+            <i class="${p.icon}"></i> <span>${p.label}</span>
+          </div>`).join('')}
+      </div>
+
+      <h6>Social</h6>
+      <div class="socials-row">
+        <a class="social-link" href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+        <a class="social-link" href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+        <a class="social-link" href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+        <a class="social-link" href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
+        <a class="social-link" href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
+      </div>
+    </aside>
+  `;
+}
+
+function renderTopbar(){
+  const socialsCompact = `
+    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
+      <a class="social-link" href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+      <a class="social-link" href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+      <a class="social-link" href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+    </div>`;
+  return `
+    <div class="topbar">
+      <div class="left">
+        <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
+        <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
+      </div>
+      <div class="right">
+        ${socialsCompact}
+        <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
+        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
+      </div>
+    </div>
+    <div class="backdrop" id="backdrop"></div>
+  `;
+}
+
+// delegated nav clicks + close sidebar on mobile
+document.addEventListener('click', (e)=>{
+  const item = e.target.closest('.sidebar .item[data-route]');
+  if (!item) return;
+  const r = item.getAttribute('data-route');
+  if (r) { go(r); closeSidebar(); }
+});
+
+// close buttons in modals
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-close]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-close');
+  if (id && typeof closeModal === 'function') { closeModal(id); }
+});
+
+// Sidebar search & helpers
+function hookSidebarInteractions(){
+  const input   = $('#globalSearch');
+  const results = $('#searchResults');
+  if (!input || !results) return;
+
+  let searchTimer;
+  const openResultsPage = (q)=>{
+    window.searchQuery = q; save && save('_searchQ', q);
+    if (window.currentRoute !== 'search') go('search'); else renderApp();
+  };
+
+  input.addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter') {
+      const q = input.value.trim();
+      if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
+    }
+  });
+
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = input.value.trim().toLowerCase();
+    if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
+    searchTimer = setTimeout(() => {
+      const indexData = buildSearchIndex();
+      const out = searchAll(indexData, q).slice(0, 12);
+      if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
+      results.innerHTML = out.map(r => `
+        <div class="result" data-route="${r.route}" data-id="${r.id||''}">
+          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
+        </div>`).join('');
+      results.classList.add('active');
+
+      results.querySelectorAll('.result').forEach(row => {
+        row.onclick = () => {
+          const r = row.getAttribute('data-route');
+          const id = row.getAttribute('data-id') || '';
+          const label = row.textContent.trim();
+          openResultsPage(label);
+          results.classList.remove('active'); input.value = ''; closeSidebar();
+          if (id) setTimeout(()=> scrollToRow(id), 80);
+        };
+      });
+    }, 120);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!results.contains(e.target) && e.target !== input) {
+      results.classList.remove('active');
+    }
+  });
+}
+
 function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); }
 function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); }
 
+// Part 3/6 — App renderer + Home/Search/Dashboard/Posts views & wiring
 /* =========================
    Part B.5 — App renderer
    ========================= */
+function renderApp() {
+  try {
+    if (!session) { renderLogin(); return; }
+    const root = document.getElementById('root');
+    if (!root) return;
+    const route = currentRoute || 'home';
+    root.innerHTML = `
+      <div class="app">
+        ${renderSidebar(route)}
+        <div>
+          ${renderTopbar()}
+          <div class="main" id="main">
+            ${safeView(route)}
+          </div>
+        </div>
+      </div>
+    `;
+    wireRoute(route);
+  } catch (e) {
+    console.error('[renderApp] crash:', e);
+    notify(e?.message || 'Render failed', 'danger');
+    showRescue(e);
+  }
+}
 
-// Return the right view for the current route
+// Return view for the current route
 function safeView(route) {
   switch ((route || 'home')) {
     case 'home':       return viewHome();
@@ -826,7 +671,7 @@ function safeView(route) {
   }
 }
 
-// Wire up interactions for whatever route is showing
+// Wire up interactions for the shown route
 function wireRoute(route) {
   // Topbar actions
   document.getElementById('btnLogout')?.addEventListener('click', doLogout);
@@ -836,7 +681,7 @@ function wireRoute(route) {
   document.getElementById('burger')?.addEventListener('click', openSidebar);
   document.getElementById('backdrop')?.addEventListener('click', closeSidebar);
 
-  // In-content navigation buttons like: <button data-go="inventory">
+  // Buttons with data-go="route"
   document.querySelectorAll('[data-go]').forEach(el => {
     el.addEventListener('click', () => {
       const r  = el.getAttribute('data-go');
@@ -848,84 +693,25 @@ function wireRoute(route) {
     });
   });
 
-  // Global helpers (search box, modals, image preview on phones)
+  // Global helpers
   hookSidebarInteractions();
   ensureGlobalModals();
   enableMobileImagePreview();
 
-  // Route-specific wiring
+  // Route-specific
   switch ((route || 'home')) {
-    case 'home':
-      wireHome();
-      break;
-    case 'dashboard':
-      wireDashboard();
-      wirePosts();       // posts live on the dashboard
-      break;
-    case 'inventory':
-      wireInventory();
-      break;
-    case 'products':
-      wireProducts();
-      break;
-    case 'cogs':
-      wireCOGS();
-      break;
-    case 'tasks':
-      wireTasks();
-      break;
-    case 'settings':
-      wireSettings();
-      break;
-    case 'contact':
-      wireContact();
-      break;
-    // policy/license/setup/guide/search need no extra wiring here
+    case 'home':       wireHome(); break;
+    case 'dashboard':  wireDashboard(); wirePosts(); break;
+    case 'inventory':  wireInventory(); break;
+    case 'products':   wireProducts(); break;
+    case 'cogs':       wireCOGS(); break;
+    case 'tasks':      wireTasks(); break;
+    case 'settings':   wireSettings(); break;
+    case 'contact':    wireContact(); break;
   }
 }
 
-// Main app renderer (called after login or route changes)
-function renderApp() {
-  try {
-    // If there’s no session yet, show login instead of crashing
-    if (!session) { renderLogin(); return; }
-
-    const root = document.getElementById('root');
-    if (!root) return;
-
-    const route = currentRoute || 'home';
-
-    root.innerHTML = `
-      <div class="app">
-        ${renderSidebar(route)}
-        <div>
-          ${renderTopbar()}
-          <div class="main" id="main">
-            ${safeView(route)}
-          </div>
-        </div>
-      </div>
-    `;
-
-    wireRoute(route);
-  } catch (e) {
-    console.error('[renderApp] crash:', e);
-    notify(e?.message || 'Render failed', 'danger');
-    showRescue(e);
-  }
-}
-
-/* =========================
-   Part C — Views (unchanged content except contact wiring exists)
-   ========================= */
-// … (ALL the view/render/wiring code from the previous message remains the same) …
-
-/* The rest of the file (Home, Search, Dashboard/Posts, Inventory, Products,
-   COGS, Tasks, Settings, Contact, Modals, SW boot, etc.) is unchanged from dev6.
-   Keep your existing dev6 sections below this point. For convenience, you can
-   paste the full dev6 body here if you prefer a single file. */
-
-// ===================== Part C — Home / Search / Dashboard / Posts =====================
+/* ===================== Part C — Home / Search / Dashboard / Posts ===================== */
 (function(){
   if (!window.USD) window.USD = (x)=> `$${Number(x||0).toFixed(2)}`;
   if (!window.parseYMD) window.parseYMD = (s)=>{ const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; };
@@ -1113,7 +899,8 @@ function wirePosts(){
   });
 }
 
-// ===================== Part D — Inventory / Products / COGS / Tasks =====================
+// Part 4/6 — Inventory / Products / COGS / Tasks views & wiring
+/* ===================== Part D — Inventory / Products / COGS / Tasks ===================== */
 
 // CSV export
 function downloadCSV(filename, rows, headers) {
@@ -1170,7 +957,7 @@ function viewInventory(){
           <tbody>
             ${items.map(it => {
               const warnClass = it.stock <= it.threshold ? (it.stock <= Math.max(1, Math.floor(it.threshold*0.6)) ? 'tr-danger' : 'tr-warn') : '';
-              return `<tr id="${it.id}" class="${warnClass}">
+              return `<tr id="\${it.id}" class="${'${warnClass}'}">
                 <td><div class="thumb-wrap">
                   ${ it.img ? `<img class="thumb inv-preview" data-src="${it.img}" alt=""/>` : `<div class="thumb inv-preview" data-src="icons/icon-512.png" style="display:grid;place-items:center">📦</div>` }
                   <img class="thumb-large" src="${it.img || 'icons/icon-512.png'}" alt=""/>
@@ -1535,7 +1322,7 @@ function wireTasks(){
   if (isTouch) {
     $$('.task-card').forEach(card=>{
       card.addEventListener('click', (e)=>{
-        if (e.target.closest('button')) return; // don’t steal edit/delete
+        if (e.target.closest('button')) return;
         if (!canAdd()) return notify('No permission','warn');
         const id = card.getAttribute('data-task'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
         const next = t.status==='todo' ? 'inprogress' : (t.status==='inprogress' ? 'done' : 'todo');
@@ -1548,10 +1335,7 @@ function wireTasks(){
 function setupDnD(){
   const lanes = ['todo','inprogress','done'];
   document.querySelectorAll('[data-task]').forEach(card=>{
-    card.ondragstart = (e)=> {
-      e.dataTransfer.setData('text/plain', card.getAttribute('data-task'));
-      e.dataTransfer.dropEffect = 'move';
-    };
+    card.ondragstart = (e)=> { e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); e.dataTransfer.dropEffect = 'move'; };
   });
   lanes.forEach(k=>{
     const laneGrid  = document.getElementById('lane-'+k);
@@ -1567,7 +1351,8 @@ function setupDnD(){
   });
 }
 
-// ===================== Part E — Settings / Contact / Modals =====================
+// Part 5/6 — Settings/Contact, modals, utilities, search, SW, boot
+/* ===================== Part E — Settings / Contact / Modals ===================== */
 
 function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); }
 function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); }
@@ -1787,7 +1572,7 @@ function wireUsers(){
   });
 }
 
-// ---------- Modals (now global, always present) ----------
+// ---------- Modals (global, always present) ----------
 function postModal(){ return `
   <div class="modal-backdrop" id="mb-post"></div>
   <div class="modal" id="m-post">
@@ -1941,7 +1726,8 @@ window.buildSearchIndex = function(){
     { id:'contact', label:'Contact',     section:'Pages', route:'contact' },
     { id:'guide',   label:'User Guide',  section:'Pages', route:'guide'   },
   ];
-  const ix=[]; posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
+  const ix=[];
+  posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
   inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`}));
   prods.forEach(p=>ix.push({id:p.id,label:p.name,section:'Products',route:'products',text:`${p.name} ${p.barcode} ${p.type} ${p.ingredients}`}));
   cogs.forEach(r=>ix.push({id:r.id,label:r.date,section:'COGS',route:'cogs',text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.delivery} ${r.other}`}));
@@ -1951,8 +1737,16 @@ window.buildSearchIndex = function(){
 };
 window.searchAll = function(index,q){
   const term = (q || '').toLowerCase();
-  return index.map(item=>({item,score: (item.label||'').toLowerCase().includes(term)?2:0 + (item.text||'').toLowerCase().includes(term)?1:0}))
-              .filter(x=>x.score>0).sort((a,b)=>b.score-a.score).map(x=>x.item);
+  return index
+    .map(item=>{
+      const inLabel = (item.label||'').toLowerCase().includes(term);
+      const inText  = (item.text ||'').toLowerCase().includes(term);
+      const score = (inLabel?2:0) + (inText?1:0);
+      return { item, score };
+    })
+    .filter(x=>x.score>0)
+    .sort((a,b)=> b.score - a.score)
+    .map(x=>x.item);
 };
 window.scrollToRow = function(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
 
@@ -1968,6 +1762,7 @@ window.addEventListener('offline', ()=> notify('You are offline','warn'));
   fetch(swUrl, { method: 'HEAD' }).then(r => { if (!r.ok) return; if ('requestIdleCallback' in window) requestIdleCallback(tryRegister); else setTimeout(tryRegister, 500); }).catch(() => {});
 })();
 
+// Part 6/6 — Boot
 // First paint
 (function boot(){
   try {
@@ -1977,4 +1772,3 @@ window.addEventListener('offline', ()=> notify('You are offline','warn'));
     notify(e.message || 'Startup error','danger'); if (typeof renderLogin === 'function') renderLogin();
   }
 })();
-
