@@ -747,65 +747,63 @@ async function doLogout(){
 /* ===================== Part C.1 — Home (Hot music videos) ===================== */
 
 // ===== Music library -> weekly rotating set of 10 =====
+/* ===================== Part C.1 — Home (Hot music videos) [FIXED] ===================== */
 (function(){
-  // Your full library (add as many as you want).
-  // Use real YouTube IDs; titles are for display only.
-  // === Hot Music (edit IDs/titles as you like) ================================
-if (!window.HOT_MUSIC_VIDEOS) window.HOT_MUSIC_VIDEOS = [
-  { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
-  { title:'DEAF KEV – Invincible (NCS Release)', id:'J2X5mJ3HDYE' },
-  { title:'Ikson – Anywhere (NCM)', id:'OZLUa8JUR18' },
-  { title:'Elektronomia – Sky High (NCS)', id:'TW9d8vYrVFQ' },
-  { title:'Janji – Heroes Tonight (NCS)', id:'3nQNiWdeH2Q' },
-  { title:'Jim Yosef – Firefly (NCS)', id:'x_OwcYTNbHs' },
-  { title:'Syn Cole – Feel Good (NCS)', id:'q1ULJ92aldE' },
-  { title:'Itro & Tobu – Cloud 9 (NCS)', id:'VtKbiyyVZks' },
-  { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
-  { title:'Tobu – Candyland (NCS)', id:'IIrCDAV3EgI' },
-  // add more…
-];
+  // 1) Define your full library once (edit/add tracks here)
+  const DEFAULT_LIB = [
+    { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
+    { title:'DEAF KEV – Invincible (NCS Release)', id:'J2X5mJ3HDYE' },
+    { title:'Ikson – Anywhere (NCM)', id:'OZLUa8JUR18' },
+    { title:'Elektronomia – Sky High (NCS)', id:'TW9d8vYrVFQ' },
+    { title:'Janji – Heroes Tonight (NCS)', id:'3nQNiWdeH2Q' },
+    { title:'Jim Yosef – Firefly (NCS)', id:'x_OwcYTNbHs' },
+    { title:'Syn Cole – Feel Good (NCS)', id:'q1ULJ92aldE' },
+    { title:'Itro & Tobu – Cloud 9 (NCS)', id:'VtKbiyyVZks' },
+    { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
+    { title:'Tobu – Candyland (NCS)', id:'IIrCDAV3EgI' },
+  ];
 
-  // Build a weekly set of N items from the library (rotates deterministically by ISO week)
+  // If you already had HOT_MUSIC_LIBRARY, keep it; else copy from HOT_MUSIC_VIDEOS or DEFAULT_LIB.
+  window.HOT_MUSIC_LIBRARY =
+    (Array.isArray(window.HOT_MUSIC_LIBRARY) && window.HOT_MUSIC_LIBRARY.length)
+      ? window.HOT_MUSIC_LIBRARY
+      : (Array.isArray(window.HOT_MUSIC_VIDEOS) && window.HOT_MUSIC_VIDEOS.length
+          ? window.HOT_MUSIC_VIDEOS.slice()
+          : DEFAULT_LIB);
+
+  // 2) Deterministic weekly subset from the library (does NOT wipe out data if library is missing)
   if (!window.buildWeeklyMusicSet) window.buildWeeklyMusicSet = (size = 10) => {
     const lib = window.HOT_MUSIC_LIBRARY || [];
     if (!lib.length) return [];
-    const week = (function getISOWeek(d){
-      const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
-      const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n);
-      const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1));
-      return Math.ceil((((t - y0) / 86400000) + 1)/7);
-    })(new Date());
+    const week = getISOWeek(new Date());
     const start = week % lib.length;
     const out = [];
-    for (let i=0; i<size; i++) out.push(lib[(start + i) % lib.length]);
+    const n = Math.min(size, lib.length);
+    for (let i = 0; i < n; i++) out.push(lib[(start + i) % lib.length]);
     return out;
   };
 
-  // Expose this week’s 10
+  // 3) Publish this week’s list
   window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
 
-  // Stable index within this weekly set (also week-based)
-  // Stable weekly index (keeps changing weekly but is deterministic)
-if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
-  const weekOfYear = (d=>{
-    const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
-    const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n);
-    const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1));
-    return Math.ceil((((t - y0) / 86400000) + 1)/7);
-  })(new Date());
-  const n = Math.max(1, (window.HOT_MUSIC_VIDEOS||[]).length);
-  return weekOfYear % n;
-};
+  // 4) Stable weekly index
+  if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
+    const n = Math.max(1, (window.HOT_MUSIC_VIDEOS || []).length);
+    return getISOWeek(new Date()) % n;
+  };
 
-// === YouTube blacklist helpers (skip broken / non-embeddable) ===============
-function _ytBlacklistLoad(){
-  try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; }
-}
-function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
-function ytBlacklistAdd(id){ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); }
-function ytIsBlacklisted(id){ const m=_ytBlacklistLoad(); return !!m[id]; }
-function ytBlacklistClear(){ _ytBlacklistSave({}); }
+  // 5) Auto-skip blacklist helpers (don’t redefine if already present)
+  if (!window._ytBlacklistLoad) {
+    window._ytBlacklistLoad = function(){
+      try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; }
+    };
+    window._ytBlacklistSave = function(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} };
+    window.ytBlacklistAdd = function(id){ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
+    window.ytIsBlacklisted = function(id){ const m=_ytBlacklistLoad(); return !!m[id]; };
+    window.ytBlacklistClear = function(){ _ytBlacklistSave({}); };
+  }
 })();
+
 
 function viewHome(){
   const weeklyIdx = pickWeeklyVideoIndex();
