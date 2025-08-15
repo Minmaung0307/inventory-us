@@ -1,62 +1,70 @@
-/* Minimal, safe SW: only caches GET; skips HEAD/POST; avoids the image-upload crash */
-const CACHE_NAME = 'inv-cache-v4';
-const PRECACHE = [
-  '/',           // if your server serves index.html at /
-  './index.html',
-  './css/styles.css',
-  './js/app.js',
-  './icons/icon-192.png',
-  './icons/icon-512.png'
+
+/* Minimal, safe SW: cache only GET requests; never cache opaque/HEAD/POST/etc. */
+const CACHE_NAME = 'inv-cache-v3';
+const ASSETS = [
+  '/',            // if you serve index.html at /
+  '/index.html',
+  'css/styles.css',
+  'js/app.js',
+  'https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css',
+  // optional: icons
+  '/icons/icon-192.png',
+  '/icons/icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(PRECACHE))
-      .catch(() => {}) // don’t fail install on precache errors
+    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS).catch(()=>{}))
   );
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  clients.claim();
   event.waitUntil(
-    caches.keys().then(keys => Promise.all(
-      keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-    ))
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    )
   );
+  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
 
-  // Only handle same-origin GET requests
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) {
-    return; // let the network handle it
+  // Only handle GET
+  if (req.method !== 'GET') return;
+
+  // Avoid data: images and chrome-extension, etc.
+  const url = new URL(req.url);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+
+  // Network-first for navigation; cache-first for same-origin files
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req).then(res => {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(req, copy)).catch(()=>{});
+        return res;
+      }).catch(async () => {
+        const cached = await caches.match(req);
+        return cached || caches.match('/index.html');
+      })
+    );
+    return;
   }
 
-  event.respondWith((async () => {
-    // try cache first
-    const cached = await caches.match(req);
-    if (cached) return cached;
-
-    // then network
-    try {
-      const res = await fetch(req);
-      // Only cache successful, basic (same-origin) GET responses
-      if (res && res.status === 200 && res.type === 'basic') {
-        const cache = await caches.open(CACHE_NAME);
-        // Avoid cloning/caching opaque or streaming bodies incorrectly
-        cache.put(req, res.clone());
-      }
-      return res;
-    } catch (err) {
-      // Optional: offline fallback for root
-      if (req.mode === 'navigate') {
-        const offline = await caches.match('/index.html');
-        if (offline) return offline;
-      }
-      throw err;
-    }
-  })());
+  // Static assets: cache-first
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      if (cached) return cached;
+      return fetch(req).then((res) => {
+        const copy = res.clone();
+        // only cache "basic" same-origin successful responses
+        if (res.ok && (res.type === 'basic' || res.type === 'cors')) {
+          caches.open(CACHE_NAME).then(cache => cache.put(req, copy)).catch(()=>{});
+        }
+        return res;
+      }).catch(() => cached || Response.error());
+    })
+  );
 });

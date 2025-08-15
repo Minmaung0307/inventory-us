@@ -1,4 +1,14 @@
 /* =========================
+   Inventory — single-file SPA
+   ========================= */
+
+/* ---------- Hoisted helpers (fixes parseYMD crash) ---------- */
+function USD(x){ return `$${Number(x || 0).toFixed(2)}`; }
+function parseYMD(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; }
+function getISOWeek(d){ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); }
+window.USD=USD; window.parseYMD=parseYMD; window.getISOWeek=getISOWeek;
+
+/* =========================
    Part A — Core bootstrap
    ========================= */
 
@@ -28,28 +38,9 @@ const notify = (msg, type='ok')=>{
 };
 const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } };
 const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
+function load(k, f){ return _lsGet(k, f); }
+function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 function setSession(s){ session = s; save('session', s); }
-
-// --- Core formatters / date utils (hoisted; safe to call anywhere below) ---
-function USD(x){ return `$${Number(x || 0).toFixed(2)}`; }
-
-function parseYMD(s){
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
-  return m ? { y: +m[1], m: +m[2], d: +m[3] } : null;
-}
-
-function getISOWeek(d){
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const n = t.getUTCDay() || 7;
-  t.setUTCDate(t.getUTCDate() + 4 - n);
-  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  return Math.ceil((((t - y0) / 86400000) + 1) / 7);
-}
-
-// (optional) also expose on window if other modules reference window.*
-window.USD = USD;
-window.parseYMD = parseYMD;
-window.getISOWeek = getISOWeek;
 
 // --- Rescue screen -----------------------------------------------------------
 function showRescue(err){
@@ -58,7 +49,7 @@ function showRescue(err){
   const msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : 'Unknown error';
   root.innerHTML = `
     <div style="max-width:680px;margin:40px auto;padding:16px;border:1px solid #ddd;border-radius:12px;font-family:system-ui">
-      <h2 style="margin:0 0 8px">Something crashed after login</h2>
+      <h2 style="margin:0 0 8px">Something crashed</h2>
       <p style="color:#666;margin:0 0 12px">You can recover or sign out below.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         <button id="rz-signout" style="padding:8px 12px">Sign out</button>
@@ -108,10 +99,6 @@ const cloud = (function(){
   function disable(){ setOn(false); unsubscribeAll(); }
   return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
 })();
-
-// --- Friendly save/load wrappers --------------------------------------------
-function load(k, f){ return _lsGet(k, f); }
-function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 
 // --- Roles & permissions ------------------------------------------------------
 const ROLES = ['user','associate','manager','admin'];
@@ -181,7 +168,7 @@ function resetIdleTimer(){
 ['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
 
 // --- Auth state --------------------------------------------------------------
-// ✅ Allow local auto-login so refresh won’t log out in local mode
+// Local auto-login: keep local users signed-in on refresh
 const ALLOW_LOCAL_AUTOLOGIN = true;
 
 auth.onAuthStateChanged(async (user) => {
@@ -198,7 +185,7 @@ async function ensureSessionAndRender(user) {
   try {
     applyTheme();
 
-    // Resume local session if allowed and present
+    // allow local session if enabled
     const stored = load('session', null);
     if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
       session = stored;
@@ -298,268 +285,7 @@ function localResetPassword(email){
   return { ok:true, temp };
 }
 
-// ---------- Login UI ----------
-function renderLogin() {
-  const root = document.getElementById('root');
-  root.innerHTML = `
-    <div class="login">
-      <div class="card login-card">
-        <div class="card-body">
-          <div class="login-logo">
-            <div class="logo">📦</div>
-            <div style="font-weight:800;font-size:20px">Inventory</div>
-          </div>
-          <p class="login-note">Sign in to continue</p>
-
-          <div class="grid">
-            <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username" />
-            <input id="li-pass" class="input" type="password" placeholder="Password" autocomplete="current-password" />
-            <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
-
-            <div style="display:flex;justify-content:space-between;gap:8px">
-              <a id="link-forgot"   href="#" class="btn ghost"   style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</a>
-              <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
-            </div>
-
-            <div class="login-note" style="margin-top:6px">
-              Tip: local admin is <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong>.
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Auth modals -->
-    <div class="modal-backdrop" id="mb-auth"></div>
-
-    <div class="modal" id="m-signup">
-      <div class="dialog">
-        <div class="head"><strong>Create account</strong><button class="btn ghost" id="cl-signup">Close</button></div>
-        <div class="body grid">
-          <input id="su-name"  class="input" placeholder="Full name" />
-          <input id="su-email" class="input" type="email" placeholder="Email" />
-          <input id="su-pass"  class="input" type="password" placeholder="Password" />
-          <input id="su-pass2" class="input" type="password" placeholder="Confirm password" />
-        </div>
-        <div class="foot"><button class="btn" id="btnSignupDo"><i class="ri-user-add-line"></i> Sign up</button></div>
-      </div>
-    </div>
-
-    <div class="modal" id="m-reset">
-      <div class="dialog">
-        <div class="head"><strong>Reset password</strong><button class="btn ghost" id="cl-reset">Close</button></div>
-        <div class="body grid">
-          <input id="fp-email" class="input" type="email" placeholder="Your email" />
-        </div>
-        <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset link</button></div>
-      </div>
-    </div>
-  `;
-
-  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); };
-  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
-
-  // ---------- Sign in ----------
-  const doSignIn = async () => {
-    const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
-    const pass  = document.getElementById('li-pass')?.value || '';
-    const btn   = document.getElementById('btnLogin');
-
-    if (!email || !pass) { notify('Enter email & password','warn'); return; }
-
-    // Local demo admin (fast path)
-    if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
-      let users = load('users', []);
-      let prof = users.find(u => (u.email||'').toLowerCase() === email);
-      if (!prof) {
-        prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
-        users.push(prof); save('users', users);
-      }
-      session = { ...prof, authMode: 'local' };
-      save('session', session);
-      notify('Welcome, Admin (local mode)');
-      try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
-      return;
-    }
-
-    // Firebase sign in
-    try {
-      if (!navigator.onLine) throw new Error('You appear to be offline.');
-      btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
-
-      const cred = await auth.signInWithEmailAndPassword(email, pass);
-      console.log('[auth] signIn OK:', cred.user?.uid);
-      notify('Welcome!');
-
-      // Fallback render if needed
-      setTimeout(() => {
-        const rendered = !!document.querySelector('.app');
-        if (!rendered) {
-          console.log('[auth] Fallback render -> ensureSessionAndRender');
-          try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); notify('Render failed','danger'); }
-        }
-      }, 600);
-
-      btn.disabled = false; btn.innerHTML = keep;
-    } catch (e) {
-      const map = {
-        'auth/invalid-email': 'Invalid email format.',
-        'auth/user-disabled': 'This user is disabled.',
-        'auth/user-not-found': 'No account found. Use Create account.',
-        'auth/wrong-password': 'Incorrect password.',
-        'auth/too-many-requests': 'Too many attempts. Try again later.',
-        'auth/operation-not-allowed': 'Email/password sign-in is disabled.',
-        'auth/network-request-failed': 'Network error. Check your connection.'
-      };
-      notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
-      console.error('[auth] signIn error:', e?.code, e?.message);
-    }
-  };
-
-  // ---------- Sign up ----------
-  const doSignup = async () => {
-    const name  = ($('#su-name')?.value || '').trim();
-    const email = ($('#su-email')?.value || '').trim().toLowerCase();
-    const pass  = ($('#su-pass')?.value  || '');
-    const pass2 = ($('#su-pass2')?.value || '');
-    if (!email || !pass) return notify('Email and password are required','warn');
-    if (pass !== pass2)  return notify('Passwords do not match','warn');
-
-    try {
-      if (!navigator.onLine) throw new Error('You appear to be offline.');
-      await auth.createUserWithEmailAndPassword(email, pass);
-      try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
-      notify('Account created — you are signed in');
-      closeAuthModal();
-    } catch (e) {
-      notify(e?.message || 'Could not create account','danger');
-    }
-  };
-
-  // ---------- Reset password ----------
-  const doReset = async () => {
-    const email = ($('#fp-email')?.value || '').trim().toLowerCase();
-    if (!email) return notify('Enter your email','warn');
-    try {
-      if (!navigator.onLine) throw new Error('You appear to be offline.');
-      await auth.sendPasswordResetEmail(email);
-      notify('Reset email sent — check your inbox','ok');
-      closeAuthModal();
-    } catch (e) {
-      notify(e?.message || 'Could not send reset email','danger');
-    }
-  };
-
-  // ---------- Bindings ----------
-  const emailEl  = document.getElementById('li-email');
-  const passEl   = document.getElementById('li-pass');
-  const btnLogin = document.getElementById('btnLogin');
-
-  btnLogin?.addEventListener('click', doSignIn);
-  passEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
-
-  document.getElementById('link-forgot')?.addEventListener('click', (e)=>{ 
-    e.preventDefault(); 
-    openAuthModal('#m-reset'); 
-    const fp = document.getElementById('fp-email'); if (fp) fp.value = (emailEl?.value || '');
-  });
-  document.getElementById('link-register')?.addEventListener('click', (e)=>{ 
-    e.preventDefault(); 
-    openAuthModal('#m-signup'); 
-    const su = document.getElementById('su-email'); if (su) su.value = (emailEl?.value || '');
-  });
-
-  document.getElementById('cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
-  document.getElementById('cl-reset')?.addEventListener('click',  (e)=>{ e.preventDefault(); closeAuthModal(); });
-
-  document.getElementById('btnSignupDo')?.addEventListener('click', doSignup);
-  document.getElementById('btnResetDo')?.addEventListener('click',  doReset);
-}
-
-async function doLogout(){
-  try { cloud?.disable?.(); } catch {}
-  try { await auth.signOut(); } catch {}
-  if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
-  session = null;
-  save('session', null);
-  currentRoute = 'home';
-  notify('Signed out');
-  try { renderLogin(); } catch (e) { console.error(e); }
-}
-
-// delegated nav clicks + close sidebar on mobile
-document.addEventListener('click', (e)=>{
-  const item = e.target.closest('.sidebar .item[data-route]');
-  if (!item) return;
-  const r = item.getAttribute('data-route');
-  if (r) { go(r); closeSidebar(); }
-});
-
-// close buttons in modals
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-close]');
-  if (!btn) return;
-  const id = btn.getAttribute('data-close');
-  if (id && typeof closeModal === 'function') { closeModal(id); }
-});
-
-// Sidebar search helpers
-function hookSidebarInteractions(){
-  const input   = $('#globalSearch');
-  const results = $('#searchResults');
-  if (!input || !results) return;
-
-  let searchTimer;
-  const openResultsPage = (q)=>{
-    window.searchQuery = q; save && save('_searchQ', q);
-    if (window.currentRoute !== 'search') go('search'); else renderApp();
-  };
-
-  input.addEventListener('keydown', (e)=>{
-    if (e.key === 'Enter') {
-      const q = input.value.trim();
-      if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
-    }
-  });
-
-  input.addEventListener('input', () => {
-    clearTimeout(searchTimer);
-    const q = input.value.trim().toLowerCase();
-    if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
-    searchTimer = setTimeout(() => {
-      const indexData = buildSearchIndex();
-      const out = searchAll(indexData, q).slice(0, 12);
-      if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
-      results.innerHTML = out.map(r => `
-        <div class="result" data-route="${r.route}" data-id="${r.id||''}">
-          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
-        </div>`).join('');
-      results.classList.add('active');
-
-      results.querySelectorAll('.result').forEach(row => {
-        row.onclick = () => {
-          const r = row.getAttribute('data-route');
-          const id = row.getAttribute('data-id') || '';
-          const label = row.textContent.trim();
-          openResultsPage(label);
-          results.classList.remove('active'); input.value = ''; closeSidebar();
-          if (id) setTimeout(()=> scrollToRow(id), 80);
-        };
-      });
-    }, 120);
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!results.contains(e.target) && e.target !== input) {
-      results.classList.remove('active');
-    }
-  });
-}
-
-/* =========================
-   Part B.5 — App renderer
-   ========================= */
-
+// ---------- Sidebar + Topbar ----------
 function renderSidebar(active='home'){
   const links = [
     { route:'home',      icon:'ri-home-5-line',              label:'Home' },
@@ -640,10 +366,101 @@ function renderTopbar(){
   `;
 }
 
+// delegated nav clicks + close sidebar on mobile
+document.addEventListener('click', (e)=>{
+  const item = e.target.closest('.sidebar .item[data-route]');
+  if (!item) return;
+  const r = item.getAttribute('data-route');
+  if (r) { go(r); closeSidebar(); }
+});
+
+// close buttons in modals (generic)
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-close]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-close');
+  if (id && typeof closeModal === 'function') { closeModal(id); }
+});
+
+// Sidebar search
+function hookSidebarInteractions(){
+  const input   = $('#globalSearch');
+  const results = $('#searchResults');
+  if (!input || !results) return;
+
+  let searchTimer;
+  const openResultsPage = (q)=>{
+    window.searchQuery = q; save && save('_searchQ', q);
+    if (window.currentRoute !== 'search') go('search'); else renderApp();
+  };
+
+  input.addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter') {
+      const q = input.value.trim();
+      if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
+    }
+  });
+
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = input.value.trim().toLowerCase();
+    if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
+    searchTimer = setTimeout(() => {
+      const indexData = buildSearchIndex();
+      const out = searchAll(indexData, q).slice(0, 12);
+      if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
+      results.innerHTML = out.map(r => `
+        <div class="result" data-route="${r.route}" data-id="${r.id||''}">
+          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
+        </div>`).join('');
+      results.classList.add('active');
+
+      results.querySelectorAll('.result').forEach(row => {
+        row.onclick = () => {
+          const r = row.getAttribute('data-route');
+          const id = row.getAttribute('data-id') || '';
+          const label = row.textContent.trim();
+          openResultsPage(label);
+          results.classList.remove('active'); input.value = ''; closeSidebar();
+          if (id) setTimeout(()=> scrollToRow(id), 80);
+        };
+      });
+    }, 120);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!results.contains(e.target) && e.target !== input) {
+      results.classList.remove('active');
+    }
+  });
+}
+
 function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); }
 function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); }
 
-// Wire up interactions common to routes
+/* =========================
+   Part B.5 — App renderer
+   ========================= */
+
+function safeView(route) {
+  switch ((route || 'home')) {
+    case 'home':       return viewHome();
+    case 'search':     return viewSearch();
+    case 'dashboard':  return viewDashboard();
+    case 'inventory':  return viewInventory();
+    case 'products':   return viewProducts();
+    case 'cogs':       return viewCOGS();
+    case 'tasks':      return viewTasks();
+    case 'settings':   return viewSettings();
+    case 'policy':
+    case 'license':
+    case 'setup':
+    case 'contact':
+    case 'guide':      return viewPage(route);
+    default:           return viewHome();
+  }
+}
+
 function wireRoute(route) {
   // Topbar actions
   document.getElementById('btnLogout')?.addEventListener('click', doLogout);
@@ -665,29 +482,43 @@ function wireRoute(route) {
     });
   });
 
-  // Global helpers (search box, modals, image preview on phones)
+  // Global helpers
   hookSidebarInteractions();
   ensureGlobalModals();
   enableMobileImagePreview();
 
   // Route-specific wiring
   switch ((route || 'home')) {
-    case 'home':       wireHome(); break;
-    case 'dashboard':  wireDashboard(); wirePosts(); break;
-    case 'inventory':  wireInventory(); break;
-    case 'products':   wireProducts();  break;
-    case 'cogs':       wireCOGS();      break;
-    case 'tasks':      wireTasks();     break;
-    case 'settings':   wireSettings();  break;
-    case 'contact':    wireContact();   break;
-    // policy/license/setup/guide/search need no extra wiring here
+    case 'home':
+      wireHome();
+      break;
+    case 'dashboard':
+      wireDashboard();
+      wirePosts();
+      break;
+    case 'inventory':
+      wireInventory();
+      break;
+    case 'products':
+      wireProducts();
+      break;
+    case 'cogs':
+      wireCOGS();
+      break;
+    case 'tasks':
+      wireTasks();
+      break;
+    case 'settings':
+      wireSettings();
+      break;
+    case 'contact':
+      wireContact();
+      break;
   }
 }
 
-// Main app renderer (called after login or route changes)
 function renderApp() {
   try {
-    // If there’s no session yet, show login instead of crashing
     if (!session) { renderLogin(); return; }
 
     const root = document.getElementById('root');
@@ -698,7 +529,7 @@ function renderApp() {
     root.innerHTML = `
       <div class="app">
         ${renderSidebar(route)}
-        <div class="content">
+        <div>
           ${renderTopbar()}
           <div class="main" id="main">
             ${safeView(route)}
@@ -716,41 +547,211 @@ function renderApp() {
 }
 
 /* =========================
-   Part C — Views
+   Part C — Login
    ========================= */
 
-// (function(){
-//   if (!window.USD) window.USD = (x)=> `$${Number(x||0).toFixed(2)}`;
-//   if (!window.parseYMD) window.parseYMD = (s)=>{ const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; };
-//   if (!window.getISOWeek) window.getISOWeek = (d)=>{ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); };
-//   // 🎵 Hot weekly music (not movies)
-//   if (!window.HOT_TRACKS) window.HOT_TRACKS = [
-//     { title: 'Chillhop - Daydream (CC0)',  src: 'https://cdn.pixabay.com/download/audio/2022/03/23/audio_2d9b1f6d2e.mp3?filename=daydream-141288.mp3', cover: 'https://i.imgur.com/t5GmH9I.jpeg' },
-//     { title: 'Jazz Vibes (CC0)',           src: 'https://cdn.pixabay.com/download/audio/2022/02/22/audio_7c062f54a1.mp3?filename=jazzy-11228.mp3', cover: 'https://i.imgur.com/VrJvO7X.jpeg' },
-//     { title: 'Ambient Lights (CC0)',       src: 'https://cdn.pixabay.com/download/audio/2021/10/26/audio_56eb27e6a0.mp3?filename=ambient-epic-11090.mp3', cover: 'https://i.imgur.com/3h9b2yX.jpeg' },
-//     { title: 'Lo-Fi Sunset (CC0)',         src: 'https://cdn.pixabay.com/download/audio/2021/09/30/audio_7c266cb14a.mp3?filename=lofi-study-112191.mp3',   cover: 'https://i.imgur.com/6Cwqvba.jpeg' }
-//   ];
-//   if (!window.pickWeeklyTrackIndex) window.pickWeeklyTrackIndex = ()=> getISOWeek(new Date()) % HOT_TRACKS.length;
-// })();
+function renderLogin() {
+  const root = document.getElementById('root');
+  root.innerHTML = `
+    <div class="login">
+      <div class="card login-card">
+        <div class="card-body">
+          <div class="login-logo">
+            <div class="logo">📦</div>
+            <div style="font-weight:800;font-size:20px">Inventory</div>
+          </div>
+          <p class="login-note">Sign in to continue</p>
 
-/* --- Hot Music Videos (YouTube) --- */
+          <div class="grid">
+            <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username" />
+            <input id="li-pass" class="input" type="password" placeholder="Password" autocomplete="current-password" />
+            <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
+
+            <div style="display:flex;justify-content:space-between;gap:8px">
+              <a id="link-forgot"   href="#" class="btn ghost"   style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</a>
+              <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
+            </div>
+
+            <div class="login-note" style="margin-top:6px">
+              Tip: you can log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Auth modals -->
+    <div class="modal-backdrop" id="mb-auth"></div>
+
+    <div class="modal" id="m-signup">
+      <div class="dialog">
+        <div class="head"><strong>Create account</strong><button class="btn ghost" id="cl-signup">Close</button></div>
+        <div class="body grid">
+          <input id="su-name"  class="input" placeholder="Full name" />
+          <input id="su-email" class="input" type="email" placeholder="Email" />
+          <input id="su-pass"  class="input" type="password" placeholder="Password" />
+          <input id="su-pass2" class="input" type="password" placeholder="Confirm password" />
+        </div>
+        <div class="foot"><button class="btn" id="btnSignupDo"><i class="ri-user-add-line"></i> Sign up</button></div>
+      </div>
+    </div>
+
+    <div class="modal" id="m-reset">
+      <div class="dialog">
+        <div class="head"><strong>Reset password</strong><button class="btn ghost" id="cl-reset">Close</button></div>
+        <div class="body grid">
+          <input id="fp-email" class="input" type="email" placeholder="Your email" />
+        </div>
+        <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset / Local reset</button></div>
+      </div>
+    </div>
+  `;
+
+  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); };
+  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
+
+  // ---------- Sign in ----------
+  const doSignIn = async () => {
+    const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
+    const pass  = document.getElementById('li-pass')?.value || '';
+    const btn   = document.getElementById('btnLogin');
+
+    if (!email || !pass) { notify('Enter email & password','warn'); return; }
+
+    // Local demo admin (render immediately)
+    if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
+      let users = load('users', []);
+      let prof = users.find(u => (u.email||'').toLowerCase() === email);
+      if (!prof) {
+        prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
+        users.push(prof); save('users', users);
+      }
+      session = { ...prof, authMode: 'local' };
+      save('session', session);
+      notify('Welcome, Admin (local mode)');
+      try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
+      return;
+    }
+
+    try {
+      if (!navigator.onLine) throw new Error('You appear to be offline.');
+      console.log('[auth] signInWithEmailAndPassword starting', email);
+      btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
+
+      const cred = await auth.signInWithEmailAndPassword(email, pass);
+      console.log('[auth] signInWithEmailAndPassword OK:', cred.user?.uid);
+      notify('Welcome!');
+
+      // Fallback if change doesn't render fast
+      setTimeout(() => {
+        const rendered = !!document.querySelector('.app');
+        if (!rendered) {
+          console.log('[auth] Fallback render -> ensureSessionAndRender');
+          try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); notify('Render failed','danger'); }
+        }
+      }, 700);
+
+      btn.disabled = false; btn.innerHTML = keep;
+    } catch (e) {
+      const map = {
+        'auth/invalid-email': 'Invalid email format.',
+        'auth/user-disabled': 'This user is disabled.',
+        'auth/user-not-found': 'No account found. Use Create account.',
+        'auth/wrong-password': 'Incorrect password.',
+        'auth/too-many-requests': 'Too many attempts. Try again later.',
+        'auth/operation-not-allowed': 'Email/password sign-in is disabled.',
+        'auth/network-request-failed': 'Network error. Check your connection.'
+      };
+      notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
+      console.error('[auth] signIn error:', e?.code, e?.message);
+    }
+  };
+
+  // ---------- Sign up ----------
+  const doSignup = async () => {
+    const name  = ($('#su-name')?.value || '').trim();
+    const email = ($('#su-email')?.value || '').trim().toLowerCase();
+    const pass  = ($('#su-pass')?.value  || '');
+    const pass2 = ($('#su-pass2')?.value || '');
+    if (!email || !pass) return notify('Email and password are required','warn');
+    if (pass !== pass2)  return notify('Passwords do not match','warn');
+
+    try {
+      if (!navigator.onLine) throw new Error('You appear to be offline.');
+      await auth.createUserWithEmailAndPassword(email, pass);
+      try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
+      notify('Account created — you are signed in');
+      closeAuthModal();
+    } catch (e) {
+      // Local fallback
+      console.warn('[auth] Firebase signup failed; creating local account', e?.code, e?.message);
+      localSignup({name,email,pass});
+      closeAuthModal();
+    }
+  };
+
+  // ---------- Reset password ----------
+  const doReset = async () => {
+    const email = ($('#fp-email')?.value || '').trim().toLowerCase();
+    if (!email) return notify('Enter your email','warn');
+    try {
+      if (!navigator.onLine) throw new Error('You appear to be offline.');
+      await auth.sendPasswordResetEmail(email);
+      notify('Reset email sent — check your inbox','ok');
+      closeAuthModal();
+    } catch (e) {
+      console.warn('[auth] Firebase reset failed; doing local reset', e?.code, e?.message);
+      const r = localResetPassword(email);
+      if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
+      else { notify('Reset failed: '+ (r.msg || e?.message || 'Unknown'), 'danger'); }
+    }
+  };
+
+  // ---------- Bindings ----------
+  const emailEl  = document.getElementById('li-email');
+  const passEl   = document.getElementById('li-pass');
+  const btnLogin = document.getElementById('btnLogin');
+
+  btnLogin?.addEventListener('click', doSignIn);
+  passEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
+
+  document.getElementById('link-forgot')?.addEventListener('click', (e)=>{ 
+    e.preventDefault(); 
+    openAuthModal('#m-reset'); 
+    const fp = document.getElementById('fp-email'); if (fp) fp.value = (emailEl?.value || '');
+  });
+  document.getElementById('link-register')?.addEventListener('click', (e)=>{ 
+    e.preventDefault(); 
+    openAuthModal('#m-signup'); 
+    const su = document.getElementById('su-email'); if (su) su.value = (emailEl?.value || '');
+  });
+
+  document.getElementById('cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
+  document.getElementById('cl-reset')?.addEventListener('click',  (e)=>{ e.preventDefault(); closeAuthModal(); });
+
+  document.getElementById('btnSignupDo')?.addEventListener('click', doSignup);
+  document.getElementById('btnResetDo')?.addEventListener('click',  doReset);
+}
+
+async function doLogout(){
+  try { cloud?.disable?.(); } catch {}
+  try { await auth.signOut(); } catch {}
+  if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
+  session = null;
+  save('session', null);
+  currentRoute = 'home';
+  notify('Signed out');
+  try { renderLogin(); } catch (e) { console.error(e); }
+}
+
+/* ===================== Part C.1 — Home (Hot music videos) ===================== */
+
 (function(){
-  if (!window.getISOWeek) window.getISOWeek = (d)=>{
-  const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
-  const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n);
-  const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1));
-  return Math.ceil((((t - y0) / 86400000) + 1)/7);
-};
-  // 👉 Put your favorite (legal-to-embed) YouTube music video IDs here
-  // Titles are just for display.
   if (!window.HOT_MUSIC_VIDEOS) window.HOT_MUSIC_VIDEOS = [
     { title: 'LAKEY INSPIRED – Better Days (NCM)', id: 'RXLzvo6kvVQ' },
     { title: 'DEAF KEV – Invincible (NCS Release)', id: 'J2X5mJ3HDYE' },
     { title: 'Ikson – Anywhere (NCM)', id: 'OZLUa8JUR18' },
-    // add more like: { title:'Track Name', id:'YouTubeID' },
   ];
-
-  // Weekly pick based on ISO week number (stable but rotates weekly)
   if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
     const arr = window.HOT_MUSIC_VIDEOS || [];
     if (!arr.length) return 0;
@@ -823,7 +824,6 @@ function wireHome(){
     const i = ((idx % list.length) + list.length) % list.length;
     const item = list[i];
 
-    // Build embed URL
     const origin = encodeURIComponent(location.origin);
     const params = `?rel=0&modestbranding=1&playsinline=1&origin=${origin}`;
     frame.src = `https://www.youtube.com/embed/${item.id}${params}`;
@@ -833,11 +833,9 @@ function wireHome(){
     wrap.setAttribute('data-vid-index', String(i));
   };
 
-  // initial
   const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
   setVideo(startIdx);
 
-  // shuffle button
   btn?.addEventListener('click', ()=>{
     const list = window.HOT_MUSIC_VIDEOS || [];
     if (!list.length) return;
@@ -849,7 +847,8 @@ function wireHome(){
   });
 }
 
-// ---------- Search ----------
+/* ===================== Part C.2 — Search ===================== */
+
 function viewSearch(){
   const q = (window.searchQuery || '').trim();
   const index = buildSearchIndex();
@@ -870,7 +869,8 @@ function viewSearch(){
     </div></div>`;
 }
 
-// ---------- Dashboard + Posts ----------
+/* ===================== Part C.3 — Dashboard + Posts ===================== */
+
 function viewDashboard(){
   const posts = load('posts', []);
   const inv   = load('inventory', []);
@@ -882,7 +882,10 @@ function viewDashboard(){
   const lowCt  = inv.filter(i => i.stock <= i.threshold && i.stock > Math.max(1, Math.floor(i.threshold*0.6))).length;
   const critCt = inv.filter(i => i.stock <= Math.max(1, Math.floor(i.threshold*0.6))).length;
 
-  const sumForMonth = (y,m)=> cogs.filter(r=>{ const p=parseYMD(r.date); return p && p.y===y && p.m===m; }).reduce((s,r)=> s + Number(r.grossIncome||0), 0);
+  const sumForMonth = (y,m)=> cogs
+    .filter(r=>{ const p=parseYMD(r.date); return p && p.y===y && p.m===m; })
+    .reduce((s,r)=> s + Number(r.grossIncome||0), 0);
+
   const today=new Date(); const cy=today.getFullYear(), cm=today.getMonth()+1;
   const py = cm===1? (cy-1) : cy; const pm = cm===1? 12 : (cm-1); const ly=cy-1, lm=cm;
   const totalThisMonth=sumForMonth(cy,cm), totalPrevMonth=sumForMonth(py,pm), totalLY=sumForMonth(ly,lm);
@@ -966,7 +969,7 @@ function wirePosts(){
   });
 }
 
-// ===================== Inventory / Products / COGS / Tasks =====================
+/* ===================== Part D — Inventory / Products / COGS / Tasks ===================== */
 
 // CSV export
 function downloadCSV(filename, rows, headers) {
@@ -1023,12 +1026,9 @@ function viewInventory(){
           <tbody>
             ${items.map(it => {
               const warnClass = it.stock <= it.threshold ? (it.stock <= Math.max(1, Math.floor(it.threshold*0.6)) ? 'tr-danger' : 'tr-warn') : '';
-              const small = it.img
-                ? `<img class="thumb inv-preview" data-src="${it.img}" alt="" src="${it.img}"/>`
-                : `<div class="thumb inv-preview" data-src="icons/icon-512.png" style="display:grid;place-items:center">📦</div>`;
               return `<tr id="${it.id}" class="${warnClass}">
                 <td><div class="thumb-wrap">
-                  ${small}
+                  ${ it.img ? `<img class="thumb inv-preview" data-src="${it.img}" src="${it.img}" alt=""/>` : `<div class="thumb inv-preview" data-src="icons/icon-512.png" style="display:grid;place-items:center">📦</div>` }
                   <img class="thumb-large" src="${it.img || 'icons/icon-512.png'}" alt=""/>
                 </div></td>
                 <td>${it.name}</td>
@@ -1423,10 +1423,83 @@ function setupDnD(){
   });
 }
 
-// ===================== Settings / Contact / Modals =====================
+/* ===================== Part E — Settings / Contact / Modals ===================== */
 
-function renderTopAndSidebar(){ return renderSidebar(currentRoute||'home') + renderTopbar(); }
+function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); }
+function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); }
 
+function enableMobileImagePreview(){
+  const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
+  $$('.inv-preview, .prod-thumb').forEach(el=>{
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', ()=>{
+      const src = el.getAttribute('data-src') || el.getAttribute('src') || 'icons/icon-512.png';
+      const img = $('#preview-img'); if (img) img.src = src; openModal('m-img');
+    });
+  });
+}
+
+// Static pages + Contact
+window.pageContent = window.pageContent || {};
+Object.assign(window.pageContent, {
+  policy: `<h3>Policy</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  license:`<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  setup:  `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;"><iframe src="setup-guide.html" style="width:100%; height: calc(100vh - 220px); border:none;"></iframe></div>`,
+  guide:  `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  contact:`<h3>Contact</h3>
+    <p style="color:var(--muted)">Send us a message. It will go to <strong>minmaung0307@gmail.com</strong>.</p>
+    <div class="grid">
+      <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
+      <input id="ct-subj"  class="input" placeholder="Subject"/>
+      <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
+      <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
+      <div id="ct-note" style="color:var(--muted);font-size:12px"></div>
+    </div>`
+});
+function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
+
+function wireContact(){
+  const btn = $('#ct-send'); if (!btn) return;
+  btn.onclick = async ()=>{
+    const fromEmail = ($('#ct-email')?.value || '').trim();
+    const subject   = ($('#ct-subj')?.value  || '').trim();
+    const message   = ($('#ct-msg')?.value   || '').trim();
+    const note      = $('#ct-note');
+    if (!fromEmail || !subject || !message) { notify('Please fill your email, subject and message','warn'); return; }
+
+    const TO = 'minmaung0307@gmail.com';
+
+    // Try EmailJS if available; else mailto
+    const EMAILJS_PUBLIC_KEY  = 'WT0GOYrL9HnDKvLUf'; // e.g. 'YOUR_PUBLIC_KEY'
+    const EMAILJS_SERVICE_ID  = 'service_z9tkmvr'; // e.g. 'service_123'
+    const EMAILJS_TEMPLATE_ID = 'template_q5q471f'; // e.g. 'template_abc'
+    const hasEmailJS = !!(window.emailjs && window.emailjs.send && EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID);
+
+    try{
+      if (hasEmailJS) {
+        if (!window.__emailjs_inited){ window.emailjs.init(EMAILJS_PUBLIC_KEY); window.__emailjs_inited = true; }
+        await window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+          from_name: fromEmail,
+          reply_to: fromEmail,
+          subject,
+          message,
+          to_email: TO
+        });
+        notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
+        $('#ct-msg').value=''; $('#ct-subj').value='';
+      } else {
+        const mail = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${fromEmail}\n\n${message}`)}`;
+        window.location.href = mail;
+        if (note) note.textContent = 'Opening your email app…';
+      }
+    }catch(e){
+      notify('Failed to send message','danger');
+      if (note) note.textContent = e?.message || 'Unknown error';
+    }
+  };
+}
+
+// Settings (Cloud/Theme + Users)
 function viewSettings(){
   const users = load('users', []);
   const theme = getTheme();
@@ -1485,6 +1558,14 @@ function viewSettings(){
     </div>`;
 }
 
+function allowedRoleOptions(){
+  const r = role();
+  if (r === 'admin') return ROLES;
+  if (r === 'manager') return ['user','associate','manager'];
+  if (r === 'associate') return ['user','associate'];
+  return ['user'];
+}
+
 function wireSettings(){
   // Theme instant apply
   const mode = $('#theme-mode'), size = $('#theme-size');
@@ -1513,14 +1594,6 @@ function wireSettings(){
 
   // Users wiring
   wireUsers();
-}
-
-function allowedRoleOptions(){
-  const r = role();
-  if (r === 'admin') return ROLES;
-  if (r === 'manager') return ['user','associate','manager'];
-  if (r === 'associate') return ['user','associate'];
-  return ['user'];
 }
 
 function wireUsers(){
@@ -1570,87 +1643,7 @@ function wireUsers(){
   });
 }
 
-// Static pages + Contact
-window.pageContent = window.pageContent || {};
-Object.assign(window.pageContent, {
-  policy: `<h3>Policy</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  license:`<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  setup:  `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;"><iframe src="setup-guide.html" style="width:100%; height: calc(100vh - 220px); border:none;"></iframe></div>`,
-  guide:  `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  contact:`<h3>Contact</h3>
-    <p style="color:var(--muted)">Send us a message. It will go to <strong>minmaung0307@gmail.com</strong>.</p>
-    <div class="grid">
-      <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
-      <input id="ct-subj"  class="input" placeholder="Subject"/>
-      <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
-      <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
-      <div id="ct-note" style="color:var(--muted);font-size:12px"></div>
-    </div>`
-});
-function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
-
-function wireContact(){
-  const btn = $('#ct-send'); if (!btn) return;
-  btn.onclick = async ()=>{
-    const fromEmail = ($('#ct-email')?.value || '').trim();
-    const subject   = ($('#ct-subj')?.value  || '').trim();
-    const message   = ($('#ct-msg')?.value   || '').trim();
-    const note      = $('#ct-note');
-    if (!fromEmail || !subject || !message) { notify('Please fill your email, subject and message','warn'); return; }
-
-    const TO = 'minmaung0307@gmail.com';
-
-    // Try EmailJS if available (fill keys). Otherwise fallback to mailto:
-    const EMAILJS_PUBLIC_KEY  = 'WT0GOYrL9HnDKvLUf';
-    const EMAILJS_SERVICE_ID  = 'service_z9tkmvr';
-    const EMAILJS_TEMPLATE_ID = 'template_q5q471f';
-    const hasEmailJS = !!(window.emailjs && window.emailjs.send && EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID);
-
-    try{
-      if (hasEmailJS) {
-        if (!window.__emailjs_inited){ window.emailjs.init(EMAILJS_PUBLIC_KEY); window.__emailjs_inited = true; }
-        await window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-          from_name: fromEmail,
-          reply_to: fromEmail,
-          subject,
-          message,
-          to_email: TO
-        });
-        notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
-        $('#ct-msg').value=''; $('#ct-subj').value='';
-      } else {
-        const mail = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${fromEmail}\n\n${message}`)}`;
-        window.location.href = mail;
-        if (note) note.textContent = 'Opening your email app…';
-      }
-    }catch(e){
-      notify('Failed to send message','danger');
-      if (note) note.textContent = e?.message || 'Unknown error';
-    }
-  };
-}
-
-/* ---------- Views switcher ---------- */
-function safeView(route) {
-  switch ((route || 'home')) {
-    case 'home':       return viewHome();
-    case 'search':     return viewSearch();
-    case 'dashboard':  return viewDashboard();
-    case 'inventory':  return viewInventory();
-    case 'products':   return viewProducts();
-    case 'cogs':       return viewCOGS();
-    case 'tasks':      return viewTasks();
-    case 'settings':   return viewSettings();
-    case 'policy':
-    case 'license':
-    case 'setup':
-    case 'contact':
-    case 'guide':      return viewPage(route);
-    default:           return viewHome();
-  }
-}
-
-/* ---------- Modals (global, always present) ---------- */
+// ---------- Modals (global, always present) ----------
 function postModal(){ return `
   <div class="modal-backdrop" id="mb-post"></div>
   <div class="modal" id="m-post">
@@ -1790,25 +1783,10 @@ function ensureGlobalModals(){
   wrap.id = '__modals';
   wrap.innerHTML = postModal()+invModal()+prodModal()+prodCardModal()+cogsModal()+taskModal()+userModal()+imgPreviewModal();
   document.body.appendChild(wrap);
-  // image upload for Post modal too
   attachImageUpload('#post-imgfile', '#post-img');
 }
 
-function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); }
-function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); }
-
-function enableMobileImagePreview(){
-  const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
-  $$('.inv-preview, .prod-thumb').forEach(el=>{
-    el.style.cursor = 'pointer';
-    el.addEventListener('click', ()=>{
-      const src = el.getAttribute('data-src') || el.getAttribute('src') || 'icons/icon-512.png';
-      const img = $('#preview-img'); if (img) img.src = src; openModal('m-img');
-    });
-  });
-}
-
-/* ===================== Search utils + SW + Boot ===================== */
+/* ===================== Part F — Search utils + SW + Boot ===================== */
 window.buildSearchIndex = function(){
   const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
   const pages = [
@@ -1828,10 +1806,12 @@ window.buildSearchIndex = function(){
 };
 window.searchAll = function(index,q){
   const term = (q || '').toLowerCase();
-  return index.map(item=>{
-      const inLabel = (item.label||'').toLowerCase().includes(term) ? 2 : 0;
-      const inText  = (item.text || '').toLowerCase().includes(term) ? 1 : 0;
-      return { item, score: inLabel + inText };
+  return index
+    .map(item=>{
+      const score =
+        ((item.label||'').toLowerCase().includes(term) ? 2 : 0) +
+        ((item.text ||'').toLowerCase().includes(term)  ? 1 : 0);
+      return { item, score };
     })
     .filter(x=>x.score>0)
     .sort((a,b)=>b.score-a.score)
@@ -1843,12 +1823,13 @@ window.scrollToRow = function(id){ const el=document.getElementById(id); if (el)
 window.addEventListener('online',  ()=> notify('Back online','ok'));
 window.addEventListener('offline', ()=> notify('You are offline','warn'));
 
-// Service Worker
+// Service Worker (no HEAD; safe)
 (function(){
   if (!('serviceWorker' in navigator)) return;
   const swUrl = 'service-worker.js';
   const tryRegister = () => navigator.serviceWorker.register(swUrl).catch(err => console.warn('[sw] registration failed:', err));
-  fetch(swUrl, { method: 'GET' })
+  // Use GET + no-cache so the SW sees it safely (no HEAD)
+  fetch(swUrl, { method: 'GET', cache: 'no-cache' })
     .then(r => { if (!r.ok) return; if ('requestIdleCallback' in window) requestIdleCallback(tryRegister); else setTimeout(tryRegister, 500); })
     .catch(() => {});
 })();
@@ -1862,5 +1843,3 @@ window.addEventListener('offline', ()=> notify('You are offline','warn'));
     notify(e.message || 'Startup error','danger'); if (typeof renderLogin === 'function') renderLogin();
   }
 })();
-
-// delegated: close sidebar items, close modals via [data-close] handled above
