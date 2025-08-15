@@ -788,14 +788,15 @@ function viewHome(){
               <div id="musicVideoWrap" data-vid-index="${weeklyIdx}">
                 <div>
                   <iframe
-                    id="ytEmbed"
-                    src=""
-                    title="Music video"
-                    frameborder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowfullscreen
-                    style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px"
-                  ></iframe>
+  id="ytEmbed"
+  src="https://www.youtube-nocookie.com/embed/VIDEO_ID?rel=0&modestbranding=1&playsinline=1"
+  title="Music video"
+  loading="lazy"
+  referrerpolicy="strict-origin-when-cross-origin"
+  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+  allowfullscreen
+  style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px"
+></iframe>
                 </div>
                 <div style="margin-top:8px;font-weight:700" id="mvTitle"></div>
                 <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
@@ -818,20 +819,20 @@ function wireHome(){
   if (!wrap || !frame || !title || !openYT) return;
 
   const setVideo = (idx) => {
-    const list = window.HOT_MUSIC_VIDEOS || [];
-    if (!list.length) return;
+  const list = window.HOT_MUSIC_VIDEOS || [];
+  if (!list.length) return;
 
-    const i = ((idx % list.length) + list.length) % list.length;
-    const item = list[i];
+  const i = ((idx % list.length) + list.length) % list.length;
+  const item = list[i];
 
-    const origin = encodeURIComponent(location.origin);
-    const params = `?rel=0&modestbranding=1&playsinline=1&origin=${origin}`;
-    frame.src = `https://www.youtube.com/embed/${item.id}${params}`;
+  // Build embed URL using the privacy-enhanced domain
+  const params = '?rel=0&modestbranding=1&playsinline=1';
+  frame.src = `https://www.youtube-nocookie.com/embed/${item.id}${params}`;
 
-    title.textContent = item.title || 'Hot music';
-    openYT.href = `https://www.youtube.com/watch?v=${item.id}`;
-    wrap.setAttribute('data-vid-index', String(i));
-  };
+  title.textContent = item.title || 'Hot music';
+  openYT.href = `https://www.youtube.com/watch?v=${item.id}`;
+  wrap.setAttribute('data-vid-index', String(i));
+};
 
   const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
   setVideo(startIdx);
