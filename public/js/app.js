@@ -297,6 +297,7 @@ function renderSidebar(active='home'){
     { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
   ];
   const pages = [
+    { route:'about',   icon:'ri-information-line',       label:'About' },
     { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
     { route:'license', icon:'ri-copyright-line',          label:'License' },
     { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
@@ -512,6 +513,7 @@ function safeView(route) {
     case 'cogs':       return viewCOGS();
     case 'tasks':      return viewTasks();
     case 'settings':   return viewSettings();
+    case 'about':      return viewPage('about');  // ⬅️ add this
     case 'policy':
     case 'license':
     case 'setup':
@@ -1596,13 +1598,87 @@ function enableMobileImagePreview(){
 }
 
 // Static pages + Contact
+// Static pages + Contact + About
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
-  policy: `<h3>Policy</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  license:`<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  setup:  `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;"><iframe src="setup-guide.html" style="width:100%; height: calc(100vh - 220px); border:none;"></iframe></div>`,
-  guide:  `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  contact:`<h3>Contact</h3>
+  about: `
+    <div class="grid">
+      <div class="card"><div class="card-body">
+        <h3 style="margin:0">About Inventory</h3>
+        <p style="color:var(--muted);margin-top:6px">
+          A fast, offline-capable inventory app that keeps small and mid–sized teams in sync — from cafés and food trucks to boutiques and makers.
+        </p>
+
+        <div class="grid cols-4 auto" style="margin-top:8px">
+          <div class="card tile" data-go="inventory"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-archive-2-line"></i><div><strong>Track stock in seconds</strong><div style="color:var(--muted);font-size:12px">Edit counts inline, low/critical alerts.</div></div></div></div>
+          <div class="card tile" data-go="products"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-store-2-line"></i><div><strong>Products & barcodes</strong><div style="color:var(--muted);font-size:12px">Price, type, ingredients & notes.</div></div></div></div>
+          <div class="card tile" data-go="cogs"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-money-dollar-circle-line"></i><div><strong>COGS & simple analytics</strong><div style="color:var(--muted);font-size:12px">MoM / YoY hints; CSV export.</div></div></div></div>
+          <div class="card tile" data-go="tasks"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-list-check-2"></i><div><strong>Kanban tasks</strong><div style="color:var(--muted);font-size:12px">Drag & drop, tap to advance on mobile.</div></div></div></div>
+        </div>
+
+        <div class="grid cols-4 auto" style="margin-top:8px">
+          <div class="card tile" data-go="settings"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-cloud-line"></i><div><strong>Cloud Sync (optional)</strong><div style="color:var(--muted);font-size:12px">Firebase realtime sync per account.</div></div></div></div>
+          <div class="card tile" data-go="settings"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-shield-user-line"></i><div><strong>Role-based access</strong><div style="color:var(--muted);font-size:12px">Admin/Manager/Associate/User.</div></div></div></div>
+          <div class="card tile" data-go="search"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-search-line"></i><div><strong>Global search</strong><div style="color:var(--muted);font-size:12px">Find items, products, posts & users.</div></div></div></div>
+          <div class="card tile" data-go="inventory"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-image-line"></i><div><strong>Images & thumbnails</strong><div style="color:var(--muted);font-size:12px">Hover to preview, tap to zoom on mobile.</div></div></div></div>
+        </div>
+      </div></div>
+
+      <div class="card"><div class="card-body">
+        <h4 style="margin:0">Who it’s for</h4>
+        <p style="color:var(--muted)">
+          • Cafés, restaurants, food trucks • Boutique retail & salons • Pop-ups & event vendors • Makers & small warehouses • School clubs and offices.
+        </p>
+
+        <h4 style="margin:10px 0 0">Why teams love it</h4>
+        <ul style="margin-top:6px">
+          <li><i class="ri-check-line" style="color:var(--ok)"></i> <strong>Fast & smooth.</strong> Works great on phones, tablets, and desktops.</li>
+          <li><i class="ri-check-line" style="color:var(--ok)"></i> <strong>Offline-friendly PWA.</strong> Install to your device; continues working even without a connection.</li>
+          <li><i class="ri-check-line" style="color:var(--ok)"></i> <strong>Zero-fuss images.</strong> Upload or paste a URL—thumbnails + hover preview just work.</li>
+          <li><i class="ri-check-line" style="color:var(--ok)"></i> <strong>Simple analytics.</strong> Month-to-date totals with MoM/YoY hints.</li>
+          <li><i class="ri-check-line" style="color:var(--ok)"></i> <strong>Own your data.</strong> Local by default; optional Firebase sync per signed-in user.</li>
+        </ul>
+
+        <h4 style="margin:10px 0 0">A day in the life</h4>
+        <div class="grid cols-3 auto">
+          <div class="card"><div class="card-body">
+            <strong>Morning</strong>
+            <p style="color:var(--muted)">Check critical stock on the Dashboard, add incoming deliveries, and assign prep tasks.</p>
+          </div></div>
+          <div class="card"><div class="card-body">
+            <strong>Mid-day</strong>
+            <p style="color:var(--muted)">Adjust counts as items sell. Scan barcodes or search to find product details fast.</p>
+          </div></div>
+          <div class="card"><div class="card-body">
+            <strong>Close</strong>
+            <p style="color:var(--muted)">Record COGS, export CSV if needed, and review tomorrow’s low-stock list.</p>
+          </div></div>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+          <button class="btn" data-go="inventory"><i class="ri-archive-2-line"></i> Go to Inventory</button>
+          <button class="btn secondary" data-go="products"><i class="ri-store-2-line"></i> Go to Products</button>
+          <button class="btn ghost" data-go="cogs"><i class="ri-money-dollar-circle-line"></i> Open COGS</button>
+        </div>
+      </div></div>
+
+      <div class="card"><div class="card-body">
+        <h4 style="margin:0">Tech quick-facts</h4>
+        <ul style="color:var(--muted)">
+          <li>Single-file SPA (HTML/CSS/JS). PWA with service worker + manifest for install.</li>
+          <li>LocalStorage for instant offline data; optional Firebase Realtime DB sync.</li>
+          <li>Role-based UI, CSV export, image previews, global search, modals, and DnD tasks.</li>
+        </ul>
+        <p style="margin-top:10px">Need help? Visit <a href="#" data-go="contact" class="btn ghost">Contact</a> or read the <a href="#" data-go="setup" class="btn ghost">Setup Guide</a>.</p>
+      </div></div>
+    </div>
+  `,
+
+  policy:  `<h3>Policy</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  license: `<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  setup:   `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;"><iframe src="setup-guide.html" style="width:100%; height: calc(100vh - 220px); border:none;"></iframe></div>`,
+  guide:   `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  contact: `<h3>Contact</h3>
     <p style="color:var(--muted)">Send us a message. It will go to <strong>minmaung0307@gmail.com</strong>.</p>
     <div class="grid">
       <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
@@ -1612,6 +1688,7 @@ Object.assign(window.pageContent, {
       <div id="ct-note" style="color:var(--muted);font-size:12px"></div>
     </div>`
 });
+
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
 
 function wireContact(){
@@ -1946,6 +2023,7 @@ function ensureGlobalModals(){
 window.buildSearchIndex = function(){
   const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
   const pages = [
+    { id:'about',   label:'About',       section:'Pages', route:'about'   }, // ⬅️ add
     { id:'policy',  label:'Policy',      section:'Pages', route:'policy'  },
     { id:'license', label:'License',     section:'Pages', route:'license' },
     { id:'setup',   label:'Setup Guide', section:'Pages', route:'setup'   },
