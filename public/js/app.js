@@ -750,19 +750,20 @@ async function doLogout(){
 (function(){
   // Your full library (add as many as you want).
   // Use real YouTube IDs; titles are for display only.
-  if (!window.HOT_MUSIC_LIBRARY) window.HOT_MUSIC_LIBRARY = [
-    { title: 'LAKEY INSPIRED – Better Days (NCM)', id: 'RXLzvo6kvVQ' },
-    { title: 'DEAF KEV – Invincible (NCS Release)', id: 'J2X5mJ3HDYE' },
-    { title: 'Ikson – Anywhere (NCM)', id: 'OZLUa8JUR18' },
-    { title: 'JPB – High (NCS Release)', id: 'Tv6WImqSuxA' },
-    { title: 'Jim Yosef – Link (NCS Release)', id: '9iHM6X6uUH8' },
-    { title: 'Elektronomia – Limitless (NCS)', id: 'cNcy3J4x62M' },
-    { title: 'Tobu – Hope (NCS Release)', id: 'EP625xQIGzs' },
-    { title: 'Alan Walker – Fade (NCS Release)', id: 'bM7SZ5SBzyY' },
-    { title: 'Different Heaven & EH!DE – My Heart', id: 'jK2aIUmmdP4' },
-    { title: 'Janji – Heroes Tonight (feat. Johnning)', id: '3nQNiWdeH2Q' },
-    // add more...
-  ];
+  // === Hot Music (edit IDs/titles as you like) ================================
+if (!window.HOT_MUSIC_VIDEOS) window.HOT_MUSIC_VIDEOS = [
+  { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
+  { title:'DEAF KEV – Invincible (NCS Release)', id:'J2X5mJ3HDYE' },
+  { title:'Ikson – Anywhere (NCM)', id:'OZLUa8JUR18' },
+  { title:'Elektronomia – Sky High (NCS)', id:'TW9d8vYrVFQ' },
+  { title:'Janji – Heroes Tonight (NCS)', id:'3nQNiWdeH2Q' },
+  { title:'Jim Yosef – Firefly (NCS)', id:'x_OwcYTNbHs' },
+  { title:'Syn Cole – Feel Good (NCS)', id:'q1ULJ92aldE' },
+  { title:'Itro & Tobu – Cloud 9 (NCS)', id:'VtKbiyyVZks' },
+  { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
+  { title:'Tobu – Candyland (NCS)', id:'IIrCDAV3EgI' },
+  // add more…
+];
 
   // Build a weekly set of N items from the library (rotates deterministically by ISO week)
   if (!window.buildWeeklyMusicSet) window.buildWeeklyMusicSet = (size = 10) => {
@@ -784,19 +785,26 @@ async function doLogout(){
   window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
 
   // Stable index within this weekly set (also week-based)
-  if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
-    const arr = window.HOT_MUSIC_VIDEOS || [];
-    if (!arr.length) return 0;
-    // seed by week for a consistent first pick each week
-    const now = new Date();
-    const week = (function getISOWeek(d){
-      const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
-      const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n);
-      const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1));
-      return Math.ceil((((t - y0) / 86400000) + 1)/7);
-    })(now);
-    return week % arr.length;
-  };
+  // Stable weekly index (keeps changing weekly but is deterministic)
+if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
+  const weekOfYear = (d=>{
+    const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
+    const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n);
+    const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1));
+    return Math.ceil((((t - y0) / 86400000) + 1)/7);
+  })(new Date());
+  const n = Math.max(1, (window.HOT_MUSIC_VIDEOS||[]).length);
+  return weekOfYear % n;
+};
+
+// === YouTube blacklist helpers (skip broken / non-embeddable) ===============
+function _ytBlacklistLoad(){
+  try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; }
+}
+function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
+function ytBlacklistAdd(id){ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); }
+function ytIsBlacklisted(id){ const m=_ytBlacklistLoad(); return !!m[id]; }
+function ytBlacklistClear(){ _ytBlacklistSave({}); }
 })();
 
 function viewHome(){
@@ -818,7 +826,7 @@ function viewHome(){
           <div class="card">
             <div class="card-body">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <h4 style="margin:0">Hot Music Videos (weekly set of 10)</h4>
+                <h4 style="margin:0">Hot Music Videos</h4>
                 <div style="display:flex;gap:8px">
                   <button class="btn ghost" id="btnShuffleVideo"><i class="ri-shuffle-line"></i> Shuffle</button>
                   <a class="btn secondary" id="btnOpenYouTube" href="#" target="_blank" rel="noopener"><i class="ri-youtube-fill"></i> Open on YouTube</a>
@@ -826,18 +834,7 @@ function viewHome(){
               </div>
 
               <div id="musicVideoWrap" data-vid-index="${weeklyIdx}">
-                <div>
-                  <iframe
-                    id="ytEmbed"
-                    src=""
-                    title="Music video"
-                    loading="lazy"
-                    referrerpolicy="strict-origin-when-cross-origin"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowfullscreen
-                    style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px"
-                  ></iframe>
-                </div>
+                <div id="ytPlayerHost" style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px;overflow:hidden"></div>
                 <div style="margin-top:8px;font-weight:700" id="mvTitle"></div>
                 <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
               </div>
@@ -851,42 +848,90 @@ function viewHome(){
 
 function wireHome(){
   const wrap   = $('#musicVideoWrap');
-  const frame  = $('#ytEmbed');
   const title  = $('#mvTitle');
   const openYT = $('#btnOpenYouTube');
   const btn    = $('#btnShuffleVideo');
+  const hostId = 'ytPlayerHost';
+  if (!wrap || !title || !openYT) return;
 
-  if (!wrap || !frame || !title || !openYT) return;
+  // Load the YouTube Iframe API once
+  function loadYT(){
+    return new Promise((resolve)=>{
+      if (window.YT && YT.Player) return resolve();
+      const s = document.createElement('script');
+      s.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(s);
+      window.onYouTubeIframeAPIReady = ()=> resolve();
+    });
+  }
 
-  const setVideo = (idx) => {
+  // Pick next non-blacklisted candidate; if all bad, clear blacklist.
+  function nextValidIndex(start){
+    const list = window.HOT_MUSIC_VIDEOS || [];
+    if (!list.length) return 0;
+    for (let k=0; k<list.length; k++){
+      const i = (start + k) % list.length;
+      if (!ytIsBlacklisted(list[i].id)) return i;
+    }
+    // all were blacklisted; clear and start fresh
+    ytBlacklistClear();
+    return start % list.length;
+  }
+
+  let player = null;
+
+  function setVideoByIndex(idx){
     const list = window.HOT_MUSIC_VIDEOS || [];
     if (!list.length) return;
 
-    const i = ((idx % list.length) + list.length) % list.length;
-    const item = list[i];
+    const i = nextValidIndex(idx);
+    const { id, title: t } = list[i];
 
-    const origin = encodeURIComponent(location.origin);
-    const params = `?rel=0&modestbranding=1&playsinline=1&origin=${origin}`;
-    frame.src = `https://www.youtube-nocookie.com/embed/${item.id}${params}`;
-
-    title.textContent = item.title || 'Hot music';
-    openYT.href = `https://www.youtube.com/watch?v=${item.id}`;
     wrap.setAttribute('data-vid-index', String(i));
-  };
+    title.textContent = t || 'Hot music';
+    openYT.href = `https://www.youtube.com/watch?v=${id}`;
 
-  // initial
-  const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
-  setVideo(startIdx);
+    const options = {
+      host: 'https://www.youtube-nocookie.com', // privacy-enhanced
+      videoId: id,
+      playerVars: {
+        rel: 0,
+        modestbranding: 1,
+        playsinline: 1,
+        origin: location.origin
+      },
+      events: {
+        onError: (e)=>{
+          // Known embed error codes: 2,5,100,101,150
+          try { ytBlacklistAdd(id); } catch {}
+          notify('Video not available. Skipping…','warn');
+          setVideoByIndex(i + 1);
+        }
+      }
+    };
 
-  // shuffle within this week’s 10
-  btn?.addEventListener('click', ()=>{
-    const list = window.HOT_MUSIC_VIDEOS || [];
-    if (!list.length) return;
-    const curr = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
-    let next = Math.floor(Math.random() * list.length);
-    if (list.length > 1 && next === curr) next = (next + 1) % list.length;
-    setVideo(next);
-    notify('Shuffled music video', 'ok');
+    if (!player){
+      player = new YT.Player(hostId, options);
+    } else {
+      player.loadVideoById(id);
+    }
+  }
+
+  loadYT().then(()=>{
+    const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
+    setVideoByIndex(startIdx);
+
+    btn?.addEventListener('click', ()=>{
+      const list = window.HOT_MUSIC_VIDEOS || [];
+      if (!list.length) return;
+      const curr = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
+      let next = Math.floor(Math.random()*list.length);
+      if (list.length > 1 && next === curr) next = (next+1) % list.length;
+      setVideoByIndex(next);
+      notify('Shuffled music video','ok');
+    });
+  }).catch(()=>{
+    notify('YouTube player couldn’t load','warn');
   });
 }
 
