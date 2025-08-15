@@ -343,6 +343,29 @@ function renderSidebar(active='home'){
   `;
 }
 
+// function renderTopbar(){
+//   const socialsCompact = `
+//     <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
+//       <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+//       <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+//       <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+//     </div>`;
+//   return `
+//     <div class="topbar">
+//       <div class="left">
+//         <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
+//         <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
+//       </div>
+//       <div class="right">
+//         ${socialsCompact}
+//         <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
+//         <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
+//       </div>
+//     </div>
+//     <div class="backdrop" id="backdrop"></div>
+//   `;
+// }
+
 function renderTopbar(){
   const socialsCompact = `
     <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
@@ -359,11 +382,48 @@ function renderTopbar(){
       <div class="right">
         ${socialsCompact}
         <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
+        <button class="btn ghost" id="btnInstallApp" style="display:none"><i class="ri-download-2-line"></i> Install app</button>
         <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
       </div>
     </div>
     <div class="backdrop" id="backdrop"></div>
   `;
+}
+
+// === PWA install UI (omnibox + custom button) ===
+function setupPWAInstallUI(){
+  const btn = document.getElementById('btnInstallApp');
+  if (!btn) return;
+
+  let deferred = null;
+
+  // Hide button if already running as an installed app
+  if (window.matchMedia('(display-mode: standalone)').matches) {
+    btn.style.display = 'none';
+  }
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferred = e;
+    btn.style.display = 'inline-flex';
+  });
+
+  btn.addEventListener('click', async () => {
+    if (!deferred) return;
+    deferred.prompt();
+    try {
+      const choice = await deferred.userChoice;
+      if (choice && choice.outcome === 'accepted') notify('Installing…', 'ok');
+    } catch {}
+    deferred = null;
+    btn.style.display = 'none';
+  });
+
+  window.addEventListener('appinstalled', () => {
+    notify('App installed', 'ok');
+    deferred = null;
+    btn.style.display = 'none';
+  });
 }
 
 // delegated nav clicks + close sidebar on mobile
@@ -537,6 +597,9 @@ function renderApp() {
         </div>
       </div>
     `;
+
+    // ⬇️ add this EXACTLY here, after the DOM exists:
+setupPWAInstallUI();
 
     wireRoute(route);
   } catch (e) {

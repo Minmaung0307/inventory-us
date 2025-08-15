@@ -7,11 +7,17 @@
     content="width=device-width, initial-scale=1, viewport-fit=cover"
   />
   <title>Inventory</title>
+  <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0ea5a5" />
 
   <!-- Favicon stops /favicon.ico 404 -->
   <link rel="icon" href="icons/icon-512.png" sizes="512x512" />
   <link rel="apple-touch-icon" href="icons/icon-512.png" />
+  <!-- iOS “Add to Home Screen” support (Safari doesn’t show the install prompt) -->
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Inventory">
 
   <!-- Remix Icon (icons like ri-*) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/remixicon@4.2.0/fonts/remixicon.css" />
