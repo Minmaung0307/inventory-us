@@ -1587,12 +1587,16 @@ function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||
 function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); }
 
 function enableMobileImagePreview(){
-  const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
-  $$('.inv-preview, .prod-thumb').forEach(el=>{
+  const isPhone = window.matchMedia('(max-width: 740px)').matches;
+  if (!isPhone) return;
+
+  $$('.inv-preview, .prod-thumb, .user-thumb').forEach(el=>{
     el.style.cursor = 'pointer';
     el.addEventListener('click', ()=>{
       const src = el.getAttribute('data-src') || el.getAttribute('src') || 'icons/icon-512.png';
-      const img = $('#preview-img'); if (img) img.src = src; openModal('m-img');
+      const img = $('#preview-img');
+      if (img) img.src = src;
+      openModal('m-img');
     });
   });
 }
@@ -1775,16 +1779,36 @@ function viewSettings(){
           ${canAdd()? `<button class="btn" id="addUser"><i class="ri-add-line"></i> Add User</button>`:''}
         </div>
         <table class="table" data-section="users">
-          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Photo</th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
-            ${users.map(u=>`
-              <tr id="${u.email}">
-                <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
-                <td>
-                  ${canEdit()? `<button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>`:''}
-                  ${canDelete()? `<button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button>`:''}
-                </td>
-              </tr>`).join('')}
+            ${users.map(u=>{
+              const img = u.img || 'icons/icon-512.png';
+              const alt = (u.name || u.email || 'User') + ' avatar';
+              return `
+                <tr id="${u.email}">
+                  <td>
+                    <div class="thumb-wrap">
+                      <img class="thumb user-thumb" data-src="${img}" src="${img}" alt="${alt}"/>
+                      <img class="thumb-large" src="${img}" alt="${alt} enlarged"/>
+                    </div>
+                  </td>
+                  <td>${u.name}</td>
+                  <td>${u.email}</td>
+                  <td>${u.role}</td>
+                  <td>
+                    ${canEdit()? `<button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>`:''}
+                    ${canDelete()? `<button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button>`:''}
+                  </td>
+                </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div></div>

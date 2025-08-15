@@ -197,6 +197,9 @@ body {
   z-index: 400;                          /* sit above tables, headers, etc. */
 }
 
+/* optional: round user thumbnails */
+.table .user-thumb { border-radius: 9999px; }
+
 /* Image modal (phones) */
 .img-modal .dialog { width: min(520px, 94vw); }
 .img-modal .imgbox { width: 100%; max-height: 70vh; display: grid; place-items: center; }
