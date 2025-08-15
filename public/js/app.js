@@ -30,6 +30,27 @@ const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:
 const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
 function setSession(s){ session = s; save('session', s); }
 
+// --- Core formatters / date utils (hoisted; safe to call anywhere below) ---
+function USD(x){ return `$${Number(x || 0).toFixed(2)}`; }
+
+function parseYMD(s){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+  return m ? { y: +m[1], m: +m[2], d: +m[3] } : null;
+}
+
+function getISOWeek(d){
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const n = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - n);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil((((t - y0) / 86400000) + 1) / 7);
+}
+
+// (optional) also expose on window if other modules reference window.*
+window.USD = USD;
+window.parseYMD = parseYMD;
+window.getISOWeek = getISOWeek;
+
 // --- Rescue screen -----------------------------------------------------------
 function showRescue(err){
   const root = document.getElementById('root');
