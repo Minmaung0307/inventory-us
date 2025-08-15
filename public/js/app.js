@@ -1,4 +1,3 @@
-// Part 1/6 — Core bootstrap, helpers, theme, cloud, storage, roles, seeds, router/idle, auth
 /* =========================
    Part A — Core bootstrap
    ========================= */
@@ -29,8 +28,6 @@ const notify = (msg, type='ok')=>{
 };
 const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } };
 const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
-function load(k, f){ return _lsGet(k, f); }
-function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 function setSession(s){ session = s; save('session', s); }
 
 // --- Rescue screen -----------------------------------------------------------
@@ -90,6 +87,10 @@ const cloud = (function(){
   function disable(){ setOn(false); unsubscribeAll(); }
   return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
 })();
+
+// --- Friendly save/load wrappers --------------------------------------------
+function load(k, f){ return _lsGet(k, f); }
+function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 
 // --- Roles & permissions ------------------------------------------------------
 const ROLES = ['user','associate','manager','admin'];
@@ -159,7 +160,8 @@ function resetIdleTimer(){
 ['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
 
 // --- Auth state --------------------------------------------------------------
-const ALLOW_LOCAL_AUTOLOGIN = false;
+// ✅ Allow local auto-login so refresh won’t log out in local mode
+const ALLOW_LOCAL_AUTOLOGIN = true;
 
 auth.onAuthStateChanged(async (user) => {
   console.log('[auth] onAuthStateChanged:', !!user, user?.email || '');
@@ -175,7 +177,7 @@ async function ensureSessionAndRender(user) {
   try {
     applyTheme();
 
-    // allow local session ONLY if the flag is true
+    // Resume local session if allowed and present
     const stored = load('session', null);
     if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
       session = stored;
@@ -230,7 +232,6 @@ async function ensureSessionAndRender(user) {
 // SAFETY helpers
 if (!window.getCogs) window.getCogs = () => (typeof load === 'function' ? (load('cogs', []) || []) : []);
 
-// Part 2/6 — Login & shell (single renderLogin), local auth helpers, logout, sidebar/topbar, interactions
 /* =========================
    Part B — Login & Shell
    ========================= */
@@ -300,7 +301,7 @@ function renderLogin() {
             </div>
 
             <div class="login-note" style="margin-top:6px">
-              Tip: you can log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
+              Tip: local admin is <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong>.
             </div>
           </div>
         </div>
@@ -345,7 +346,7 @@ function renderLogin() {
 
     if (!email || !pass) { notify('Enter email & password','warn'); return; }
 
-    // Local demo admin (render immediately — no Firebase user)
+    // Local demo admin (fast path)
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
       let users = load('users', []);
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
@@ -356,28 +357,27 @@ function renderLogin() {
       session = { ...prof, authMode: 'local' };
       save('session', session);
       notify('Welcome, Admin (local mode)');
-      renderApp(); // direct render
+      try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
       return;
     }
 
     // Firebase sign in
     try {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
-      console.log('[auth] signInWithEmailAndPassword starting', email);
       btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
 
       const cred = await auth.signInWithEmailAndPassword(email, pass);
-      console.log('[auth] signInWithEmailAndPassword OK:', cred.user?.uid);
+      console.log('[auth] signIn OK:', cred.user?.uid);
       notify('Welcome!');
 
-      // Fallback: if render doesn’t occur via onAuthStateChanged, force it
+      // Fallback render if needed
       setTimeout(() => {
         const rendered = !!document.querySelector('.app');
         if (!rendered) {
           console.log('[auth] Fallback render -> ensureSessionAndRender');
           try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); notify('Render failed','danger'); }
         }
-      }, 700);
+      }, 600);
 
       btn.disabled = false; btn.innerHTML = keep;
     } catch (e) {
@@ -425,10 +425,7 @@ function renderLogin() {
       notify('Reset email sent — check your inbox','ok');
       closeAuthModal();
     } catch (e) {
-      // Local fallback
-      const r = localResetPassword(email);
-      if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
-      else { notify(e?.message || 'Could not send reset email','danger'); }
+      notify(e?.message || 'Could not send reset email','danger');
     }
   };
 
@@ -469,87 +466,6 @@ async function doLogout(){
   try { renderLogin(); } catch (e) { console.error(e); }
 }
 
-// ---------- Sidebar + Topbar ----------
-function renderSidebar(active='home'){
-  const links = [
-    { route:'home',      icon:'ri-home-5-line',              label:'Home' },
-    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
-    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
-    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
-    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
-    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
-    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
-  ];
-  const pages = [
-    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
-    { route:'license', icon:'ri-copyright-line',          label:'License' },
-    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
-    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
-    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
-  ];
-  return `
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <div class="logo">📦</div>
-        <div class="title">Inventory</div>
-      </div>
-
-      <div class="search-wrap">
-        <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
-        <div id="searchResults" class="search-results"></div>
-      </div>
-
-      <h6>Menu</h6>
-      <nav class="nav">
-        ${links.map(l => `
-          <div class="item ${active===l.route?'active':''}" data-route="${l.route}">
-            <i class="${l.icon}"></i> <span>${l.label}</span>
-          </div>`).join('')}
-      </nav>
-
-      <h6>Links</h6>
-      <div class="links">
-        ${pages.map(p => `
-          <div class="item" data-route="${p.route}">
-            <i class="${p.icon}"></i> <span>${p.label}</span>
-          </div>`).join('')}
-      </div>
-
-      <h6>Social</h6>
-      <div class="socials-row">
-        <a class="social-link" href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-        <a class="social-link" href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-        <a class="social-link" href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-        <a class="social-link" href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
-        <a class="social-link" href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
-      </div>
-    </aside>
-  `;
-}
-
-function renderTopbar(){
-  const socialsCompact = `
-    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
-      <a class="social-link" href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-      <a class="social-link" href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-      <a class="social-link" href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-    </div>`;
-  return `
-    <div class="topbar">
-      <div class="left">
-        <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
-        <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
-      </div>
-      <div class="right">
-        ${socialsCompact}
-        <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
-        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
-      </div>
-    </div>
-    <div class="backdrop" id="backdrop"></div>
-  `;
-}
-
 // delegated nav clicks + close sidebar on mobile
 document.addEventListener('click', (e)=>{
   const item = e.target.closest('.sidebar .item[data-route]');
@@ -566,7 +482,7 @@ document.addEventListener('click', (e) => {
   if (id && typeof closeModal === 'function') { closeModal(id); }
 });
 
-// Sidebar search & helpers
+// Sidebar search helpers
 function hookSidebarInteractions(){
   const input   = $('#globalSearch');
   const results = $('#searchResults');
@@ -619,59 +535,94 @@ function hookSidebarInteractions(){
   });
 }
 
-function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); }
-function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); }
-
-// Part 3/6 — App renderer + Home/Search/Dashboard/Posts views & wiring
 /* =========================
    Part B.5 — App renderer
    ========================= */
-function renderApp() {
-  try {
-    if (!session) { renderLogin(); return; }
-    const root = document.getElementById('root');
-    if (!root) return;
-    const route = currentRoute || 'home';
-    root.innerHTML = `
-      <div class="app">
-        ${renderSidebar(route)}
-        <div>
-          ${renderTopbar()}
-          <div class="main" id="main">
-            ${safeView(route)}
-          </div>
-        </div>
+
+function renderSidebar(active='home'){
+  const links = [
+    { route:'home',      icon:'ri-home-5-line',              label:'Home' },
+    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
+    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
+    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
+    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
+    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
+    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
+  ];
+  const pages = [
+    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
+    { route:'license', icon:'ri-copyright-line',          label:'License' },
+    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
+    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
+    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
+  ];
+  return `
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="logo">📦</div>
+        <div class="title">Inventory</div>
       </div>
-    `;
-    wireRoute(route);
-  } catch (e) {
-    console.error('[renderApp] crash:', e);
-    notify(e?.message || 'Render failed', 'danger');
-    showRescue(e);
-  }
+
+      <div class="search-wrap">
+        <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+
+      <h6>Menu</h6>
+      <nav class="nav">
+        ${links.map(l => `
+          <div class="item ${active===l.route?'active':''}" data-route="${l.route}">
+            <i class="${l.icon}"></i> <span>${l.label}</span>
+          </div>`).join('')}
+      </nav>
+
+      <h6>Links</h6>
+      <div class="links">
+        ${pages.map(p => `
+          <div class="item" data-route="${p.route}">
+            <i class="${p.icon}"></i> <span>${p.label}</span>
+          </div>`).join('')}
+      </div>
+
+      <h6>Social</h6>
+      <div class="socials-row">
+        <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+        <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+        <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+        <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
+        <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
+      </div>
+    </aside>
+  `;
 }
 
-// Return view for the current route
-function safeView(route) {
-  switch ((route || 'home')) {
-    case 'home':       return viewHome();
-    case 'search':     return viewSearch();
-    case 'dashboard':  return viewDashboard();
-    case 'inventory':  return viewInventory();
-    case 'products':   return viewProducts();
-    case 'cogs':       return viewCOGS();
-    case 'tasks':      return viewTasks();
-    case 'settings':   return viewSettings();
-    case 'policy':
-    case 'license':
-    case 'setup':
-    case 'contact':
-    case 'guide':      return viewPage(route);
-    default:           return viewHome();
-  }
+function renderTopbar(){
+  const socialsCompact = `
+    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
+      <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+      <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+      <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+    </div>`;
+  return `
+    <div class="topbar">
+      <div class="left">
+        <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
+        <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
+      </div>
+      <div class="right">
+        ${socialsCompact}
+        <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
+        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
+      </div>
+    </div>
+    <div class="backdrop" id="backdrop"></div>
+  `;
 }
 
-// Wire up interactions for the shown route
+function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); }
+function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); }
+
+// Wire up interactions common to routes
 function wireRoute(route) {
   // Topbar actions
   document.getElementById('btnLogout')?.addEventListener('click', doLogout);
@@ -681,7 +632,7 @@ function wireRoute(route) {
   document.getElementById('burger')?.addEventListener('click', openSidebar);
   document.getElementById('backdrop')?.addEventListener('click', closeSidebar);
 
-  // Buttons with data-go="route"
+  // In-content navigation buttons like: <button data-go="inventory">
   document.querySelectorAll('[data-go]').forEach(el => {
     el.addEventListener('click', () => {
       const r  = el.getAttribute('data-go');
@@ -693,36 +644,97 @@ function wireRoute(route) {
     });
   });
 
-  // Global helpers
+  // Global helpers (search box, modals, image preview on phones)
   hookSidebarInteractions();
   ensureGlobalModals();
   enableMobileImagePreview();
 
-  // Route-specific
+  // Route-specific wiring
   switch ((route || 'home')) {
     case 'home':       wireHome(); break;
     case 'dashboard':  wireDashboard(); wirePosts(); break;
     case 'inventory':  wireInventory(); break;
-    case 'products':   wireProducts(); break;
-    case 'cogs':       wireCOGS(); break;
-    case 'tasks':      wireTasks(); break;
-    case 'settings':   wireSettings(); break;
-    case 'contact':    wireContact(); break;
+    case 'products':   wireProducts();  break;
+    case 'cogs':       wireCOGS();      break;
+    case 'tasks':      wireTasks();     break;
+    case 'settings':   wireSettings();  break;
+    case 'contact':    wireContact();   break;
+    // policy/license/setup/guide/search need no extra wiring here
   }
 }
 
-/* ===================== Part C — Home / Search / Dashboard / Posts ===================== */
+// Main app renderer (called after login or route changes)
+function renderApp() {
+  try {
+    // If there’s no session yet, show login instead of crashing
+    if (!session) { renderLogin(); return; }
+
+    const root = document.getElementById('root');
+    if (!root) return;
+
+    const route = currentRoute || 'home';
+
+    root.innerHTML = `
+      <div class="app">
+        ${renderSidebar(route)}
+        <div class="content">
+          ${renderTopbar()}
+          <div class="main" id="main">
+            ${safeView(route)}
+          </div>
+        </div>
+      </div>
+    `;
+
+    wireRoute(route);
+  } catch (e) {
+    console.error('[renderApp] crash:', e);
+    notify(e?.message || 'Render failed', 'danger');
+    showRescue(e);
+  }
+}
+
+/* =========================
+   Part C — Views
+   ========================= */
+
+// (function(){
+//   if (!window.USD) window.USD = (x)=> `$${Number(x||0).toFixed(2)}`;
+//   if (!window.parseYMD) window.parseYMD = (s)=>{ const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; };
+//   if (!window.getISOWeek) window.getISOWeek = (d)=>{ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); };
+//   // 🎵 Hot weekly music (not movies)
+//   if (!window.HOT_TRACKS) window.HOT_TRACKS = [
+//     { title: 'Chillhop - Daydream (CC0)',  src: 'https://cdn.pixabay.com/download/audio/2022/03/23/audio_2d9b1f6d2e.mp3?filename=daydream-141288.mp3', cover: 'https://i.imgur.com/t5GmH9I.jpeg' },
+//     { title: 'Jazz Vibes (CC0)',           src: 'https://cdn.pixabay.com/download/audio/2022/02/22/audio_7c062f54a1.mp3?filename=jazzy-11228.mp3', cover: 'https://i.imgur.com/VrJvO7X.jpeg' },
+//     { title: 'Ambient Lights (CC0)',       src: 'https://cdn.pixabay.com/download/audio/2021/10/26/audio_56eb27e6a0.mp3?filename=ambient-epic-11090.mp3', cover: 'https://i.imgur.com/3h9b2yX.jpeg' },
+//     { title: 'Lo-Fi Sunset (CC0)',         src: 'https://cdn.pixabay.com/download/audio/2021/09/30/audio_7c266cb14a.mp3?filename=lofi-study-112191.mp3',   cover: 'https://i.imgur.com/6Cwqvba.jpeg' }
+//   ];
+//   if (!window.pickWeeklyTrackIndex) window.pickWeeklyTrackIndex = ()=> getISOWeek(new Date()) % HOT_TRACKS.length;
+// })();
+
+/* --- Hot Music Videos (YouTube) --- */
 (function(){
-  if (!window.USD) window.USD = (x)=> `$${Number(x||0).toFixed(2)}`;
-  if (!window.parseYMD) window.parseYMD = (s)=>{ const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; };
-  if (!window.getISOWeek) window.getISOWeek = (d)=>{ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); };
-  if (!window.HOT_VIDEOS) window.HOT_VIDEOS = [
-    { title: 'Countryside (CC0)', src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4', poster: 'https://i.imgur.com/7v2C8bX.jpeg' },
-    { title: 'Big Buck Bunny (CC)', src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', poster: 'https://peach.blender.org/wp-content/uploads/title_anouncement.jpg?x11217' },
-    { title: 'Sintel Trailer (CC)', src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4', poster: 'https://durian.blender.org/wp-content/uploads/2010/05/sintel_poster.jpg' },
-    { title: 'Flower Close-ups (CC0)', src: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', poster: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.jpg' }
+  if (!window.getISOWeek) window.getISOWeek = (d)=>{
+  const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
+  const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n);
+  const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1));
+  return Math.ceil((((t - y0) / 86400000) + 1)/7);
+};
+  // 👉 Put your favorite (legal-to-embed) YouTube music video IDs here
+  // Titles are just for display.
+  if (!window.HOT_MUSIC_VIDEOS) window.HOT_MUSIC_VIDEOS = [
+    { title: 'LAKEY INSPIRED – Better Days (NCM)', id: 'RXLzvo6kvVQ' },
+    { title: 'DEAF KEV – Invincible (NCS Release)', id: 'J2X5mJ3HDYE' },
+    { title: 'Ikson – Anywhere (NCM)', id: 'OZLUa8JUR18' },
+    // add more like: { title:'Track Name', id:'YouTubeID' },
   ];
-  if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = ()=> getISOWeek(new Date()) % HOT_VIDEOS.length;
+
+  // Weekly pick based on ISO week number (stable but rotates weekly)
+  if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
+    const arr = window.HOT_MUSIC_VIDEOS || [];
+    if (!arr.length) return 0;
+    return getISOWeek(new Date()) % arr.length;
+  };
 })();
 
 function viewHome(){
@@ -731,7 +743,7 @@ function viewHome(){
     <div class="card">
       <div class="card-body">
         <h3 style="margin-top:0">Welcome 👋</h3>
-        <p style="color:var(--muted)">Pick a section or watch a hot weekly video. Tap Shuffle to change.</p>
+        <p style="color:var(--muted)">Pick a section or watch this week’s hot music video. Tap Shuffle to change.</p>
 
         <div class="grid cols-4 auto" style="margin-bottom:12px">
           <div class="card tile" data-go="inventory"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-archive-2-line"></i><div>Inventory</div></div></div>
@@ -744,16 +756,27 @@ function viewHome(){
           <div class="card">
             <div class="card-body">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <h4 style="margin:0">Hot Weekly Video</h4>
-                <button class="btn ghost" id="btnShuffleVideo"><i class="ri-shuffle-line"></i> Shuffle</button>
+                <h4 style="margin:0">Hot Music Videos</h4>
+                <div style="display:flex;gap:8px">
+                  <button class="btn ghost" id="btnShuffleVideo"><i class="ri-shuffle-line"></i> Shuffle</button>
+                  <a class="btn secondary" id="btnOpenYouTube" href="#" target="_blank" rel="noopener"><i class="ri-youtube-fill"></i> Open on YouTube</a>
+                </div>
               </div>
-              <div id="videoWrap" data-video-index="${weeklyIdx}">
-                <div id="videoTitle" style="font-weight:700;margin-bottom:8px"></div>
-                <video id="hotVideo" style="width:100%;border-radius:12px;border:1px solid var(--card-border)" controls playsinline preload="metadata" poster="">
-                  <source id="hotVideoSrc" src="" type="video/mp4" />
-                  Your browser does not support HTML5 video.
-                </video>
-                <div style="color:var(--muted);font-size:12px;margin-top:6px">On iPhone, videos need a tap to play.</div>
+
+              <div id="musicVideoWrap" data-vid-index="${weeklyIdx}">
+                <div>
+                  <iframe
+                    id="ytEmbed"
+                    src=""
+                    title="Music video"
+                    frameborder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen
+                    style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px"
+                  ></iframe>
+                </div>
+                <div style="margin-top:8px;font-weight:700" id="mvTitle"></div>
+                <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
               </div>
             </div>
           </div>
@@ -764,21 +787,44 @@ function viewHome(){
 }
 
 function wireHome(){
-  const wrap = $('#videoWrap'), vEl=$('#hotVideo'), src=$('#hotVideoSrc'), title=$('#videoTitle'), btn=$('#btnShuffleVideo');
-  if (!wrap || !vEl || !src || !title) return;
-  const setVideo = (idx)=>{
-    const pool = window.HOT_VIDEOS || []; if (!pool.length) return;
-    const i = ((idx % pool.length) + pool.length) % pool.length;
-    const item = pool[i]; title.textContent = item.title || 'Hot pick'; src.src = item.src; vEl.poster = item.poster || '';
-    try{ vEl.load(); }catch(_){}
+  const wrap   = $('#musicVideoWrap');
+  const frame  = $('#ytEmbed');
+  const title  = $('#mvTitle');
+  const openYT = $('#btnOpenYouTube');
+  const btn    = $('#btnShuffleVideo');
+
+  if (!wrap || !frame || !title || !openYT) return;
+
+  const setVideo = (idx) => {
+    const list = window.HOT_MUSIC_VIDEOS || [];
+    if (!list.length) return;
+
+    const i = ((idx % list.length) + list.length) % list.length;
+    const item = list[i];
+
+    // Build embed URL
+    const origin = encodeURIComponent(location.origin);
+    const params = `?rel=0&modestbranding=1&playsinline=1&origin=${origin}`;
+    frame.src = `https://www.youtube.com/embed/${item.id}${params}`;
+
+    title.textContent = item.title || 'Hot music';
+    openYT.href = `https://www.youtube.com/watch?v=${item.id}`;
+    wrap.setAttribute('data-vid-index', String(i));
   };
-  const startIdx = parseInt(wrap.getAttribute('data-video-index') || '0', 10) || 0;
+
+  // initial
+  const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
   setVideo(startIdx);
+
+  // shuffle button
   btn?.addEventListener('click', ()=>{
-    const pool = window.HOT_VIDEOS || []; if (!pool.length) return;
-    const curr = parseInt(wrap.getAttribute('data-video-index') || '0', 10) || 0;
-    let next = Math.floor(Math.random()*pool.length); if (pool.length > 1 && next === curr) next = (next+1) % pool.length;
-    wrap.setAttribute('data-video-index', String(next)); setVideo(next); notify('Shuffled video', 'ok');
+    const list = window.HOT_MUSIC_VIDEOS || [];
+    if (!list.length) return;
+    const curr = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
+    let next = Math.floor(Math.random() * list.length);
+    if (list.length > 1 && next === curr) next = (next + 1) % list.length;
+    setVideo(next);
+    notify('Shuffled music video', 'ok');
   });
 }
 
@@ -899,8 +945,7 @@ function wirePosts(){
   });
 }
 
-// Part 4/6 — Inventory / Products / COGS / Tasks views & wiring
-/* ===================== Part D — Inventory / Products / COGS / Tasks ===================== */
+// ===================== Inventory / Products / COGS / Tasks =====================
 
 // CSV export
 function downloadCSV(filename, rows, headers) {
@@ -927,49 +972,13 @@ function downloadCSV(filename, rows, headers) {
 }
 
 // Generic image upload helper (file -> dataURL -> set into text input)
-// Generic image upload helper (file -> dataURL -> set into text input) with resize/compress
 function attachImageUpload(fileInputSel, textInputSel){
-  const f = $(fileInputSel), t = $(textInputSel);
-  if (!f || !t) return;
-
-  f.onchange = async () => {
-    try {
-      const file = f.files && f.files[0]; if (!file) return;
-      if (!/^image\//i.test(file.type)) { notify('Please select an image file', 'warn'); return; }
-
-      // Read into a bitmap
-      const imgData = await file.arrayBuffer();
-      const blobUrl = URL.createObjectURL(new Blob([imgData], { type: file.type }));
-      const img = new Image();
-      img.src = blobUrl;
-      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
-
-      // Compute scaled size
-      const maxSide = 1280;
-      let { width, height } = img;
-      if (width > maxSide || height > maxSide) {
-        const ratio = Math.min(maxSide / width, maxSide / height);
-        width = Math.round(width * ratio);
-        height = Math.round(height * ratio);
-      }
-
-      // Draw to canvas
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-
-      // Export as JPEG (smaller than PNG) – tweak quality if needed
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-      URL.revokeObjectURL(blobUrl);
-
-      // Save to the target text box
-      t.value = dataUrl;
-      notify('Image ready', 'ok');
-    } catch (e) {
-      console.error('[image] resize/upload failed', e);
-      notify('Could not process image', 'danger');
-    }
+  const f = $(fileInputSel), t = $(textInputSel); if (!f || !t) return;
+  f.onchange = ()=>{
+    const file = f.files && f.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{ t.value = reader.result; };
+    reader.readAsDataURL(file);
   };
 }
 
@@ -993,9 +1002,12 @@ function viewInventory(){
           <tbody>
             ${items.map(it => {
               const warnClass = it.stock <= it.threshold ? (it.stock <= Math.max(1, Math.floor(it.threshold*0.6)) ? 'tr-danger' : 'tr-warn') : '';
-              return `<tr id="\${it.id}" class="${'${warnClass}'}">
+              const small = it.img
+                ? `<img class="thumb inv-preview" data-src="${it.img}" alt="" src="${it.img}"/>`
+                : `<div class="thumb inv-preview" data-src="icons/icon-512.png" style="display:grid;place-items:center">📦</div>`;
+              return `<tr id="${it.id}" class="${warnClass}">
                 <td><div class="thumb-wrap">
-                  ${ it.img ? `<img class="thumb inv-preview" data-src="${it.img}" alt=""/>` : `<div class="thumb inv-preview" data-src="icons/icon-512.png" style="display:grid;place-items:center">📦</div>` }
+                  ${small}
                   <img class="thumb-large" src="${it.img || 'icons/icon-512.png'}" alt=""/>
                 </div></td>
                 <td>${it.name}</td>
@@ -1371,7 +1383,10 @@ function wireTasks(){
 function setupDnD(){
   const lanes = ['todo','inprogress','done'];
   document.querySelectorAll('[data-task]').forEach(card=>{
-    card.ondragstart = (e)=> { e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); e.dataTransfer.dropEffect = 'move'; };
+    card.ondragstart = (e)=> {
+      e.dataTransfer.setData('text/plain', card.getAttribute('data-task'));
+      e.dataTransfer.dropEffect = 'move';
+    };
   });
   lanes.forEach(k=>{
     const laneGrid  = document.getElementById('lane-'+k);
@@ -1387,84 +1402,10 @@ function setupDnD(){
   });
 }
 
-// Part 5/6 — Settings/Contact, modals, utilities, search, SW, boot
-/* ===================== Part E — Settings / Contact / Modals ===================== */
+// ===================== Settings / Contact / Modals =====================
 
-function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); }
-function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); }
+function renderTopAndSidebar(){ return renderSidebar(currentRoute||'home') + renderTopbar(); }
 
-function enableMobileImagePreview(){
-  const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
-  $$('.inv-preview, .prod-thumb').forEach(el=>{
-    el.style.cursor = 'pointer';
-    el.addEventListener('click', ()=>{
-      const src = el.getAttribute('data-src') || el.getAttribute('src') || 'icons/icon-512.png';
-      const img = $('#preview-img'); if (img) img.src = src; openModal('m-img');
-    });
-  });
-}
-
-// Static pages + Contact
-window.pageContent = window.pageContent || {};
-Object.assign(window.pageContent, {
-  policy: `<h3>Policy</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  license:`<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  setup:  `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;"><iframe src="setup-guide.html" style="width:100%; height: calc(100vh - 220px); border:none;"></iframe></div>`,
-  guide:  `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
-  contact:`<h3>Contact</h3>
-    <p style="color:var(--muted)">Send us a message. It will go to <strong>minmaung0307@gmail.com</strong>.</p>
-    <div class="grid">
-      <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
-      <input id="ct-subj"  class="input" placeholder="Subject"/>
-      <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
-      <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
-      <div id="ct-note" style="color:var(--muted);font-size:12px"></div>
-    </div>`
-});
-function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
-
-function wireContact(){
-  const btn = $('#ct-send'); if (!btn) return;
-  btn.onclick = async ()=>{
-    const fromEmail = ($('#ct-email')?.value || '').trim();
-    const subject   = ($('#ct-subj')?.value  || '').trim();
-    const message   = ($('#ct-msg')?.value   || '').trim();
-    const note      = $('#ct-note');
-    if (!fromEmail || !subject || !message) { notify('Please fill your email, subject and message','warn'); return; }
-
-    const TO = 'minmaung0307@gmail.com';
-
-    // Try EmailJS if available (fill your keys below). Otherwise fallback to mailto:
-    const EMAILJS_PUBLIC_KEY  = ''; // e.g. 'YOUR_PUBLIC_KEY'
-    const EMAILJS_SERVICE_ID  = ''; // e.g. 'service_123'
-    const EMAILJS_TEMPLATE_ID = ''; // e.g. 'template_abc'
-    const hasEmailJS = !!(window.emailjs && window.emailjs.send && EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID);
-
-    try{
-      if (hasEmailJS) {
-        if (!window.__emailjs_inited){ window.emailjs.init(EMAILJS_PUBLIC_KEY); window.__emailjs_inited = true; }
-        await window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-          from_name: fromEmail,
-          reply_to: fromEmail,
-          subject,
-          message,
-          to_email: TO
-        });
-        notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
-        $('#ct-msg').value=''; $('#ct-subj').value='';
-      } else {
-        const mail = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${fromEmail}\n\n${message}`)}`;
-        window.location.href = mail;
-        if (note) note.textContent = 'Opening your email app…';
-      }
-    }catch(e){
-      notify('Failed to send message','danger');
-      if (note) note.textContent = e?.message || 'Unknown error';
-    }
-  };
-}
-
-// Settings (Cloud/Theme + Users)
 function viewSettings(){
   const users = load('users', []);
   const theme = getTheme();
@@ -1608,7 +1549,87 @@ function wireUsers(){
   });
 }
 
-// ---------- Modals (global, always present) ----------
+// Static pages + Contact
+window.pageContent = window.pageContent || {};
+Object.assign(window.pageContent, {
+  policy: `<h3>Policy</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  license:`<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  setup:  `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;"><iframe src="setup-guide.html" style="width:100%; height: calc(100vh - 220px); border:none;"></iframe></div>`,
+  guide:  `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe></div>`,
+  contact:`<h3>Contact</h3>
+    <p style="color:var(--muted)">Send us a message. It will go to <strong>minmaung0307@gmail.com</strong>.</p>
+    <div class="grid">
+      <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
+      <input id="ct-subj"  class="input" placeholder="Subject"/>
+      <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
+      <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
+      <div id="ct-note" style="color:var(--muted);font-size:12px"></div>
+    </div>`
+});
+function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
+
+function wireContact(){
+  const btn = $('#ct-send'); if (!btn) return;
+  btn.onclick = async ()=>{
+    const fromEmail = ($('#ct-email')?.value || '').trim();
+    const subject   = ($('#ct-subj')?.value  || '').trim();
+    const message   = ($('#ct-msg')?.value   || '').trim();
+    const note      = $('#ct-note');
+    if (!fromEmail || !subject || !message) { notify('Please fill your email, subject and message','warn'); return; }
+
+    const TO = 'minmaung0307@gmail.com';
+
+    // Try EmailJS if available (fill keys). Otherwise fallback to mailto:
+    const EMAILJS_PUBLIC_KEY  = 'WT0GOYrL9HnDKvLUf';
+    const EMAILJS_SERVICE_ID  = 'service_z9tkmvr';
+    const EMAILJS_TEMPLATE_ID = 'template_q5q471f';
+    const hasEmailJS = !!(window.emailjs && window.emailjs.send && EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID);
+
+    try{
+      if (hasEmailJS) {
+        if (!window.__emailjs_inited){ window.emailjs.init(EMAILJS_PUBLIC_KEY); window.__emailjs_inited = true; }
+        await window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+          from_name: fromEmail,
+          reply_to: fromEmail,
+          subject,
+          message,
+          to_email: TO
+        });
+        notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
+        $('#ct-msg').value=''; $('#ct-subj').value='';
+      } else {
+        const mail = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${fromEmail}\n\n${message}`)}`;
+        window.location.href = mail;
+        if (note) note.textContent = 'Opening your email app…';
+      }
+    }catch(e){
+      notify('Failed to send message','danger');
+      if (note) note.textContent = e?.message || 'Unknown error';
+    }
+  };
+}
+
+/* ---------- Views switcher ---------- */
+function safeView(route) {
+  switch ((route || 'home')) {
+    case 'home':       return viewHome();
+    case 'search':     return viewSearch();
+    case 'dashboard':  return viewDashboard();
+    case 'inventory':  return viewInventory();
+    case 'products':   return viewProducts();
+    case 'cogs':       return viewCOGS();
+    case 'tasks':      return viewTasks();
+    case 'settings':   return viewSettings();
+    case 'policy':
+    case 'license':
+    case 'setup':
+    case 'contact':
+    case 'guide':      return viewPage(route);
+    default:           return viewHome();
+  }
+}
+
+/* ---------- Modals (global, always present) ---------- */
 function postModal(){ return `
   <div class="modal-backdrop" id="mb-post"></div>
   <div class="modal" id="m-post">
@@ -1752,7 +1773,21 @@ function ensureGlobalModals(){
   attachImageUpload('#post-imgfile', '#post-img');
 }
 
-// ===================== Part F — Search utils + SW + Boot =====================
+function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); }
+function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); }
+
+function enableMobileImagePreview(){
+  const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
+  $$('.inv-preview, .prod-thumb').forEach(el=>{
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', ()=>{
+      const src = el.getAttribute('data-src') || el.getAttribute('src') || 'icons/icon-512.png';
+      const img = $('#preview-img'); if (img) img.src = src; openModal('m-img');
+    });
+  });
+}
+
+/* ===================== Search utils + SW + Boot ===================== */
 window.buildSearchIndex = function(){
   const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
   const pages = [
@@ -1762,8 +1797,7 @@ window.buildSearchIndex = function(){
     { id:'contact', label:'Contact',     section:'Pages', route:'contact' },
     { id:'guide',   label:'User Guide',  section:'Pages', route:'guide'   },
   ];
-  const ix=[];
-  posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
+  const ix=[]; posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
   inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`}));
   prods.forEach(p=>ix.push({id:p.id,label:p.name,section:'Products',route:'products',text:`${p.name} ${p.barcode} ${p.type} ${p.ingredients}`}));
   cogs.forEach(r=>ix.push({id:r.id,label:r.date,section:'COGS',route:'cogs',text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.delivery} ${r.other}`}));
@@ -1773,15 +1807,13 @@ window.buildSearchIndex = function(){
 };
 window.searchAll = function(index,q){
   const term = (q || '').toLowerCase();
-  return index
-    .map(item=>{
-      const inLabel = (item.label||'').toLowerCase().includes(term);
-      const inText  = (item.text ||'').toLowerCase().includes(term);
-      const score = (inLabel?2:0) + (inText?1:0);
-      return { item, score };
+  return index.map(item=>{
+      const inLabel = (item.label||'').toLowerCase().includes(term) ? 2 : 0;
+      const inText  = (item.text || '').toLowerCase().includes(term) ? 1 : 0;
+      return { item, score: inLabel + inText };
     })
     .filter(x=>x.score>0)
-    .sort((a,b)=> b.score - a.score)
+    .sort((a,b)=>b.score-a.score)
     .map(x=>x.item);
 };
 window.scrollToRow = function(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
@@ -1791,20 +1823,15 @@ window.addEventListener('online',  ()=> notify('Back online','ok'));
 window.addEventListener('offline', ()=> notify('You are offline','warn'));
 
 // Service Worker
-// Service Worker
 (function(){
   if (!('serviceWorker' in navigator)) return;
   const swUrl = 'service-worker.js';
-  const register = () => navigator.serviceWorker.register(swUrl)
-    .catch(err => console.warn('[sw] registration failed:', err));
-
-  // Probe with a GET that bypasses cache; then register
-  fetch(swUrl, { cache: 'no-store', method: 'GET' })
-    .then(r => { if (!r.ok) return; if ('requestIdleCallback' in window) requestIdleCallback(register); else setTimeout(register, 500); })
-    .catch(() => { /* still try to register */ register(); });
+  const tryRegister = () => navigator.serviceWorker.register(swUrl).catch(err => console.warn('[sw] registration failed:', err));
+  fetch(swUrl, { method: 'GET' })
+    .then(r => { if (!r.ok) return; if ('requestIdleCallback' in window) requestIdleCallback(tryRegister); else setTimeout(tryRegister, 500); })
+    .catch(() => {});
 })();
 
-// Part 6/6 — Boot
 // First paint
 (function boot(){
   try {
@@ -1814,3 +1841,5 @@ window.addEventListener('offline', ()=> notify('You are offline','warn'));
     notify(e.message || 'Startup error','danger'); if (typeof renderLogin === 'function') renderLogin();
   }
 })();
+
+// delegated: close sidebar items, close modals via [data-close] handled above

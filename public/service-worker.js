@@ -1,6 +1,7 @@
-const CACHE = 'inv-v7';
-const ASSETS = [
-  './',
+/* Minimal, safe SW: only caches GET; skips HEAD/POST; avoids the image-upload crash */
+const CACHE_NAME = 'inv-cache-v4';
+const PRECACHE = [
+  '/',           // if your server serves index.html at /
   './index.html',
   './css/styles.css',
   './js/app.js',
@@ -9,49 +10,53 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(ASSETS))
-  );
   self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(PRECACHE))
+      .catch(() => {}) // don’t fail install on precache errors
+  );
 });
 
 self.addEventListener('activate', (event) => {
+  clients.claim();
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    )
+    caches.keys().then(keys => Promise.all(
+      keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
+    ))
   );
-  self.clients.claim();
 });
 
-// Very important: only SPA-fallback for real navigations.
-// Never return index.html for scripts, css, images, etc.
 self.addEventListener('fetch', (event) => {
   const req = event.request;
 
-  // Let non-GET (POST/PUT/HEAD) go straight through (fixes your HEAD error).
-  if (req.method !== 'GET') return;
-
-  // Navigations → network first, fallback to cached index.html when offline
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).catch(() => caches.match('./index.html'))
-    );
-    return;
+  // Only handle same-origin GET requests
+  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) {
+    return; // let the network handle it
   }
 
-  // Static assets → cache-first, then network, and cache successful basic responses
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req).then((resp) => {
-        // Only cache good same-origin/basic responses
-        const copy = resp.clone();
-        if (copy.ok && copy.type === 'basic') {
-          caches.open(CACHE).then((c) => c.put(req, copy));
-        }
-        return resp;
-      });
-    })
-  );
+  event.respondWith((async () => {
+    // try cache first
+    const cached = await caches.match(req);
+    if (cached) return cached;
+
+    // then network
+    try {
+      const res = await fetch(req);
+      // Only cache successful, basic (same-origin) GET responses
+      if (res && res.status === 200 && res.type === 'basic') {
+        const cache = await caches.open(CACHE_NAME);
+        // Avoid cloning/caching opaque or streaming bodies incorrectly
+        cache.put(req, res.clone());
+      }
+      return res;
+    } catch (err) {
+      // Optional: offline fallback for root
+      if (req.mode === 'navigate') {
+        const offline = await caches.match('/index.html');
+        if (offline) return offline;
+      }
+      throw err;
+    }
+  })());
 });
