@@ -1,12 +1,33 @@
 /* =========================
-   Inventory — single-file SPA
+   Inventory — single-file SPA (with PWA + EmailJS hooks)
    ========================= */
 
-/* ---------- Hoisted helpers (parseYMD etc.) ---------- */
+/* ---------- Hoisted helpers (fixes parseYMD crash) ---------- */
 function USD(x){ return `$${Number(x || 0).toFixed(2)}`; }
 function parseYMD(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; }
 function getISOWeek(d){ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); }
 window.USD=USD; window.parseYMD=parseYMD; window.getISOWeek=getISOWeek;
+
+/* ---------- EmailJS config (EDIT HERE) ----------
+  1) Create a free account at https://www.emailjs.com
+  2) Create a service + template, copy their IDs + your Public Key
+  3) Paste them below OR set them in Settings → “Email Delivery (EmailJS)”
+*/
+const EMAILJS = _loadEmailJSCfg();
+function _loadEmailJSCfg(){
+  const ls = (()=>{ try{ return JSON.parse(localStorage.getItem('emailjsCfg')||'{}'); }catch{ return {}; }})();
+  return {
+    PUBLIC_KEY : ls.PUBLIC_KEY  || 'WT0GOYrL9HnDKvLUf',     // ← replace if you want
+    SERVICE_ID : ls.SERVICE_ID  || 'service_z9tkmvr',       // ← replace if you want
+    TEMPLATE_ID: ls.TEMPLATE_ID || 'template_q5q471f'       // ← replace if you want
+  };
+}
+function _saveEmailJSCfg(obj){
+  try{ localStorage.setItem('emailjsCfg', JSON.stringify(obj)); }catch{}
+  EMAILJS.PUBLIC_KEY  = obj.PUBLIC_KEY;
+  EMAILJS.SERVICE_ID  = obj.SERVICE_ID;
+  EMAILJS.TEMPLATE_ID = obj.TEMPLATE_ID;
+}
 
 /* =========================
    Part A — Core bootstrap
@@ -41,6 +62,43 @@ const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch
 function load(k, f){ return _lsGet(k, f); }
 function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 function setSession(s){ session = s; save('session', s); }
+
+// --- Hover preview singleton (prevents table clipping) -----------------------
+let _hoverImgEl = null;
+function ensureHoverPreviewEl(){
+  if (_hoverImgEl) return _hoverImgEl;
+  _hoverImgEl = document.createElement('img');
+  _hoverImgEl.id = 'hover-preview';
+  document.body.appendChild(_hoverImgEl);
+  return _hoverImgEl;
+}
+function enhanceHoverPreviews(){
+  const imgs = $$('.inv-preview, .prod-thumb, .thumb');
+  const hp = ensureHoverPreviewEl();
+  const hide = ()=>{ hp.style.transform='translate(-9999px,-9999px) scale(.98)'; hp.style.opacity='0'; };
+  const place = (e, src)=>{
+    if (!src) return hide();
+    hp.src = src;
+    const gap = 12;
+    const maxW = Math.min(260, Math.round(window.innerWidth * .4));
+    hp.style.width = maxW+'px';
+    let x = e.clientX + gap, y = e.clientY - maxW/2;
+    if (x + maxW + 12 > window.innerWidth) x = e.clientX - maxW - gap;
+    if (y < 12) y = 12;
+    if (y + maxW + 12 > window.innerHeight) y = window.innerHeight - maxW - 12;
+    hp.style.left = x+'px'; hp.style.top = y+'px';
+    hp.style.transform = 'translate(0,0) scale(1)';
+    hp.style.opacity = '1';
+  };
+  imgs.forEach(el=>{
+    const src = el.getAttribute('data-src') || el.getAttribute('src') || '';
+    el.addEventListener('mouseenter', (e)=>{ if (document.body.classList.contains('hover-suppressed')) return; place(e, src); });
+    el.addEventListener('mousemove', (e)=>{ if (document.body.classList.contains('hover-suppressed')) return; place(e, src); });
+    el.addEventListener('mouseleave', hide);
+  });
+  // Hide on scroll/resize
+  ['scroll','resize'].forEach(evt=> window.addEventListener(evt, hide, {passive:true}));
+}
 
 // --- Rescue screen -----------------------------------------------------------
 function showRescue(err){
@@ -157,27 +215,32 @@ const DEMO_ADMIN_PASS  = 'admin123';
   save('_seeded_v3', true);
 })();
 
-// --- Router ------------------------------------------------------------------
+// --- Router + idle logout ----------------------------------------------------
 function go(route){ currentRoute = route; save('_route', route); renderApp(); }
 
-/* ---------- Idle auto-logout (10 min) ---------- */
-const IDLE_LIMIT = 10 * 60 * 1000;
-let _lastActivity = Date.now();
-function _bumpActivity(){ _lastActivity = Date.now(); }
-['click','mousemove','keydown','touchstart','wheel'].forEach(evt => window.addEventListener(evt, _bumpActivity, { passive:true }));
-document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) _bumpActivity(); });
-setInterval(async ()=>{
+let idleTimer = null; const IDLE_LIMIT = 10*60*1000; // 10 minutes
+let lastActivity = Date.now();
+function resetIdleTimer(){
   if (!session) return;
-  if (Date.now() - _lastActivity >= IDLE_LIMIT) {
-    try { await auth.signOut(); } catch {}
-    session = null; save('session', null);
-    notify('Signed out due to inactivity','warn');
-    try { renderLogin(); } catch (e) { console.error(e); }
-  }
-}, 15000);
-function resetIdleTimer(){ _bumpActivity(); }
+  lastActivity = Date.now();
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(forceIdleLogout, IDLE_LIMIT + 2000);
+  _lsSet('_lastActivity', lastActivity);
+}
+async function forceIdleLogout(){
+  try{ await auth.signOut(); } catch {}
+  notify('Signed out due to inactivity','warn');
+}
+setInterval(()=>{
+  if (!session) return;
+  const last = _lsGet('_lastActivity', lastActivity);
+  if (Date.now() - last > IDLE_LIMIT) forceIdleLogout();
+}, 30000);
 
-/* ---------- Auth state ---------- */
+['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
+
+// --- Auth state --------------------------------------------------------------
+// Local auto-login: keep local users signed-in on refresh
 const ALLOW_LOCAL_AUTOLOGIN = true;
 
 auth.onAuthStateChanged(async (user) => {
@@ -189,17 +252,19 @@ async function ensureSessionAndRender(user) {
   try {
     applyTheme();
 
+    // allow local session if enabled
     const stored = load('session', null);
     if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
       session = stored;
       resetIdleTimer();
-      currentRoute = 'home'; save('_route','home');
+      currentRoute = 'home'; save('_route','home'); // force Home after sign-in
       renderApp();
       return;
     }
 
     if (!user) {
       session = null; save('session', null);
+      if (idleTimer) clearTimeout(idleTimer);
       renderLogin();
       return;
     }
@@ -219,9 +284,6 @@ async function ensureSessionAndRender(user) {
     session = { ...prof, authMode: 'firebase' };
     save('session', session);
 
-    // 👉 Always land on Home after login
-    currentRoute = 'home'; save('_route','home');
-
     try {
       if (cloud?.isOn?.()) {
         try{ await firebase.database().goOnline(); }catch{}
@@ -231,6 +293,7 @@ async function ensureSessionAndRender(user) {
     } catch {}
 
     resetIdleTimer();
+    currentRoute = 'home'; save('_route','home');  // always land on Home after login
     renderApp();
 
   } catch (outer) {
@@ -244,21 +307,17 @@ async function ensureSessionAndRender(user) {
    Part B — Login & Shell
    ========================= */
 
-// Local Auth helpers
+// ---------- Local Auth helpers ----------
 function localLogin(email, pass){
   const users = load('users', []);
   const e = (email||'').toLowerCase();
-  if (e === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
+  if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
     let u = users.find(x => (x.email||'').toLowerCase() === e);
     if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
-    session = { ...u, authMode: 'local' }; save('session', session);
-    currentRoute = 'home'; save('_route','home');
-    notify('Signed in (Local mode)'); resetIdleTimer(); renderApp(); return true;
+    session = { ...u, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); return true;
   }
   const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
-  if (u2) { session = { ...u2, authMode: 'local' }; save('session', session);
-    currentRoute = 'home'; save('_route','home');
-    notify('Signed in (Local mode)'); resetIdleTimer(); renderApp(); return true; }
+  if (u2) { session = { ...u2, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); return true; }
   return false;
 }
 
@@ -274,8 +333,7 @@ function localSignup({name,email,pass}){
   const u = { name: name || e.split('@')[0], username: e.split('@')[0], email: e, role, password: pass, img:'', contact:'' };
   users.push(u); save('users', users);
   session = { ...u, authMode: 'local' }; save('session', session);
-  currentRoute = 'home'; save('_route','home');
-  notify('Account created (Local mode)'); resetIdleTimer(); renderApp(); return true;
+  notify('Account created (Local mode)'); renderApp(); return true;
 }
 
 function localResetPassword(email){
@@ -288,7 +346,7 @@ function localResetPassword(email){
   return { ok:true, temp };
 }
 
-// Sidebar + Topbar
+// ---------- Sidebar + Topbar ----------
 function renderSidebar(active='home'){
   const links = [
     { route:'home',      icon:'ri-home-5-line',              label:'Home' },
@@ -301,11 +359,11 @@ function renderSidebar(active='home'){
   ];
   const pages = [
     { route:'about',   icon:'ri-information-line',        label:'About' },
-    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
-    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
     { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
     { route:'license', icon:'ri-copyright-line',          label:'License' },
-    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' }
+    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
+    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
+    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
   ];
   return `
     <aside class="sidebar" id="sidebar">
@@ -347,8 +405,6 @@ function renderSidebar(active='home'){
   `;
 }
 
-let _deferredInstallPrompt = null;
-
 function renderTopbar(){
   const socialsCompact = `
     <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
@@ -356,6 +412,8 @@ function renderTopbar(){
       <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
       <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
     </div>`;
+  // PWA install button placeholder (shown only when available)
+  const installBtn = `<button class="btn secondary" id="btnInstallPWA" style="display:none"><i class="ri-download-2-line"></i> Install</button>`;
   return `
     <div class="topbar">
       <div class="left">
@@ -363,8 +421,8 @@ function renderTopbar(){
         <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
       </div>
       <div class="right">
+        ${installBtn}
         ${socialsCompact}
-        <button class="btn secondary" id="btnInstall" style="display:none"><i class="ri-download-2-line"></i> Install</button>
         <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
         <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
       </div>
@@ -418,7 +476,7 @@ function hookSidebarInteractions(){
       if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
       results.innerHTML = out.map(r => `
         <div class="result" data-route="${r.route}" data-id="${r.id||''}">
-          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
+          <strong>${r.label}</strong> <span class="muted">— ${r.section||''}</span>
         </div>`).join('');
       results.classList.add('active');
 
@@ -442,8 +500,8 @@ function hookSidebarInteractions(){
   });
 }
 
-function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('has-sidebar'); }
-function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('has-sidebar'); }
+function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('hover-suppressed'); }
+function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('hover-suppressed'); }
 
 /* =========================
    Part B.5 — App renderer
@@ -459,12 +517,12 @@ function safeView(route) {
     case 'cogs':       return viewCOGS();
     case 'tasks':      return viewTasks();
     case 'settings':   return viewSettings();
+    case 'about':
     case 'policy':
     case 'license':
     case 'setup':
     case 'contact':
-    case 'guide':
-    case 'about':      return viewPage(route);
+    case 'guide':      return viewPage(route);
     default:           return viewHome();
   }
 }
@@ -473,21 +531,6 @@ function wireRoute(route) {
   // Topbar actions
   document.getElementById('btnLogout')?.addEventListener('click', doLogout);
   document.getElementById('btnHome')?.addEventListener('click', () => go('home'));
-
-  // PWA install
-  const installBtn = $('#btnInstall');
-  const refreshInstallBtn = ()=> { if (installBtn) installBtn.style.display = _deferredInstallPrompt ? 'inline-flex' : 'none'; };
-  refreshInstallBtn();
-  installBtn?.addEventListener('click', async ()=>{
-    if (!_deferredInstallPrompt) return;
-    _deferredInstallPrompt.prompt();
-    try {
-      const { outcome } = await _deferredInstallPrompt.userChoice;
-      if (outcome === 'accepted') notify('App installed','ok');
-    } catch {}
-    _deferredInstallPrompt = null;
-    refreshInstallBtn();
-  });
 
   // Sidebar open/close
   document.getElementById('burger')?.addEventListener('click', openSidebar);
@@ -509,17 +552,36 @@ function wireRoute(route) {
   hookSidebarInteractions();
   ensureGlobalModals();
   enableMobileImagePreview();
+  enhanceHoverPreviews();
+  wirePWAInstallButton(); // show install button if ready
 
   // Route-specific wiring
   switch ((route || 'home')) {
-    case 'home':      wireHome(); break;
-    case 'dashboard': wireDashboard(); wirePosts(); break;
-    case 'inventory': wireInventory(); break;
-    case 'products':  wireProducts(); break;
-    case 'cogs':      wireCOGS(); break;
-    case 'tasks':     wireTasks(); break;
-    case 'settings':  wireSettings(); break;
-    case 'contact':   wireContact(); break;
+    case 'home':
+      wireHome();
+      break;
+    case 'dashboard':
+      wireDashboard();
+      wirePosts();
+      break;
+    case 'inventory':
+      wireInventory();
+      break;
+    case 'products':
+      wireProducts();
+      break;
+    case 'cogs':
+      wireCOGS();
+      break;
+    case 'tasks':
+      wireTasks();
+      break;
+    case 'settings':
+      wireSettings();
+      break;
+    case 'contact':
+      wireContact();
+      break;
   }
 }
 
@@ -613,9 +675,10 @@ function renderLogin() {
     </div>
   `;
 
-  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('has-modal'); };
-  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('has-modal'); };
+  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('hover-suppressed'); };
+  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('hover-suppressed'); };
 
+  // ---------- Sign in ----------
   const doSignIn = async () => {
     const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
     const pass  = document.getElementById('li-pass')?.value || '';
@@ -623,7 +686,7 @@ function renderLogin() {
 
     if (!email || !pass) { notify('Enter email & password','warn'); return; }
 
-    // Local demo admin
+    // Local demo admin (render immediately)
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
       let users = load('users', []);
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
@@ -633,7 +696,6 @@ function renderLogin() {
       }
       session = { ...prof, authMode: 'local' };
       save('session', session);
-      currentRoute = 'home'; save('_route','home');
       notify('Welcome, Admin (local mode)');
       try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
       return;
@@ -644,17 +706,15 @@ function renderLogin() {
       btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
 
       const cred = await auth.signInWithEmailAndPassword(email, pass);
-      if (cred?.user) {
-        currentRoute = 'home'; save('_route','home');
-        notify('Welcome!');
-      }
+      console.log('[auth] signIn OK:', cred.user?.uid);
+      notify('Welcome!');
 
       setTimeout(() => {
         const rendered = !!document.querySelector('.app');
         if (!rendered) {
           try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); notify('Render failed','danger'); }
         }
-      }, 700);
+      }, 600);
 
       btn.disabled = false; btn.innerHTML = keep;
     } catch (e) {
@@ -668,9 +728,11 @@ function renderLogin() {
         'auth/network-request-failed': 'Network error. Check your connection.'
       };
       notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
+      console.error('[auth] signIn error:', e?.code, e?.message);
     }
   };
 
+  // ---------- Sign up ----------
   const doSignup = async () => {
     const name  = ($('#su-name')?.value || '').trim();
     const email = ($('#su-email')?.value || '').trim().toLowerCase();
@@ -683,16 +745,16 @@ function renderLogin() {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
       await auth.createUserWithEmailAndPassword(email, pass);
       try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
-      currentRoute = 'home'; save('_route','home');
       notify('Account created — you are signed in');
       closeAuthModal();
     } catch (e) {
-      // Local fallback
+      console.warn('[auth] Firebase signup failed; creating local account', e?.code, e?.message);
       localSignup({name,email,pass});
       closeAuthModal();
     }
   };
 
+  // ---------- Reset password ----------
   const doReset = async () => {
     const email = ($('#fp-email')?.value || '').trim().toLowerCase();
     if (!email) return notify('Enter your email','warn');
@@ -702,12 +764,14 @@ function renderLogin() {
       notify('Reset email sent — check your inbox','ok');
       closeAuthModal();
     } catch (e) {
+      console.warn('[auth] Firebase reset failed; doing local reset', e?.code, e?.message);
       const r = localResetPassword(email);
       if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
       else { notify('Reset failed: '+ (r.msg || e?.message || 'Unknown'), 'danger'); }
     }
   };
 
+  // ---------- Bindings ----------
   const emailEl  = document.getElementById('li-email');
   const passEl   = document.getElementById('li-pass');
   const btnLogin = document.getElementById('btnLogin');
@@ -736,6 +800,7 @@ function renderLogin() {
 async function doLogout(){
   try { cloud?.disable?.(); } catch {}
   try { await auth.signOut(); } catch {}
+  if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
   session = null; save('session', null);
   currentRoute = 'home'; save('_route','home');
   notify('Signed out');
@@ -744,10 +809,10 @@ async function doLogout(){
 
 /* ===================== Part C.1 — Home (Hot music videos) ===================== */
 
-// ===== Music library -> weekly rotating set of 10 (with blacklist auto-skip) =====
+// ===== Music library -> weekly rotating set of 10 =====
 (function(){
-  // Full library of music videos (safe-to-embed YouTube IDs). Add more freely.
-  window.HOT_MUSIC_LIBRARY = [
+  // Full library of music video IDs (safe to embed)
+  if (!window.HOT_MUSIC_LIBRARY) window.HOT_MUSIC_LIBRARY = [
     { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
     { title:'DEAF KEV – Invincible (NCS Release)', id:'J2X5mJ3HDYE' },
     { title:'Ikson – Anywhere (NCM)', id:'OZLUa8JUR18' },
@@ -758,14 +823,9 @@ async function doLogout(){
     { title:'Itro & Tobu – Cloud 9 (NCS)', id:'VtKbiyyVZks' },
     { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
     { title:'Tobu – Candyland (NCS)', id:'IIrCDAV3EgI' },
-    { title:'Tobu – Hope (NCS)', id:'EP625xQIGzs' },
-    { title:'Different Heaven – Nekozilla (NCS)', id:'6FNHe3kf8_s' },
-    { title:'Electro-Light – Symbolism (NCS)', id:'__CRWE-L45k' },
-    { title:'Disfigure – Blank (NCS)', id:'p7ZsBPK656s' },
-    { title:'Alan Walker – Fade (NCS)', id:'bM7SZ5SBzyY' }
   ];
 
-  // Build weekly set of N items (deterministic by ISO week)
+  // Build a weekly set of N items from the library (rotates deterministically by ISO week)
   if (!window.buildWeeklyMusicSet) window.buildWeeklyMusicSet = (size = 10) => {
     const lib = window.HOT_MUSIC_LIBRARY || [];
     if (!lib.length) return [];
@@ -779,19 +839,19 @@ async function doLogout(){
   // Expose this week’s 10
   window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
 
-  // Stable weekly index (changes weekly, deterministic)
+  // Stable weekly index in this set
   if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
     const weekOfYear = getISOWeek(new Date());
     const n = Math.max(1, (window.HOT_MUSIC_VIDEOS||[]).length);
     return weekOfYear % n;
   };
 
-  // Blacklist helpers (skip broken / non-embeddable videos automatically)
+  // === YouTube blacklist helpers (skip broken / non-embeddable) ===============
   function _ytBlacklistLoad(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
   function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
-  window.ytBlacklistAdd   = (id)=>{ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
-  window.ytIsBlacklisted  = (id)=> !!_ytBlacklistLoad()[id];
-  window.ytBlacklistClear = ()=> _ytBlacklistSave({});
+  window.ytBlacklistAdd = (id)=>{ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
+  window.ytIsBlacklisted= (id)=>{ const m=_ytBlacklistLoad(); return !!m[id]; };
+  window.ytBlacklistClear=()=> _ytBlacklistSave({});
 })();
 
 function viewHome(){
@@ -800,7 +860,7 @@ function viewHome(){
     <div class="card">
       <div class="card-body">
         <h3 style="margin-top:0">Welcome 👋</h3>
-        <p style="color:var(--muted)">Pick a section or watch this week’s hot music video. Tap Shuffle to change.</p>
+        <p class="muted">Pick a section or watch this week’s hot music video. Tap Shuffle to change.</p>
 
         <div class="grid cols-4 auto" style="margin-bottom:12px">
           <div class="card tile" data-go="inventory"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-archive-2-line"></i><div>Inventory</div></div></div>
@@ -823,7 +883,7 @@ function viewHome(){
               <div id="musicVideoWrap" data-vid-index="${weeklyIdx}">
                 <div id="ytPlayerHost" style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px;overflow:hidden"></div>
                 <div style="margin-top:8px;font-weight:700" id="mvTitle"></div>
-                <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
+                <div class="muted" style="font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
               </div>
             </div>
           </div>
@@ -841,6 +901,7 @@ function wireHome(){
   const hostId = 'ytPlayerHost';
   if (!wrap || !title || !openYT) return;
 
+  // Load the YouTube Iframe API once
   function loadYT(){
     return new Promise((resolve)=>{
       if (window.YT && YT.Player) return resolve();
@@ -851,6 +912,7 @@ function wireHome(){
     });
   }
 
+  // Pick next non-blacklisted candidate; if all bad, clear blacklist.
   function nextValidIndex(start){
     const list = window.HOT_MUSIC_VIDEOS || [];
     if (!list.length) return 0;
@@ -878,27 +940,19 @@ function wireHome(){
     const options = {
       host: 'https://www.youtube-nocookie.com',
       videoId: id,
-      playerVars: { rel:0, modestbranding:1, playsinline:1, origin: location.origin },
+      playerVars: { rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
       events: {
-        onError: ()=>{
-          try { ytBlacklistAdd(id); } catch {}
-          notify('Video not available. Skipping…','warn');
-          setVideoByIndex(i + 1);
-        }
+        onError: ()=>{ try { ytBlacklistAdd(id); } catch {} notify('Video not available. Skipping…','warn'); setVideoByIndex(i + 1); }
       }
     };
 
-    if (!player){
-      player = new YT.Player(hostId, options);
-    } else {
-      player.loadVideoById(id);
-    }
+    if (!player){ player = new YT.Player(hostId, options); }
+    else { player.loadVideoById(id); }
   }
 
   loadYT().then(()=>{
     const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
     setVideoByIndex(startIdx);
-
     btn?.addEventListener('click', ()=>{
       const list = window.HOT_MUSIC_VIDEOS || [];
       if (!list.length) return;
@@ -908,9 +962,7 @@ function wireHome(){
       setVideoByIndex(next);
       notify('Shuffled music video','ok');
     });
-  }).catch(()=>{
-    notify('YouTube player couldn’t load','warn');
-  });
+  }).catch(()=> notify('YouTube player couldn’t load','warn'));
 }
 
 /* ===================== Part C.2 — Search ===================== */
@@ -923,15 +975,15 @@ function viewSearch(){
     <div class="card"><div class="card-body">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <h3 style="margin:0">Search</h3>
-        <div style="color:var(--muted)">Query: <strong>${q || '(empty)'}</strong></div>
+        <div class="muted">Query: <strong>${q || '(empty)'}</strong></div>
       </div>
       ${out.length ? `<div class="grid">
         ${out.map(r=>`
           <div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
-            <div><div style="font-weight:700">${r.label}</div><div style="color:var(--muted);font-size:12px">${r.section||''}</div></div>
+            <div><div style="font-weight:700">${r.label}</div><div class="muted" style="font-size:12px">${r.section||''}</div></div>
             <button class="btn" data-go="${r.route}" data-id="${r.id||''}">Open</button>
           </div></div>`).join('')}
-      </div>` : `<p style="color:var(--muted)">No results.</p>`}
+      </div>` : `<p class="muted">No results.</p>`}
     </div></div>`;
 }
 
@@ -973,17 +1025,17 @@ function viewDashboard(){
     </div>
 
     <div class="grid cols-4 auto" style="margin-top:12px">
-      <div class="card" style="border-left:4px solid var(--warn)"><div class="card-body"><strong>Low stock</strong><div style="color:var(--muted)">${lowCt}</div></div></div>
-      <div class="card" style="border-left:4px solid var(--danger)"><div class="card-body"><strong>Critical</strong><div style="color:var(--muted)">${critCt}</div></div></div>
+      <div class="card" style="border-left:4px solid var(--warn)"><div class="card-body"><strong>Low stock</strong><div class="muted">${lowCt}</div></div></div>
+      <div class="card" style="border-left:4px solid var(--danger)"><div class="card-body"><strong>Critical</strong><div class="muted">${critCt}</div></div></div>
 
       <div class="card"><div class="card-body">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <strong>Sales (Month-to-Date)</strong>
           <button class="btn ghost" data-go="cogs"><i class="ri-line-chart-line"></i> Details</button>
         </div>
-        <div style="margin-top:6px"><span style="color:var(--muted)">This month:</span> <strong>${USD(totalThisMonth)}</strong></div>
-        <div><span style="color:var(--muted)">Prev month:</span> ${USD(totalPrevMonth)} <span style="color:${trendColor(mom)}">${fmtPct(mom)} MoM</span></div>
-        <div><span style="color:var(--muted)">Same month last year:</span> ${USD(totalLY)} <span style="color:${trendColor(yoy)}">${fmtPct(yoy)} YoY</span></div>
+        <div style="margin-top:6px"><span class="muted">This month:</span> <strong>${USD(totalThisMonth)}</strong></div>
+        <div><span class="muted">Prev month:</span> ${USD(totalPrevMonth)} <span style="color:${trendColor(mom)}">${fmtPct(mom)} MoM</span></div>
+        <div><span class="muted">Same month last year:</span> ${USD(totalLY)} <span style="color:${trendColor(yoy)}">${fmtPct(yoy)} YoY</span></div>
       </div></div>
     </div>
 
@@ -998,7 +1050,7 @@ function viewDashboard(){
             <div class="card" id="${p.id}">
               <div class="card-body">
                 <div style="display:flex;justify-content:space-between;align-items:center">
-                  <div><strong>${p.title}</strong><div style="color:var(--muted);font-size:12px">${new Date(p.createdAt).toLocaleString()}</div></div>
+                  <div><strong>${p.title}</strong><div class="muted" style="font-size:12px">${new Date(p.createdAt).toLocaleString()}</div></div>
                   <div>
                     ${canEdit()?`<button class="btn ghost" data-edit="${p.id}"><i class="ri-edit-line"></i></button>`:''}
                     ${canDelete()?`<button class="btn danger" data-del="${p.id}"><i class="ri-delete-bin-6-line"></i></button>`:''}
@@ -1042,6 +1094,7 @@ function wirePosts(){
 
 /* ===================== Part D — Inventory / Products / COGS / Tasks ===================== */
 
+// CSV export
 function downloadCSV(filename, rows, headers) {
   try {
     const csvRows = [];
@@ -1065,6 +1118,7 @@ function downloadCSV(filename, rows, headers) {
   } catch (e) { notify('Export failed', 'danger'); }
 }
 
+// Generic image upload helper (file -> dataURL -> set into text input)
 function attachImageUpload(fileInputSel, textInputSel){
   const f = $(fileInputSel), t = $(textInputSel); if (!f || !t) return;
   f.onchange = ()=>{
@@ -1075,7 +1129,7 @@ function attachImageUpload(fileInputSel, textInputSel){
   };
 }
 
-/* Inventory */
+// Inventory
 function viewInventory(){
   const items = load('inventory', []);
   return `
@@ -1127,7 +1181,7 @@ function wireInventory(){
 
   $('#addInv')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-inv');
+    openModal('m-inv'); document.body.classList.add('hover-suppressed');
     $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value=''; $('#inv-type').value='Other';
     $('#inv-price').value='0'; $('#inv-stock').value='0'; $('#inv-threshold').value='0'; $('#inv-img').value='';
     attachImageUpload('#inv-imgfile', '#inv-img');
@@ -1164,7 +1218,7 @@ function wireInventory(){
       if (!canEdit()) return notify('No permission','warn');
       const id = btn.getAttribute('data-edit');
       const it = get(id); if (!it) return;
-      openModal('m-inv');
+      openModal('m-inv'); document.body.classList.add('hover-suppressed');
       $('#inv-id').value=id; $('#inv-name').value=it.name; $('#inv-code').value=it.code; $('#inv-type').value=it.type || 'Other';
       $('#inv-price').value=it.price; $('#inv-stock').value=it.stock; $('#inv-threshold').value=it.threshold; $('#inv-img').value=it.img || '';
       attachImageUpload('#inv-imgfile', '#inv-img');
@@ -1190,7 +1244,7 @@ function wireInventory(){
   });
 }
 
-/* Products */
+// Products
 function viewProducts(){
   const items = load('products', []);
   return `
@@ -1234,7 +1288,7 @@ function wireProducts(){
 
   $('#addProd')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-prod');
+    openModal('m-prod'); document.body.classList.add('hover-suppressed');
     $('#prod-id').value=''; $('#prod-name').value=''; $('#prod-barcode').value=''; $('#prod-price').value='0';
     $('#prod-type').value=''; $('#prod-ingredients').value=''; $('#prod-instructions').value=''; $('#prod-img').value='';
     attachImageUpload('#prod-imgfile', '#prod-img');
@@ -1262,6 +1316,7 @@ function wireProducts(){
     closeModal('m-prod'); notify('Saved'); renderApp();
   });
 
+  // Product card + row actions
   sec.addEventListener('click', (e)=>{
     const prodCard = e.target.closest('.prod-thumb');
     if (prodCard){
@@ -1275,7 +1330,7 @@ function wireProducts(){
       $('#pc-type').textContent = it.type || '';
       $('#pc-ingredients').textContent = it.ingredients || '';
       $('#pc-instructions').textContent = it.instructions || '';
-      openModal('m-card');
+      openModal('m-card'); document.body.classList.add('hover-suppressed');
       return;
     }
 
@@ -1286,7 +1341,7 @@ function wireProducts(){
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const it = items.find(x=>x.id===id); if (!it) return;
-      openModal('m-prod');
+      openModal('m-prod'); document.body.classList.add('hover-suppressed');
       $('#prod-id').value=id; $('#prod-name').value=it.name; $('#prod-barcode').value=it.barcode||'';
       $('#prod-price').value=it.price; $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||'';
       $('#prod-instructions').value=it.instructions||''; $('#prod-img').value=it.img||'';
@@ -1298,7 +1353,7 @@ function wireProducts(){
   });
 }
 
-/* COGS */
+// COGS
 function viewCOGS(){
   const rows = load('cogs', []);
   const totals = rows.reduce((a,r)=>({grossIncome:a.grossIncome+(+r.grossIncome||0),produceCost:a.produceCost+(+r.produceCost||0),itemCost:a.itemCost+(+r.itemCost||0),freight:a.freight+(+r.freight||0),delivery:a.delivery+(+r.delivery||0),other:a.other+(+r.other||0)}),{grossIncome:0,produceCost:0,itemCost:0,freight:0,delivery:0,other:0});
@@ -1349,7 +1404,7 @@ function wireCOGS(){
 
   $('#addCOGS')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-cogs');
+    openModal('m-cogs'); document.body.classList.add('hover-suppressed');
     $('#cogs-id').value=''; $('#cogs-date').value=new Date().toISOString().slice(0,10);
     $('#cogs-grossIncome').value='0'; $('#cogs-produceCost').value='0'; $('#cogs-itemCost').value='0';
     $('#cogs-freight').value='0'; $('#cogs-delivery').value='0'; $('#cogs-other').value='0';
@@ -1375,7 +1430,7 @@ function wireCOGS(){
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const r = load('cogs', []).find(x=>x.id===id); if (!r) return;
-      openModal('m-cogs');
+      openModal('m-cogs'); document.body.classList.add('hover-suppressed');
       $('#cogs-id').value=id; $('#cogs-date').value=r.date; $('#cogs-grossIncome').value=r.grossIncome;
       $('#cogs-produceCost').value=r.produceCost; $('#cogs-itemCost').value=r.itemCost; $('#cogs-freight').value=r.freight;
       $('#cogs-delivery').value=r.delivery; $('#cogs-other').value=r.other;
@@ -1386,7 +1441,7 @@ function wireCOGS(){
   });
 }
 
-/* Tasks */
+// Tasks (DnD + mobile tap-to-move)
 function viewTasks(){
   const items = load('tasks', []);
   const lane = (key, label, color)=>`
@@ -1422,7 +1477,8 @@ function wireTasks(){
 
   $('#addTask')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-task'); $('#task-id').value=''; $('#task-title').value=''; $('#task-status').value='todo';
+    openModal('m-task'); document.body.classList.add('hover-suppressed');
+    $('#task-id').value=''; $('#task-title').value=''; $('#task-status').value='todo';
   });
 
   $('#save-task')?.addEventListener('click', ()=>{
@@ -1437,6 +1493,7 @@ function wireTasks(){
     save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
   });
 
+  // row actions
   root.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
@@ -1444,7 +1501,8 @@ function wireTasks(){
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const t = items.find(x=>x.id===id); if (!t) return;
-      openModal('m-task'); $('#task-id').value=t.id; $('#task-title').value=t.title; $('#task-status').value=t.status;
+      openModal('m-task'); document.body.classList.add('hover-suppressed');
+      $('#task-id').value=t.id; $('#task-title').value=t.title; $('#task-status').value=t.status;
     } else {
       if (!canDelete()) return notify('No permission','warn');
       save('tasks', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
@@ -1453,6 +1511,7 @@ function wireTasks(){
 
   setupDnD();
 
+  // Mobile/touch fallback: tap a card cycles lane
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   if (isTouch) {
     $$('.task-card').forEach(card=>{
@@ -1489,10 +1548,10 @@ function setupDnD(){
   });
 }
 
-/* ===================== Part E — Settings / Contact / Static Pages / Modals ===================== */
+/* ===================== Part E — Settings / Contact / Modals ===================== */
 
-function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); document.body.classList.add('has-modal'); }
-function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); setTimeout(()=>{ const anyOpen = !!document.querySelector('.modal.active'); if (!anyOpen) document.body.classList.remove('has-modal'); }, 0); }
+function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); document.body.classList.add('hover-suppressed'); }
+function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); document.body.classList.remove('hover-suppressed'); }
 
 function enableMobileImagePreview(){
   const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
@@ -1505,76 +1564,146 @@ function enableMobileImagePreview(){
   });
 }
 
-// Static pages content (embedded)
+// Static pages + Contact
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
-  about: `<h3>About Inventory</h3>
-    <p>Inventory is a lightweight, offline-friendly app designed to help <strong>small to medium businesses</strong> track stock, products, costs, and tasks in one place.</p>
-    <ul>
-      <li><strong>Fast & simple:</strong> Single-page app with instant navigation and no page reloads.</li>
-      <li><strong>Visual inventory:</strong> Add images to items and products, with quick hover previews.</li>
-      <li><strong>COGS tracking:</strong> Log daily costs and revenue, see monthly trends at a glance.</li>
-      <li><strong>Tasks board:</strong> Drag & drop lanes for to-do, in-progress, and done.</li>
-      <li><strong>Search everything:</strong> One search box surfaces items, products, users, and pages.</li>
-      <li><strong>Cloud optional:</strong> Use it offline with local storage, or switch on Firebase sync to share data across devices.</li>
-      <li><strong>PWA:</strong> Install to your device and use like a native app.</li>
-    </ul>
-    <p>Whether you’re a food stall, a small restaurant, a parts shop, or a growing team, this app keeps your day-to-day organized: add items quickly, adjust stock in one click, export CSVs, and keep your team aligned.</p>
-  `,
-  setup: `<h3>Setup Guide</h3>
-    <div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden">
-      <iframe src="setup-guide.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe>
+  about: `
+    <div class="prose">
+      <div class="paper">
+        <h2>About Inventory</h2>
+        <p>Inventory is a fast, friendly, privacy-respecting app for everyday stock management. It’s perfect for small and medium businesses — cafés, food trucks, retail counters, studios — and runs beautifully on desktop and mobile.</p>
+        <ul>
+          <li>Track inventory, products, and costs of goods in one place.</li>
+          <li>Add photos, export CSVs, and drag tasks across simple lanes.</li>
+          <li>Cloud sync (optional) via your own Firebase account.</li>
+          <li>Works offline; install it like an app (PWA) and keep going.</li>
+        </ul>
+        <p class="muted">Built as a single-file SPA for easy hosting — drop it on any static server.</p>
+      </div>
     </div>`,
-  guide:  `<h3>User Guide</h3>
-    <div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden">
-      <iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe>
+
+  policy: `
+    <div class="prose">
+      <div class="paper">
+        <h2>Policy</h2>
+        <p>We store your data locally in your browser. Enabling Cloud Sync stores an encrypted copy in your Firebase Realtime Database under your account. You control it, you can wipe it any time.</p>
+      </div>
     </div>`,
-  policy: `<h3>Policy</h3>
-    <div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden">
-      <iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe>
+
+  license: `
+    <div class="prose">
+      <div class="paper">
+        <h2>License</h2>
+        <p>Open-source friendly license. Use, modify, and deploy for personal or commercial use. Attribution appreciated.</p>
+      </div>
     </div>`,
-  license:`<h3>License</h3>
-    <div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden">
-      <iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none"></iframe>
+
+  setup: `
+    <div class="prose">
+      <div class="paper">
+        <h2>Setup Guide</h2>
+        <ol>
+          <li><strong>Firebase:</strong> create a project, enable Email/Password auth, copy config into <code>app.js</code>.</li>
+          <li><strong>Cloud Sync:</strong> sign in, then turn it on in Settings → Cloud Sync.</li>
+          <li><strong>PWA:</strong> keep <code>manifest.webmanifest</code> + <code>service-worker.js</code> in web root; you’ll get an “Install” button.</li>
+          <li><strong>EmailJS (optional):</strong> create Service + Template, then enter keys in Settings → Email Delivery.</li>
+        </ol>
+      </div>
     </div>`,
-  contact:`<h3>Contact</h3>
-    <p style="color:var(--muted)">Prefer email? Tap the button below—your email app will open with a pre-filled message to <strong>minmaung0307@gmail.com</strong>.</p>
-    <a class="btn" href="mailto:minmaung0307@gmail.com?subject=Inventory%20Support&body=Hi%2C%0A%0A" target="_blank" rel="noopener">
-      <i class="ri-mail-send-line"></i> Contact via Email
-    </a>`
+
+  guide: `
+    <div class="prose">
+      <div class="paper">
+        <h2>User Guide</h2>
+        <p>Use the sidebar to jump between Inventory, Products, COGS, and Tasks. Use the global search to find anything fast. Hover over thumbnails to preview images. On mobile, tap a thumbnail to open a large preview.</p>
+      </div>
+    </div>`,
+
+  contact:`<div class="prose"><div class="paper">
+    <h2>Contact</h2>
+    <p class="muted">Prefer your own email app? Use this:</p>
+    <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Inventory%20Support&body=Hi%2C%20I%20need%20help%20with..." target="_blank" rel="noopener"><i class="ri-mail-send-line"></i> Email us</a>
+    <hr style="border-color:var(--card-border);margin:14px 0" />
+    <h3>Send in-app (EmailJS)</h3>
+    <p class="muted">Configure keys in <em>Settings → Email Delivery (EmailJS)</em>. When set, you can send from here.</p>
+    <div class="grid">
+      <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
+      <input id="ct-subj"  class="input" placeholder="Subject"/>
+      <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
+      <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send via EmailJS</button></div>
+      <div id="ct-note" class="muted" style="font-size:12px"></div>
+    </div>
+  </div></div>`
 });
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
 
-/* Settings (Cloud/Theme + Users) */
+function wireContact(){
+  const btn = $('#ct-send'); if (!btn) return;
+  btn.onclick = async ()=>{
+    const fromEmail = ($('#ct-email')?.value || '').trim();
+    const subject   = ($('#ct-subj')?.value  || '').trim();
+    const message   = ($('#ct-msg')?.value   || '').trim();
+    const note      = $('#ct-note');
+
+    if (!fromEmail || !subject || !message) { notify('Fill email, subject & message','warn'); return; }
+
+    const TO = 'minmaung0307@gmail.com';
+    const hasKeys = EMAILJS.PUBLIC_KEY && EMAILJS.SERVICE_ID && EMAILJS.TEMPLATE_ID;
+
+    try{
+      if (!hasKeys || !window.emailjs || !window.emailjs.send) {
+        notify('EmailJS not configured. Use the Email button above or add keys in Settings.','warn');
+        if (note) note.textContent = 'Tip: Settings → Email Delivery.';
+        return;
+      }
+      if (!window.__emailjs_inited){ window.emailjs.init(EMAILJS.PUBLIC_KEY); window.__emailjs_inited = true; }
+      await window.emailjs.send(EMAILJS.SERVICE_ID, EMAILJS.TEMPLATE_ID, {
+        from_name: fromEmail,
+        reply_to: fromEmail,
+        subject,
+        message,
+        to_email: TO
+      });
+      notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
+      $('#ct-msg').value=''; $('#ct-subj').value='';
+    }catch(e){
+      notify('Failed to send message','danger');
+      if (note) note.textContent = e?.message || 'Unknown error';
+    }
+  };
+}
+
+// Settings (Cloud/Theme + Users + EmailJS)
 function viewSettings(){
   const users = load('users', []);
   const theme = getTheme();
   const cloudOn = cloud.isOn();
+  const ej = EMAILJS;
   return `
     <div class="grid">
       <div class="card"><div class="card-body">
         <h3 style="margin-top:0">Cloud Sync</h3>
-        <p style="color:var(--muted)">Keep your data in Firebase Realtime Database.</p>
+        <p class="muted">Keep your data in Firebase Realtime Database.</p>
         <div class="theme-inline">
-          <div><label style="font-size:12px;color:var(--muted)">Status</label>
+          <div><label style="font-size:12px" class="muted">Status</label>
             <select id="cloud-toggle" class="input"><option value="off" ${!cloudOn?'selected':''}>Off</option><option value="on" ${cloudOn?'selected':''}>On</option></select>
           </div>
-          <div><label style="font-size:12px;color:var(--muted)">Actions</label><br/>
+          <div><label style="font-size:12px" class="muted">Actions</label><br/>
             <button class="btn" id="cloud-sync-now"><i class="ri-cloud-line"></i> Sync Now</button>
           </div>
         </div>
-        <p style="color:var(--muted);font-size:12px;margin-top:8px">Note: Cloud Sync requires Firebase login.</p>
+        <p class="muted" style="font-size:12px;margin-top:8px">Cloud Sync requires Firebase sign-in.</p>
       </div></div>
 
       <div class="card"><div class="card-body">
         <h3 style="margin-top:0">Theme</h3>
         <div class="theme-inline">
-          <div><label style="font-size:12px;color:var(--muted)">Mode</label>
+          <div><label style="font-size:12px" class="muted">Mode</label>
             <select id="theme-mode" class="input">
               ${THEME_MODES.map(m=>`<option value="${m.key}" ${theme.mode===m.key?'selected':''}>${m.name}</option>`).join('')}
             </select>
           </div>
-          <div><label style="font-size:12px;color:var(--muted)">Font Size</label>
+          <div><label style="font-size:12px" class="muted">Font Size</label>
             <select id="theme-size" class="input">
               ${THEME_SIZES.map(s=>`<option value="${s.key}" ${theme.size===s.key?'selected':''}>${s.label}</option>`).join('')}
             </select>
@@ -1583,22 +1712,42 @@ function viewSettings(){
       </div></div>
 
       <div class="card"><div class="card-body">
+        <h3 style="margin-top:0">Email Delivery (EmailJS)</h3>
+        <div class="theme-inline">
+          <div>
+            <label class="muted" style="font-size:12px">Public Key</label>
+            <input id="ej-public" class="input" placeholder="e.g. 0aBc..." value="${ej.PUBLIC_KEY||''}">
+          </div>
+          <div>
+            <label class="muted" style="font-size:12px">Service ID</label>
+            <input id="ej-service" class="input" placeholder="service_xxx" value="${ej.SERVICE_ID||''}">
+          </div>
+          <div>
+            <label class="muted" style="font-size:12px">Template ID</label>
+            <input id="ej-template" class="input" placeholder="template_xxx" value="${ej.TEMPLATE_ID||''}">
+          </div>
+        </div>
+        <div style="margin-top:8px"><button class="btn" id="ej-save"><i class="ri-save-3-line"></i> Save Keys</button></div>
+        <p class="muted" style="font-size:12px;margin-top:6px">Optional. If unset, Contact uses your email app via <code>mailto:</code>.</p>
+      </div></div>
+
+      <div class="card"><div class="card-body">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <h3 style="margin:0">Users</h3>
           ${canAdd()? `<button class="btn" id="addUser"><i class="ri-add-line"></i> Add User</button>`:''}
         </div>
         <table class="table" data-section="users">
-          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Avatar</th><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
           <tbody>
             ${users.map(u=>`
               <tr id="${u.email}">
                 <td>
-                  <span class="usercell">
-                    <img class="avatar" src="${u.img || 'icons/icon-192.png'}" alt="">
-                    ${u.name}
-                  </span>
+                  <div class="thumb-wrap">
+                    ${ u.img ? `<img class="thumb" src="${u.img}" alt="">` : `<div class="thumb" style="display:grid;place-items:center">👤</div>` }
+                    <img class="thumb-large" src="${u.img||'icons/icon-512.png'}" alt="">
+                  </div>
                 </td>
-                <td>${u.email}</td><td>${u.role}</td>
+                <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
                 <td>
                   ${canEdit()? `<button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>`:''}
                   ${canDelete()? `<button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button>`:''}
@@ -1619,10 +1768,12 @@ function allowedRoleOptions(){
 }
 
 function wireSettings(){
+  // Theme instant apply
   const mode = $('#theme-mode'), size = $('#theme-size');
   const applyThemeNow = ()=>{ save('_theme2', { mode: mode.value, size: size.value }); applyTheme(); renderApp(); };
   mode?.addEventListener('change', applyThemeNow); size?.addEventListener('change', applyThemeNow);
 
+  // Cloud controls
   const toggle = $('#cloud-toggle'), syncNow = $('#cloud-sync-now');
   toggle?.addEventListener('change', async (e)=>{
     const val = e.target.value;
@@ -1636,12 +1787,24 @@ function wireSettings(){
   syncNow?.addEventListener('click', async ()=>{
     try{
       if (!auth.currentUser){ notify('Sign in with Firebase to use Cloud Sync.','warn'); return; }
-      if (!cloud.isOn()){ notify('Turn Cloud Sync ON first in Settings.','warn'); return; }
+      if (!cloud.isOn()){ notify('Turn Cloud Sync ON first.','warn'); return; }
       if (!navigator.onLine){ notify('You appear to be offline.','warn'); return; }
       await firebase.database().goOnline(); await cloud.pushAll(); notify('Synced');
     }catch(e){ notify((e && e.message) || 'Sync failed','danger'); }
   });
 
+  // EmailJS saves
+  $('#ej-save')?.addEventListener('click', ()=>{
+    const obj = {
+      PUBLIC_KEY : ($('#ej-public')?.value || '').trim(),
+      SERVICE_ID : ($('#ej-service')?.value || '').trim(),
+      TEMPLATE_ID: ($('#ej-template')?.value || '').trim()
+    };
+    _saveEmailJSCfg(obj);
+    notify('EmailJS keys saved','ok');
+  });
+
+  // Users wiring
   wireUsers();
 }
 
@@ -1650,7 +1813,7 @@ function wireUsers(){
 
   addBtn?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-user');
+    openModal('m-user'); document.body.classList.add('hover-suppressed');
     $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-img').value='';
     const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions()[0];
     attachImageUpload('#user-imgfile', '#user-img');
@@ -1682,7 +1845,8 @@ function wireUsers(){
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const u = load('users', []).find(x=>x.email===email); if (!u) return;
-      openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
+      openModal('m-user'); document.body.classList.add('hover-suppressed');
+      $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
       const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions().includes(u.role) ? u.role : 'user';
       attachImageUpload('#user-imgfile', '#user-img');
     } else {
@@ -1692,7 +1856,7 @@ function wireUsers(){
   });
 }
 
-/* ---------- Modals (global) ---------- */
+// ---------- Modals (global, always present) ----------
 function postModal(){ return `
   <div class="modal-backdrop" id="mb-post"></div>
   <div class="modal" id="m-post">
@@ -1840,11 +2004,11 @@ window.buildSearchIndex = function(){
   const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
   const pages = [
     { id:'about',   label:'About',       section:'Pages', route:'about'   },
-    { id:'setup',   label:'Setup Guide', section:'Pages', route:'setup'   },
-    { id:'guide',   label:'User Guide',  section:'Pages', route:'guide'   },
     { id:'policy',  label:'Policy',      section:'Pages', route:'policy'  },
     { id:'license', label:'License',     section:'Pages', route:'license' },
-    { id:'contact', label:'Contact',     section:'Pages', route:'contact' }
+    { id:'setup',   label:'Setup Guide', section:'Pages', route:'setup'   },
+    { id:'contact', label:'Contact',     section:'Pages', route:'contact' },
+    { id:'guide',   label:'User Guide',  section:'Pages', route:'guide'   },
   ];
   const ix=[]; posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
   inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`}));
@@ -1873,17 +2037,28 @@ window.scrollToRow = function(id){ const el=document.getElementById(id); if (el)
 window.addEventListener('online',  ()=> notify('Back online','ok'));
 window.addEventListener('offline', ()=> notify('You are offline','warn'));
 
-// PWA install UI hooks
+// PWA: capture beforeinstallprompt & show topbar button
+const _pwa = { deferredPrompt: null, canInstall: false };
 window.addEventListener('beforeinstallprompt', (e)=>{
   e.preventDefault();
-  _deferredInstallPrompt = e;
-  // Show button on next render
-  const btn = document.getElementById('btnInstall');
-  if (btn) btn.style.display = 'inline-flex';
+  _pwa.deferredPrompt = e;
+  _pwa.canInstall = true;
+  const b = document.getElementById('btnInstallPWA');
+  if (b) b.style.display = 'inline-flex';
 });
-window.addEventListener('appinstalled', ()=>{ _deferredInstallPrompt=null; notify('Installed as app','ok'); });
+function wirePWAInstallButton(){
+  const b = document.getElementById('btnInstallPWA');
+  if (!b) return;
+  b.style.display = _pwa.canInstall ? 'inline-flex' : 'none';
+  b.onclick = async ()=>{
+    if (!_pwa.deferredPrompt) return;
+    _pwa.deferredPrompt.prompt();
+    try{ await _pwa.deferredPrompt.userChoice; }catch{}
+    _pwa.deferredPrompt = null; _pwa.canInstall = false; b.style.display='none';
+  };
+}
 
-// Service Worker register (safe GET fetch; no HEAD)
+// Service Worker (safe fetch)
 (function(){
   if (!('serviceWorker' in navigator)) return;
   const swUrl = 'service-worker.js';
@@ -1896,7 +2071,7 @@ window.addEventListener('appinstalled', ()=>{ _deferredInstallPrompt=null; notif
 // First paint
 (function boot(){
   try {
-    if (typeof renderApp === 'function' && window.session) { currentRoute='home'; save('_route','home'); renderApp(); }
+    if (typeof renderApp === 'function' && window.session) renderApp();
     else if (typeof renderLogin === 'function') renderLogin();
   } catch(e){
     notify(e.message || 'Startup error','danger'); if (typeof renderLogin === 'function') renderLogin();
