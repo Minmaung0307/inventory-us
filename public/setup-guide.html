@@ -2,304 +2,85 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Inventory App – Developer Setup Guide</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inventory — Setup Guide</title>
   <style>
-    :root{
-      --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0;
-      --brand:#0ea5a5; --ok:#10b981; --warn:#f59e0b; --danger:#ef4444; --border:#1f2a37;
-    }
-    @media (prefers-color-scheme: light){
-      :root{ --bg:#f7fafc; --panel:#fff; --panel2:#f2f5f8; --text:#0b1220; --muted:#51606f; --border:#e6edf3; }
-    }
-    *{ box-sizing:border-box }
-    body{ margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Arial }
-    .wrap{ max-width: 1000px; margin: 24px auto; padding: 0 16px 40px }
-    .hero{ display:flex; align-items:center; gap:14px; margin-bottom:6px }
-    .logo{ width:46px; height:46px; border-radius:12px; display:grid;place-items:center;
-           background: radial-gradient(ellipse at 30% 30%, var(--brand), #0891b2); color:#fff; font-weight:800; }
-    h1{ margin:6px 0 18px; font-size:28px }
-    h2{ margin:20px 0 10px; font-size:18px }
-    h3{ margin:16px 0 8px; font-size:15px }
-    p,li{ color: var(--text) }
-    p.muted, .muted{ color:var(--muted) }
-    code, pre{ background: var(--panel2); border:1px solid var(--border); border-radius:10px; }
-    code{ padding: 2px 6px; }
-    pre{ padding: 12px; overflow:auto }
-    .card{ background: var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0 }
-    .ok{ color: var(--ok) } .warn{ color: var(--warn) } .danger{ color: var(--danger) }
-    a{ color: var(--brand) }
-    .grid{ display:grid; gap:12px }
-    .toc a{ text-decoration: none }
-    .callout{ padding:10px 12px; border-left:4px solid var(--brand); background:rgba(14,165,165,.08); border-radius:10px }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial; line-height: 1.6; margin: 0; padding: 24px; color: #0b1220; }
+    h1,h2 { margin: 0 0 12px; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 18px; margin-top: 24px; }
+    code, pre { background: #f3f4f6; padding: 2px 6px; border-radius: 6px; }
+    pre { padding: 12px; overflow: auto; }
+    .card { background:#fff; border:1px solid #e6edf3; border-radius:12px; padding:16px; margin-bottom:12px; }
+    .ok { color:#059669; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="hero">
-      <div class="logo">📦</div>
-      <div>
-        <h1 style="margin:0">Inventory App — Developer Setup</h1>
-        <div class="muted">Single-file SPA (HTML+CSS+JS), Firebase v8, Local storage, optional Cloud Sync</div>
-      </div>
-    </div>
+  <h1>Inventory — Setup Guide</h1>
 
-    <div class="card toc">
-      <strong>Contents</strong>
-      <ol>
-        <li><a href="#stack">Stack & Structure</a></li>
-        <li><a href="#run">Run Locally</a></li>
-        <li><a href="#firebase">Firebase Setup (Auth + Database + optional Hosting)</a></li>
-        <li><a href="#config">Configuration Points</a></li>
-        <li><a href="#features">App Features (What’s inside)</a></li>
-        <li><a href="#music">Hot Music Videos (rotation + auto-skip)</a></li>
-        <li><a href="#images">Images & Thumbnails</a></li>
-        <li><a href="#pwa">Service Worker / PWA Notes</a></li>
-        <li><a href="#email">Contact (EmailJS or mailto)</a></li>
-        <li><a href="#troubleshoot">Troubleshooting (Common errors)</a></li>
-        <li><a href="#release">Release checklist</a></li>
-      </ol>
-    </div>
-
-    <h2 id="stack">1) Stack & Structure</h2>
-    <div class="card grid">
-      <div><strong>Zero build tools:</strong> pure static files.</div>
-      <div><strong>Auth:</strong> Firebase Auth (email/password). Also supports a local “demo admin” fallback.</div>
-      <div><strong>Data:</strong> LocalStorage; optional Cloud Sync to Firebase Realtime Database.</div>
-      <div><strong>UI:</strong> Vanilla HTML/CSS, a single <code>app.js</code>, and minimal icons via Remix Icon.</div>
-    </div>
-    <pre><code>/
-├─ index.html            // entry
-├─ styles.css            // design system + layout
-├─ app.js                // entire SPA (routing, views, data, auth, logic)
-├─ service-worker.js     // optional offline cache (safe GET-only registration)
-├─ icons/                // app icons
-├─ policy.html           // static pages (iframe’d)
-├─ license.html
-├─ guide.html
-├─ setup-guide.html      // ← this file
-└─ favicon.svg|ico      </code></pre>
-
-    <h2 id="run">2) Run Locally</h2>
-    <div class="card">
-      Use any static server (don’t open index.html by double-click — that breaks routing/assets).
-      <pre><code># Option A: Node http-server
-npx http-server -p 8080
-
-# Option B: serve
-npx serve -l 8080
-
-# Option C: Python
-python3 -m http.server 8080</code></pre>
-      Then visit <code>http://localhost:8080</code>.
-    </div>
-
-    <h2 id="firebase">3) Firebase Setup</h2>
-    <div class="card grid">
-      <div>
-        <h3>3.1 Create project</h3>
-        <ol>
-          <li>Create a Firebase project.</li>
-          <li>Add a Web App and copy the config snippet (apiKey, authDomain, etc.).</li>
-          <li>Paste it into <code>app.js</code> (the <code>firebaseConfig</code> const).</li>
-        </ol>
-      </div>
-
-      <div>
-        <h3>3.2 Enable Auth</h3>
-        <ol>
-          <li>Authentication → Sign-in method → enable <strong>Email/Password</strong>.</li>
-        </ol>
-      </div>
-
-      <div>
-        <h3>3.3 Realtime Database</h3>
-        <ol>
-          <li>Create Realtime Database (in your preferred location).</li>
-          <li>Rules can start as test/locked; the app writes under <code>tenants/&lt;uid&gt;/kv/&lt;key&gt;</code>.</li>
-        </ol>
-        <p class="muted">Cloud Sync is optional — the app works fully offline with LocalStorage.</p>
-      </div>
-
-      <div>
-        <h3>3.4 Optional: Firebase Hosting</h3>
-        <pre><code>npm i -g firebase-tools
-firebase login
-firebase init hosting     # pick your project, "public" = .
-firebase deploy</code></pre>
-      </div>
-    </div>
-
-    <h2 id="config">4) Configuration Points</h2>
-    <div class="card grid">
-      <div>
-        <h3>4.1 Firebase config</h3>
-        <p>In <code>app.js</code> near the top, update <code>firebaseConfig</code> with your values.</p>
-      </div>
-
-      <div>
-        <h3>4.2 Demo local admin (optional)</h3>
-        <p>Local fallback credentials (stored only in LocalStorage) allow sign-in even offline:</p>
-        <pre><code>const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
-const DEMO_ADMIN_PASS  = 'admin123';</code></pre>
-      </div>
-
-      <div>
-        <h3>4.3 Cloud Sync toggle</h3>
-        <p>Users can enable/disable Cloud Sync in <strong>Settings → Cloud Sync</strong>. It mirrors local
-           keys (<code>inventory</code>, <code>products</code>, <code>cogs</code>, <code>tasks</code>, <code>users</code>, <code>_theme2</code>) to
-           Realtime DB under the current user.</p>
-      </div>
-
-      <div>
-        <h3>4.4 Theme</h3>
-        <p>Theme mode (light/dark/aqua) + font size are kept in <code>_theme2</code> and applied on boot.</p>
-      </div>
-    </div>
-
-    <h2 id="features">5) App Features (What’s inside)</h2>
-    <div class="card grid">
-      <div><strong>Router:</strong> in-memory route (<code>home</code>, <code>dashboard</code>, <code>inventory</code>, <code>products</code>, <code>cogs</code>, <code>tasks</code>, <code>settings</code>, static pages). Persists last route to LocalStorage.</div>
-      <div><strong>Auth:</strong> Firebase Auth + Local fallback; session persists across refresh via <code>auth.setPersistence(LOCAL)</code> + saved <code>session</code> key.</div>
-      <div><strong>Inventory & Products:</strong> CRUD, CSV export, image upload (to DataURL), thumbnail preview + hover enlarge, product detail card modal.</div>
-      <div><strong>COGS:</strong> daily rows, auto totals, MoM/YoY on Dashboard.</div>
-      <div><strong>Tasks:</strong> three lanes (todo/inprogress/done), drag-and-drop + mobile tap-to-move.</div>
-      <div><strong>Search:</strong> global sidebar search indexing posts, inventory, products, cogs, users, and static pages.</div>
-      <div><strong>Posts:</strong> simple newsroom on Dashboard with create/edit/delete and optional image.</div>
-      <div><strong>Settings:</strong> Cloud Sync, Theme, User management (role-based permissions).</div>
-      <div><strong>Home:</strong> Hot Music Videos (weekly rotation, shuffle, auto-skip broken/blocked embeds).</div>
-    </div>
-
-    <h2 id="music">6) Hot Music Videos (rotation + auto-skip)</h2>
-    <div class="card grid">
-      <div>
-        <h3>6.1 Add or change the library</h3>
-        <p>In <code>app.js</code> “Part C.1 — Home (Hot music videos)”, edit the <code>DEFAULT_LIB</code> array (title + YouTube video ID):</p>
-<pre><code>const DEFAULT_LIB = [
-  { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
-  { title:'DEAF KEV – Invincible (NCS Release)', id:'J2X5mJ3HDYE' },
-  // ...add as many as you like
-];</code></pre>
-        <p>The app builds a weekly subset of up to 10 from that library using ISO week number,
-           so it rotates deterministically each week.</p>
-      </div>
-      <div>
-        <h3>6.2 Shuffle & open in YouTube</h3>
-        <p><strong>Shuffle</strong> picks a random item from this week’s set; <strong>Open on YouTube</strong> links to the watch page.</p>
-      </div>
-      <div>
-        <h3>6.3 Auto-skip broken/unembeddable videos</h3>
-        <p>If the player returns an error, the video ID is added to a local blacklist (<code>_ytBlacklist</code> in LocalStorage) and the app automatically advances to the next item. If all items are blacklisted, the list resets.</p>
-        <p class="muted">Tip: If a video stops being embeddable later, simply let the player skip it; or remove/replace the ID in the library.</p>
-      </div>
-      <div>
-        <h3>6.4 Privacy & CORS notices</h3>
-        <ul>
-          <li>Embeds use <code>youtube-nocookie.com</code> host via the Iframe API.</li>
-          <li>You may still see console requests to <code>googleads.g.doubleclick.net</code> made by the player; these are external to the app and safe to ignore.</li>
-        </ul>
-      </div>
-    </div>
-
-    <h2 id="images">7) Images & Thumbnails</h2>
-    <div class="card grid">
-      <div>
-        <h3>7.1 Uploads</h3>
-        <p>File inputs convert images to Data URLs and store them in the relevant item’s <code>img</code> field. No server storage is required.</p>
-      </div>
-      <div>
-        <h3>7.2 Hover enlarge</h3>
-        <p>Each table image has a hidden <code>.thumb-large</code> preview that appears on hover. If you ever see the preview get “clipped” by the table edge, ensure one of these is true:</p>
-        <ul>
-          <li>Remove <code>overflow:hidden</code> from <code>.table</code>, <em>or</em></li>
-          <li>Wrap the table in <code>.table-wrap</code> and keep the wrapper’s overflow visible.</li>
-        </ul>
-      </div>
-      <div class="callout">Mobile has a tap-to-preview modal so the bigger image isn’t blocked by table layout.</div>
-    </div>
-
-    <h2 id="pwa">8) Service Worker / PWA Notes</h2>
-    <div class="card grid">
-      <div>
-        <h3>8.1 Why we changed registration</h3>
-        <p>Some cache strategies reject <code>HEAD</code> requests in SW. We register using a safe <strong>GET</strong> fetch of <code>service-worker.js</code> with <code>cache:"no-cache"</code> before <code>register()</code>, which avoids the “Failed to execute 'put' on 'Cache': Request method 'HEAD' is unsupported” crash.</p>
-      </div>
-      <div>
-        <h3>8.2 Serving rules</h3>
-        <ul>
-          <li>Always serve over HTTP(S), not from <code>file://</code>.</li>
-          <li>On redeploy, refresh once to get the new SW.</li>
-        </ul>
-      </div>
-    </div>
-
-    <h2 id="email">9) Contact (EmailJS or mailto)</h2>
-    <div class="card grid">
-      <div>
-        <p>By default we try EmailJS if keys are present; otherwise we fallback to <code>mailto:</code>.</p>
-        <ol>
-          <li>Create an EmailJS account, a service and template.</li>
-          <li>Put your <code>PUBLIC_KEY</code>, <code>SERVICE_ID</code>, and <code>TEMPLATE_ID</code> in <code>app.js</code> (Contact section).</li>
-        </ol>
-        <p class="muted">If clicking “Send” just opens your mail client, you’re on the mailto fallback (no EmailJS keys configured).</p>
-      </div>
-    </div>
-
-    <h2 id="troubleshoot">10) Troubleshooting (Common errors)</h2>
-    <div class="card grid">
-      <div>
-        <h3>“Unexpected token &lt; at app.js:1:1”</h3>
-        <p>Your server is returning HTML for <code>app.js</code> (likely a 404 or index page). Serve the correct path or fix your static hosting configuration so <code>app.js</code> is reachable.</p>
-      </div>
-
-      <div>
-        <h3>“parseYMD is not defined”</h3>
-        <p>We hoist small helpers like <code>parseYMD</code> at the top of <code>app.js</code>. Make sure that section is unchanged and loads before dashboard computations.</p>
-      </div>
-
-      <div>
-        <h3>Image hover is “sinking” into table</h3>
-        <p>Remove <code>overflow:hidden</code> from <code>.table</code> or ensure the preview sits above with higher <code>z-index</code> and a container that allows overflow.</p>
-      </div>
-
-      <div>
-        <h3>Sidebar pages have inconsistent width</h3>
-        <p>All routes render inside the same <code>.main</code> container. If you inject custom DOM, keep the outer card/container consistent across routes.</p>
-      </div>
-
-      <div>
-        <h3>Favicon 404 or connection refused</h3>
-        <p>Place a <code>favicon.ico</code> or <code>favicon.svg</code> in the root, or reference a valid icon path in <code>index.html</code>.</p>
-      </div>
-
-      <div>
-        <h3>YouTube console warnings (CORS, aria-hidden)</h3>
-        <p>These come from the YouTube player internals and can be safely ignored. We use the official Iframe API + the <code>youtube-nocookie</code> domain.</p>
-      </div>
-
-      <div>
-        <h3>Logged out on refresh</h3>
-        <p>We call <code>auth.setPersistence(LOCAL)</code> and also preserve a local session for “local auth”. If you’re seeing sign-outs, check browser privacy settings or third-party cookie blockers (Firebase Auth uses storage and may be impacted by aggressive settings).</p>
-      </div>
-    </div>
-
-    <h2 id="release">11) Release checklist</h2>
-    <div class="card">
-      <ul>
-        <li>✅ Update <code>firebaseConfig</code> and test sign-in/out.</li>
-        <li>✅ Verify Cloud Sync “On/Off” and that data mirrors for your signed-in user.</li>
-        <li>✅ Add/curate <code>DEFAULT_LIB</code> music IDs; test shuffle + auto-skip.</li>
-        <li>✅ Test image uploads (inventory/products/users), hover enlarge, and mobile preview.</li>
-        <li>✅ CSV exports (Inventory, Products, COGS) download and open correctly.</li>
-        <li>✅ Service worker installed without console errors; offline page loads basics.</li>
-        <li>✅ Contact page: EmailJS keys configured or mailto fallback opens correctly.</li>
-        <li>✅ Run through routes: Home, Dashboard, Inventory, Products, COGS, Tasks, Settings, static pages.</li>
-      </ul>
-      <p class="ok"><strong>Done!</strong> Ship it 🚀</p>
-    </div>
+  <div class="card">
+    <h2>1) Files & Structure</h2>
+    <p>Put these files at your site root:</p>
+    <ul>
+      <li><code>index.html</code></li>
+      <li><code>styles.css</code></li>
+      <li><code>app.js</code></li>
+      <li><code>service-worker.js</code></li>
+      <li><code>manifest.webmanifest</code></li>
+      <li><code>/icons/</code> (PNG icons + favicon.svg)</li>
+      <li>(Optional) <code>policy.html</code>, <code>license.html</code>, <code>guide.html</code> — or keep your own docs.</li>
+    </ul>
   </div>
+
+  <div class="card">
+    <h2>2) Running locally</h2>
+    <p>Serve with any static server (PWA needs HTTP/HTTPS, not file://):</p>
+<pre><code># Python 3
+python -m http.server 9005
+
+# or Node
+npx http-server -p 9005
+</code></pre>
+    <p>Open <code>http://localhost:9005/</code>.</p>
+  </div>
+
+  <div class="card">
+    <h2>3) Firebase (optional, for Cloud Sync)</h2>
+    <ol>
+      <li>Create a project at <a href="https://console.firebase.google.com" target="_blank" rel="noopener">Firebase Console</a>.</li>
+      <li>Enable <strong>Email/Password</strong> Sign-in in <em>Authentication</em>.</li>
+      <li>Enable <strong>Realtime Database</strong> (test rules for development).</li>
+      <li>Copy the web config into <code>app.js</code> (the <code>firebaseConfig</code> object).</li>
+      <li>Sign in (top-right → Sign In). Turn <strong>Cloud Sync ON</strong> in Settings to sync local data to your Firebase DB.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>4) PWA install button + omnibox icon</h2>
+    <ul>
+      <li>We provide <code>manifest.webmanifest</code> + a <code>service-worker.js</code> with a fetch handler.</li>
+      <li>Chrome/Edge will show the native “Install app” icon in the address bar when the app meets criteria.</li>
+      <li>We also render a custom <strong>Install</strong> button in the topbar when installation is available.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>5) Assets & Images</h2>
+    <p>Uploads are stored locally as DataURLs. If you want shared images across devices, host images in Firebase Storage or on your own CDN and paste the URL into the image field.</p>
+  </div>
+
+  <div class="card">
+    <h2>6) Features Overview</h2>
+    <ul>
+      <li>Inventory & Products with images (hover preview + phone modal)</li>
+      <li>COGS with month-to-date snapshots on Dashboard</li>
+      <li>Tasks board with drag-and-drop</li>
+      <li>Search across posts, items, products, users, and pages</li>
+      <li>PWA: offline-friendly, installable</li>
+      <li>Hot Music (YouTube) on Home — weekly rotation and auto-skip broken videos</li>
+    </ul>
+  </div>
+
+  <p class="ok">You’re good to go. Happy shipping! 🚀</p>
 </body>
 </html>

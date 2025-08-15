@@ -1,43 +1,45 @@
-/* service-worker.js */
-const CACHE = "inv-cache-v3";
-const CORE = [
-  "/", "index.html", "styles.css", "app.js",
-  "manifest.json",
-  "icons/icon-192.png", "icons/icon-512.png"
+/* Simple, safe PWA service worker (GET-only caching) */
+const CACHE = 'inventory-cache-v5';
+const CORE_ASSETS = [
+  '/', '/index.html', 'css/styles.css', 'js/app.js',
+  '/manifest.webmanifest',
+  '/icons/icon-192.png', '/icons/icon-512.png', '/icons/favicon.svg'
 ];
 
-// Install: pre-cache core
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting())
+self.addEventListener('install', (e) => {
+  e.waitUntil(
+    caches.open(CACHE).then(c => c.addAll(CORE_ASSETS)).then(() => self.skipWaiting())
   );
 });
 
-// Activate: cleanup old caches
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then(keys => Promise.all(keys.map(k => (k === CACHE ? null : caches.delete(k)))))
+      .then(() => self.clients.claim())
   );
 });
 
-// Fetch: cache-first for GET; ignore HEAD/POST/etc.
-self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  if (req.method !== "GET") return; // avoid HEAD crash & non-idempotent methods
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return; // never cache non-GET (avoids HEAD error)
 
-  event.respondWith(
-    caches.match(req).then((hit) => {
-      const fetchPromise = fetch(req).then((net) => {
-        // Only cache successful, basic same-origin GET responses
-        if (net && net.ok && net.type === "basic") {
-          const copy = net.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(()=>{});
-        }
-        return net;
-      }).catch(() => hit); // offline -> use cache
-      return hit || fetchPromise;
-    })
-  );
+  const url = new URL(req.url);
+
+  // same-origin: cache-first, then network
+  if (url.origin === location.origin) {
+    e.respondWith(
+      caches.match(req).then(cached => {
+        if (cached) return cached;
+        return fetch(req).then(resp => {
+          const copy = resp.clone();
+          caches.open(CACHE).then(c => c.put(req, copy));
+          return resp;
+        }).catch(() => caches.match('/index.html'));
+      })
+    );
+    return;
+  }
+
+  // cross-origin (e.g., YouTube): network-only
+  // Don’t attempt to cache or modify; avoids CORS/opaque issues.
 });
