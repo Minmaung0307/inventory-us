@@ -153,8 +153,23 @@ body {
 .tile i { font-size: 20px; }
 
 /* Tables */
-.table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 12px; }
-.table th, .table td { padding: 10px 12px; border-bottom: 1px solid var(--card-border); text-align: left; vertical-align: middle; }
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  border-radius: 12px;
+  /* was overflow:hidden; — that clipped the preview */
+  overflow: visible;
+}
+.table th, .table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--card-border);
+  text-align: left;
+  /* ensure cells don't clip children either */
+  overflow: visible;
+  position: relative;
+}
+/* Make sure the wrapper and container don't clip either */
+.table-wrap { overflow: visible; }
 .table thead th { background: var(--thead); }
 .tr-warn { background: rgba(245, 158, 11, .14); }
 .tr-danger { background: rgba(239, 68, 68, .16); }
@@ -162,27 +177,24 @@ body {
 
 /* Thumbs & preview */
 .thumb-wrap { position: relative; width: 44px; height: 44px; }
-.thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 10px; border: 1px solid var(--card-border); }
+.thumb {
+  width: 44px; height: 44px; object-fit: cover;
+  border-radius: 10px; border: 1px solid var(--card-border);
+}
 .thumb-wrap:hover .thumb-large { opacity: 1; transform: scale(1); pointer-events: none; }
-
-/* Bigger, aspect-correct hover preview */
 .thumb-large {
   position: absolute;
-  top: -10px;
-  left: 56px;
-  width: auto; height: auto;
-  max-width: min(48vw, 420px);
-  max-height: 320px;
-  object-fit: contain;
-  background: var(--panel);
-  padding: 6px;
+  top: -8px; left: 52px;
+  width: 280px; height: 280px;          /* bigger preview */
+  object-fit: cover;
   border-radius: 12px;
   border: 1px solid var(--card-border);
   box-shadow: var(--shadow);
+  background: var(--panel);
   transform: scale(.96);
   opacity: 0;
   transition: transform .12s ease, opacity .12s ease;
-  z-index: 20;
+  z-index: 400;                          /* sit above tables, headers, etc. */
 }
 
 /* Image modal (phones) */
@@ -284,5 +296,8 @@ a.btn {
 @media (max-width: 740px) {
   .main { padding: 14px; }
   .grid.cols-4.auto { grid-template-columns: repeat(2, minmax(0,1fr)); }
-  .thumb-large { left: 8px; top: -4px; max-width: 70vw; max-height: 44vh; }
+  .thumb-large {
+    left: 8px; top: -4px;
+    width: 200px; height: 200px;        /* sensible for phones */
+  }
 }

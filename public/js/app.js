@@ -746,16 +746,56 @@ async function doLogout(){
 
 /* ===================== Part C.1 — Home (Hot music videos) ===================== */
 
+// ===== Music library -> weekly rotating set of 10 =====
 (function(){
-  if (!window.HOT_MUSIC_VIDEOS) window.HOT_MUSIC_VIDEOS = [
+  // Your full library (add as many as you want).
+  // Use real YouTube IDs; titles are for display only.
+  if (!window.HOT_MUSIC_LIBRARY) window.HOT_MUSIC_LIBRARY = [
     { title: 'LAKEY INSPIRED – Better Days (NCM)', id: 'RXLzvo6kvVQ' },
     { title: 'DEAF KEV – Invincible (NCS Release)', id: 'J2X5mJ3HDYE' },
     { title: 'Ikson – Anywhere (NCM)', id: 'OZLUa8JUR18' },
+    { title: 'JPB – High (NCS Release)', id: 'Tv6WImqSuxA' },
+    { title: 'Jim Yosef – Link (NCS Release)', id: '9iHM6X6uUH8' },
+    { title: 'Elektronomia – Limitless (NCS)', id: 'cNcy3J4x62M' },
+    { title: 'Tobu – Hope (NCS Release)', id: 'EP625xQIGzs' },
+    { title: 'Alan Walker – Fade (NCS Release)', id: 'bM7SZ5SBzyY' },
+    { title: 'Different Heaven & EH!DE – My Heart', id: 'jK2aIUmmdP4' },
+    { title: 'Janji – Heroes Tonight (feat. Johnning)', id: '3nQNiWdeH2Q' },
+    // add more...
   ];
+
+  // Build a weekly set of N items from the library (rotates deterministically by ISO week)
+  if (!window.buildWeeklyMusicSet) window.buildWeeklyMusicSet = (size = 10) => {
+    const lib = window.HOT_MUSIC_LIBRARY || [];
+    if (!lib.length) return [];
+    const week = (function getISOWeek(d){
+      const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
+      const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n);
+      const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1));
+      return Math.ceil((((t - y0) / 86400000) + 1)/7);
+    })(new Date());
+    const start = week % lib.length;
+    const out = [];
+    for (let i=0; i<size; i++) out.push(lib[(start + i) % lib.length]);
+    return out;
+  };
+
+  // Expose this week’s 10
+  window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
+
+  // Stable index within this weekly set (also week-based)
   if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
     const arr = window.HOT_MUSIC_VIDEOS || [];
     if (!arr.length) return 0;
-    return getISOWeek(new Date()) % arr.length;
+    // seed by week for a consistent first pick each week
+    const now = new Date();
+    const week = (function getISOWeek(d){
+      const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
+      const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n);
+      const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1));
+      return Math.ceil((((t - y0) / 86400000) + 1)/7);
+    })(now);
+    return week % arr.length;
   };
 })();
 
@@ -778,7 +818,7 @@ function viewHome(){
           <div class="card">
             <div class="card-body">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <h4 style="margin:0">Hot Music Videos</h4>
+                <h4 style="margin:0">Hot Music Videos (weekly set of 10)</h4>
                 <div style="display:flex;gap:8px">
                   <button class="btn ghost" id="btnShuffleVideo"><i class="ri-shuffle-line"></i> Shuffle</button>
                   <a class="btn secondary" id="btnOpenYouTube" href="#" target="_blank" rel="noopener"><i class="ri-youtube-fill"></i> Open on YouTube</a>
@@ -788,15 +828,15 @@ function viewHome(){
               <div id="musicVideoWrap" data-vid-index="${weeklyIdx}">
                 <div>
                   <iframe
-  id="ytEmbed"
-  src="https://www.youtube-nocookie.com/embed/VIDEO_ID?rel=0&modestbranding=1&playsinline=1"
-  title="Music video"
-  loading="lazy"
-  referrerpolicy="strict-origin-when-cross-origin"
-  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-  allowfullscreen
-  style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px"
-></iframe>
+                    id="ytEmbed"
+                    src=""
+                    title="Music video"
+                    loading="lazy"
+                    referrerpolicy="strict-origin-when-cross-origin"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen
+                    style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px"
+                  ></iframe>
                 </div>
                 <div style="margin-top:8px;font-weight:700" id="mvTitle"></div>
                 <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
@@ -819,24 +859,26 @@ function wireHome(){
   if (!wrap || !frame || !title || !openYT) return;
 
   const setVideo = (idx) => {
-  const list = window.HOT_MUSIC_VIDEOS || [];
-  if (!list.length) return;
+    const list = window.HOT_MUSIC_VIDEOS || [];
+    if (!list.length) return;
 
-  const i = ((idx % list.length) + list.length) % list.length;
-  const item = list[i];
+    const i = ((idx % list.length) + list.length) % list.length;
+    const item = list[i];
 
-  // Build embed URL using the privacy-enhanced domain
-  const params = '?rel=0&modestbranding=1&playsinline=1';
-  frame.src = `https://www.youtube-nocookie.com/embed/${item.id}${params}`;
+    const origin = encodeURIComponent(location.origin);
+    const params = `?rel=0&modestbranding=1&playsinline=1&origin=${origin}`;
+    frame.src = `https://www.youtube-nocookie.com/embed/${item.id}${params}`;
 
-  title.textContent = item.title || 'Hot music';
-  openYT.href = `https://www.youtube.com/watch?v=${item.id}`;
-  wrap.setAttribute('data-vid-index', String(i));
-};
+    title.textContent = item.title || 'Hot music';
+    openYT.href = `https://www.youtube.com/watch?v=${item.id}`;
+    wrap.setAttribute('data-vid-index', String(i));
+  };
 
+  // initial
   const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
   setVideo(startIdx);
 
+  // shuffle within this week’s 10
   btn?.addEventListener('click', ()=>{
     const list = window.HOT_MUSIC_VIDEOS || [];
     if (!list.length) return;
@@ -889,9 +931,15 @@ function viewDashboard(){
 
   const today=new Date(); const cy=today.getFullYear(), cm=today.getMonth()+1;
   const py = cm===1? (cy-1) : cy; const pm = cm===1? 12 : (cm-1); const ly=cy-1, lm=cm;
-  const totalThisMonth=sumForMonth(cy,cm), totalPrevMonth=sumForMonth(py,pm), totalLY=sumForMonth(ly,lm);
-  const pct=(a,b)=> (b>0 ? ((a-b)/b)*100 : (a>0? 100 : 0)); const mom=pct(totalThisMonth,totalPrevMonth), yoy=pct(totalThisMonth,totalLY);
-  const fmtPct = (v)=> `${v>=0?'+':''}${v.toFixed(1)}%`; const trendColor = (v)=> v>=0 ? 'var(--ok)' : 'var(--danger)';
+
+  const totalThisMonth=sumForMonth(cy,cm),
+        totalPrevMonth=sumForMonth(py,pm),
+        totalLY=sumForMonth(ly,lm);
+
+  const pct=(a,b)=> (b>0 ? ((a-b)/b)*100 : (a>0? 100 : 0));
+  const mom=pct(totalThisMonth,totalPrevMonth), yoy=pct(totalThisMonth,totalLY);
+  const fmtPct = (v)=> `${v>=0?'+':''}${v.toFixed(1)}%`;
+  const trendColor = (v)=> v>=0 ? 'var(--ok)' : 'var(--danger)';
 
   return `
     <div class="grid cols-4 auto">
@@ -914,8 +962,7 @@ function viewDashboard(){
         <div><span style="color:var(--muted)">Prev month:</span> ${USD(totalPrevMonth)} <span style="color:${trendColor(mom)}">${fmtPct(mom)} MoM</span></div>
         <div><span style="color:var(--muted)">Same month last year:</span> ${USD(totalLY)} <span style="color:${trendColor(yoy)}">${fmtPct(yoy)} YoY</span></div>
       </div></div>
-
-      <div class="card" data-go="tasks" style="cursor:pointer"><div class="card-body"><strong>Tasks</strong><div style="color:var(--muted)">Manage lanes</div></div></div>
+      <!-- removed the extra “Tasks – Manage lanes” card -->
     </div>
 
     <div class="card" style="margin-top:16px">
@@ -943,6 +990,8 @@ function viewDashboard(){
       </div>
     </div>`;
 }
+
+
 function wireDashboard(){ $('#addPost')?.addEventListener('click', ()=> openModal('m-post')); }
 function wirePosts(){
   const sec = document.querySelector('[data-section="posts"]'); if (!sec) return;
