@@ -1,39 +1,24 @@
 /* =========================
-   Inventory — single-file SPA (with PWA + EmailJS hooks)
+   Inventory — single-file SPA
    ========================= */
 
-/* ---------- Hoisted helpers (fixes parseYMD crash) ---------- */
+/* ---------- Hoisted helpers ---------- */
 function USD(x){ return `$${Number(x || 0).toFixed(2)}`; }
 function parseYMD(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; }
 function getISOWeek(d){ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); }
-window.USD=USD; window.parseYMD=parseYMD; window.getISOWeek=getISOWeek;
-
-/* ---------- EmailJS config (EDIT HERE) ----------
-  1) Create a free account at https://www.emailjs.com
-  2) Create a service + template, copy their IDs + your Public Key
-  3) Paste them below OR set them in Settings → “Email Delivery (EmailJS)”
-*/
-const EMAILJS = _loadEmailJSCfg();
-function _loadEmailJSCfg(){
-  const ls = (()=>{ try{ return JSON.parse(localStorage.getItem('emailjsCfg')||'{}'); }catch{ return {}; }})();
-  return {
-    PUBLIC_KEY : ls.PUBLIC_KEY  || 'WT0GOYrL9HnDKvLUf',     // ← replace if you want
-    SERVICE_ID : ls.SERVICE_ID  || 'service_z9tkmvr',       // ← replace if you want
-    TEMPLATE_ID: ls.TEMPLATE_ID || 'template_q5q471f'       // ← replace if you want
-  };
-}
-function _saveEmailJSCfg(obj){
-  try{ localStorage.setItem('emailjsCfg', JSON.stringify(obj)); }catch{}
-  EMAILJS.PUBLIC_KEY  = obj.PUBLIC_KEY;
-  EMAILJS.SERVICE_ID  = obj.SERVICE_ID;
-  EMAILJS.TEMPLATE_ID = obj.TEMPLATE_ID;
-}
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const _lsGet=(k,f)=>{try{const v=localStorage.getItem(k);return v==null?f:JSON.parse(v);}catch{ return f; }};
+const _lsSet=(k,v)=>{try{localStorage.setItem(k, JSON.stringify(v));}catch{}};
+const notify=(m,t='ok')=>{ const n=$('#notification'); if(!n) return; n.textContent=m; n.className=`notification show ${t}`; setTimeout(()=>n.className='notification',2400); };
+function load(k,f){ return _lsGet(k,f); }
+function save(k,v){ _lsSet(k,v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k,v); }catch{} }
 
 /* =========================
    Part A — Core bootstrap
    ========================= */
 
-// --- Firebase (v8) -----------------------------------------------------------
+// Firebase v8
 const firebaseConfig = {
   apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
   authDomain: "inventory-us.firebaseapp.com",
@@ -49,86 +34,7 @@ const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db   = firebase.database();
 
-// --- Tiny helpers ------------------------------------------------------------
-const $  = (s, r=document) => r.querySelector(s);
-const $$ = (s, r=document) => [...r.querySelectorAll(s)];
-const notify = (msg, type='ok')=>{
-  const n = $('#notification'); if (!n) return;
-  n.textContent = msg; n.className = `notification show ${type}`;
-  setTimeout(()=>{ n.className='notification'; }, 2400);
-};
-const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } };
-const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
-function load(k, f){ return _lsGet(k, f); }
-function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
-function setSession(s){ session = s; save('session', s); }
-
-// --- Hover preview singleton (prevents table clipping) -----------------------
-let _hoverImgEl = null;
-function ensureHoverPreviewEl(){
-  if (_hoverImgEl) return _hoverImgEl;
-  _hoverImgEl = document.createElement('img');
-  _hoverImgEl.id = 'hover-preview';
-  document.body.appendChild(_hoverImgEl);
-  return _hoverImgEl;
-}
-function enhanceHoverPreviews(){
-  const imgs = $$('.inv-preview, .prod-thumb, .thumb');
-  const hp = ensureHoverPreviewEl();
-  const hide = ()=>{ hp.style.transform='translate(-9999px,-9999px) scale(.98)'; hp.style.opacity='0'; };
-  const place = (e, src)=>{
-    if (!src) return hide();
-    hp.src = src;
-    const gap = 12;
-    const maxW = Math.min(260, Math.round(window.innerWidth * .4));
-    hp.style.width = maxW+'px';
-    let x = e.clientX + gap, y = e.clientY - maxW/2;
-    if (x + maxW + 12 > window.innerWidth) x = e.clientX - maxW - gap;
-    if (y < 12) y = 12;
-    if (y + maxW + 12 > window.innerHeight) y = window.innerHeight - maxW - 12;
-    hp.style.left = x+'px'; hp.style.top = y+'px';
-    hp.style.transform = 'translate(0,0) scale(1)';
-    hp.style.opacity = '1';
-  };
-  imgs.forEach(el=>{
-    const src = el.getAttribute('data-src') || el.getAttribute('src') || '';
-    el.addEventListener('mouseenter', (e)=>{ if (document.body.classList.contains('hover-suppressed')) return; place(e, src); });
-    el.addEventListener('mousemove', (e)=>{ if (document.body.classList.contains('hover-suppressed')) return; place(e, src); });
-    el.addEventListener('mouseleave', hide);
-  });
-  // Hide on scroll/resize
-  ['scroll','resize'].forEach(evt=> window.addEventListener(evt, hide, {passive:true}));
-}
-
-// --- Rescue screen -----------------------------------------------------------
-function showRescue(err){
-  const root = document.getElementById('root');
-  if (!root) return;
-  const msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : 'Unknown error';
-  root.innerHTML = `
-    <div style="max-width:680px;margin:40px auto;padding:16px;border:1px solid #ddd;border-radius:12px;font-family:system-ui">
-      <h2 style="margin:0 0 8px">Something crashed</h2>
-      <p style="color:#666;margin:0 0 12px">You can recover or sign out below.</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <button id="rz-signout" style="padding:8px 12px">Sign out</button>
-        <button id="rz-clearls" style="padding:8px 12px">Clear LocalStorage</button>
-        <button id="rz-retry"   style="padding:8px 12px">Retry render</button>
-      </div>
-      <pre style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px">${msg}</pre>
-    </div>`;
-  $('#rz-signout')?.addEventListener('click', async ()=>{ try { await auth.signOut(); } catch {} location.reload(); });
-  $('#rz-clearls')?.addEventListener('click', ()=>{ try { localStorage.clear(); } catch {} location.reload(); });
-  $('#rz-retry')?.addEventListener('click', ()=>{ try { renderApp(); } catch (e) { console.error(e); notify(e?.message||'Retry failed','danger'); } });
-}
-
-// quick console diag
-window._diags = ()=>({
-  user: auth.currentUser ? { email: auth.currentUser.email, uid: auth.currentUser.uid } : null,
-  route: currentRoute, hasSession: !!session, role: session?.role,
-  authMode: session?.authMode || 'firebase'
-});
-
-// --- Theme -------------------------------------------------------------------
+// Theme
 const THEME_MODES = [{key:'light',name:'Light'},{key:'dark',name:'Dark'},{key:'aqua',name:'Aqua'}];
 const THEME_SIZES = [{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
 function getTheme(){ return _lsGet('_theme2', { mode:'aqua', size:'medium' }); }
@@ -140,8 +46,8 @@ function applyTheme(){
 }
 applyTheme();
 
-// --- Cloud Sync --------------------------------------------------------------
-const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2'];
+// Cloud Sync (per-user namespace)
+const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2','_emailjsCfg'];
 const cloud = (function(){
   let liveRefs = [];
   const on      = ()=> !!_lsGet('_cloudOn', false);
@@ -158,7 +64,7 @@ const cloud = (function(){
   return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
 })();
 
-// --- Roles & permissions ------------------------------------------------------
+// Roles
 const ROLES = ['user','associate','manager','admin'];
 const SUPER_ADMINS = ['admin@sushi.com','admin@inventory.com'];
 function role(){ return (session?.role)||'user'; }
@@ -167,17 +73,17 @@ function canAdd(){ return ['admin','manager','associate'].includes(role()); }
 function canEdit(){ return ['admin','manager'].includes(role()); }
 function canDelete(){ return ['admin'].includes(role()); }
 
-// --- Globals + seed ----------------------------------------------------------
+// Globals
 let session      = load('session', null);
 let currentRoute = load('_route', 'home');
 let searchQuery  = load('_searchQ', '');
 
-// built-in demo admin (local auth fallback)
-const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
-const DEMO_ADMIN_PASS  = 'admin123';
+// Seed data (and demo admin)
+const DEMO_ADMIN_EMAIL='admin@inventory.com';
+const DEMO_ADMIN_PASS='admin123';
 
 (function seedOnFirstRun(){
-  if (load('_seeded_v3', false)) {
+  if (load('_seeded_v4', false)) {
     const users = load('users', []);
     if (!users.find(u => (u.email||'').toLowerCase() === DEMO_ADMIN_EMAIL)){
       users.push({ name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:DEMO_ADMIN_PASS, img:'' });
@@ -212,141 +118,118 @@ const DEMO_ADMIN_PASS  = 'admin123';
     { id:'c1', date:'2024-08-01', grossIncome:1200, produceCost:280, itemCost:180, freight:45, delivery:30, other:20 },
     { id:'c2', date:'2024-08-02', grossIncome: 900, produceCost:220, itemCost:140, freight:30, delivery:25, other:10 }
   ]);
-  save('_seeded_v3', true);
+  save('_seeded_v4', true);
 })();
 
-// --- Router + idle logout ----------------------------------------------------
+/* ---------- Router / idle sign-out ---------- */
 function go(route){ currentRoute = route; save('_route', route); renderApp(); }
-
-let idleTimer = null; const IDLE_LIMIT = 10*60*1000; // 10 minutes
-let lastActivity = Date.now();
+let idleTimer = null; const IDLE_LIMIT = 10*60*1000;
 function resetIdleTimer(){
   if (!session) return;
-  lastActivity = Date.now();
   if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(forceIdleLogout, IDLE_LIMIT + 2000);
-  _lsSet('_lastActivity', lastActivity);
+  idleTimer = setTimeout(async ()=>{ try{ await auth.signOut(); } finally { notify('Signed out due to inactivity','warn'); } }, IDLE_LIMIT);
 }
-async function forceIdleLogout(){
-  try{ await auth.signOut(); } catch {}
-  notify('Signed out due to inactivity','warn');
-}
-setInterval(()=>{
-  if (!session) return;
-  const last = _lsGet('_lastActivity', lastActivity);
-  if (Date.now() - last > IDLE_LIMIT) forceIdleLogout();
-}, 30000);
-
 ['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
 
-// --- Auth state --------------------------------------------------------------
-// Local auto-login: keep local users signed-in on refresh
+/* ---------- Auth flow ---------- */
 const ALLOW_LOCAL_AUTOLOGIN = true;
 
 auth.onAuthStateChanged(async (user) => {
   try { await ensureSessionAndRender(user); }
-  catch (err) { console.error('[auth] ensureSessionAndRender crashed:', err); notify(err?.message || 'Render failed', 'danger'); showRescue(err); }
+  catch (err) { console.error('[auth] render fail:', err); showRescue(err); }
 });
 
 async function ensureSessionAndRender(user) {
-  try {
-    applyTheme();
+  applyTheme();
 
-    // allow local session if enabled
-    const stored = load('session', null);
-    if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
-      session = stored;
-      resetIdleTimer();
-      currentRoute = 'home'; save('_route','home'); // force Home after sign-in
-      renderApp();
-      return;
-    }
-
-    if (!user) {
-      session = null; save('session', null);
-      if (idleTimer) clearTimeout(idleTimer);
-      renderLogin();
-      return;
-    }
-
-    const email = (user.email || '').toLowerCase();
-    let users = load('users', []);
-    let prof = users.find(u => (u.email || '').toLowerCase() === email);
-
-    if (!prof) {
-      const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
-      prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
-      users.push(prof); save('users', users);
-    } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
-      prof.role = 'admin'; save('users', users);
-    }
-
-    session = { ...prof, authMode: 'firebase' };
-    save('session', session);
-
-    try {
-      if (cloud?.isOn?.()) {
-        try{ await firebase.database().goOnline(); }catch{}
-        try{ await cloud.pullAllOnce(); }catch{}
-        try{ cloud.subscribeAll(); }catch{}
-      }
-    } catch {}
-
-    resetIdleTimer();
-    currentRoute = 'home'; save('_route','home');  // always land on Home after login
-    renderApp();
-
-  } catch (outer) {
-    console.error('[ensureSessionAndRender] outer crash:', outer);
-    notify(outer?.message || 'Render failed', 'danger');
-    showRescue(outer);
+  // Allow stored local session (no Firebase)
+  const stored = load('session', null);
+  if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
+    session = stored; resetIdleTimer(); currentRoute = load('_route','home'); renderApp(); return;
   }
+
+  if (!user) {
+    session = null; save('session', null);
+    if (idleTimer) clearTimeout(idleTimer);
+    renderLogin(); return;
+  }
+
+  const email = (user.email || '').toLowerCase();
+  let users = load('users', []);
+  let prof = users.find(u => (u.email || '').toLowerCase() === email);
+
+  if (!prof) {
+    const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
+    prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
+    users.push(prof); save('users', users);
+  } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
+    prof.role = 'admin'; save('users', users);
+  }
+
+  session = { ...prof, authMode: 'firebase' }; save('session', session);
+
+  try { if (cloud?.isOn?.()) { await firebase.database().goOnline(); await cloud.pullAllOnce(); cloud.subscribeAll(); } } catch {}
+  resetIdleTimer();
+
+  // Always land on Home after login
+  currentRoute = 'home'; save('_route','home');
+  renderApp();
 }
+
+// Rescue screen
+function showRescue(err){
+  const root = $('#root'); if (!root) return;
+  const msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : 'Unknown error';
+  root.innerHTML = `
+    <div style="max-width:680px;margin:40px auto;padding:16px;border:1px solid #ddd;border-radius:12px;font-family:system-ui">
+      <h2 style="margin:0 0 8px">Something crashed</h2>
+      <p style="color:#666;margin:0 0 12px">You can recover or sign out below.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button id="rz-signout" style="padding:8px 12px">Sign out</button>
+        <button id="rz-clearls" style="padding:8px 12px">Clear LocalStorage</button>
+        <button id="rz-retry"   style="padding:8px 12px">Retry render</button>
+      </div>
+      <pre style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px">${msg}</pre>
+    </div>`;
+  $('#rz-signout')?.addEventListener('click', async ()=>{ try { await auth.signOut(); } catch {} location.reload(); });
+  $('#rz-clearls')?.addEventListener('click', ()=>{ try { localStorage.clear(); } catch {} location.reload(); });
+  $('#rz-retry')?.addEventListener('click', ()=>{ try { renderApp(); } catch (e) { console.error(e); notify(e?.message||'Retry failed','danger'); } });
+}
+
+window._diags = ()=>({ user: auth.currentUser ? { email: auth.currentUser.email, uid: auth.currentUser.uid } : null, route: currentRoute, role: session?.role });
 
 /* =========================
    Part B — Login & Shell
    ========================= */
 
-// ---------- Local Auth helpers ----------
+// Local auth helpers
 function localLogin(email, pass){
   const users = load('users', []);
-  const e = (email||'').toLowerCase();
-  if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
-    let u = users.find(x => (x.email||'').toLowerCase() === e);
-    if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
-    session = { ...u, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); return true;
+  const e=(email||'').toLowerCase();
+  if (e===DEMO_ADMIN_EMAIL && pass===DEMO_ADMIN_PASS){
+    let u=users.find(x=>(x.email||'').toLowerCase()===e);
+    if(!u){u={name:'Admin',username:'admin',email:DEMO_ADMIN_EMAIL,role:'admin',password:DEMO_ADMIN_PASS,img:'',contact:''};users.push(u);save('users',users);}
+    session={...u,authMode:'local'}; save('session',session); notify('Signed in (Local mode)'); renderApp(); return true;
   }
-  const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
-  if (u2) { session = { ...u2, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); return true; }
+  const u2=users.find(x=>(x.email||'').toLowerCase()===e && (x.password||'')===pass);
+  if(u2){session={...u2,authMode:'local'}; save('session',session); notify('Signed in (Local mode)'); renderApp(); return true;}
   return false;
 }
-
 function localSignup({name,email,pass}){
-  const e = (email||'').toLowerCase();
-  const users = load('users', []);
-  if (users.find(x => (x.email||'').toLowerCase() === e)) {
-    if (localLogin(email, pass)) return true;
-    notify('User already exists locally. Use Sign In.', 'warn');
-    return false;
-  }
-  const role = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
-  const u = { name: name || e.split('@')[0], username: e.split('@')[0], email: e, role, password: pass, img:'', contact:'' };
-  users.push(u); save('users', users);
-  session = { ...u, authMode: 'local' }; save('session', session);
-  notify('Account created (Local mode)'); renderApp(); return true;
+  const e=(email||'').toLowerCase();
+  const users=load('users',[]);
+  if(users.find(x=>(x.email||'').toLowerCase()===e)){ if(localLogin(email,pass))return true; notify('User already exists locally. Use Sign In.','warn'); return false; }
+  const r = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
+  const u={name:name||e.split('@')[0],username:e.split('@')[0],email:e,role:r,password:pass,img:'',contact:''};
+  users.push(u); save('users',users);
+  session={...u,authMode:'local'}; save('session',session); notify('Account created (Local mode)'); renderApp(); return true;
 }
-
 function localResetPassword(email){
-  const e = (email||'').toLowerCase();
-  const users = load('users', []);
-  const i = users.findIndex(x => (x.email||'').toLowerCase() === e);
-  if (i < 0) return { ok:false, msg:'No local user found.' };
-  const temp = 'reset' + Math.floor(1000 + Math.random()*9000);
-  users[i].password = temp; save('users', users);
-  return { ok:true, temp };
+  const e=(email||'').toLowerCase(); const users=load('users',[]); const i=users.findIndex(x=>(x.email||'').toLowerCase()===e);
+  if(i<0) return {ok:false,msg:'No local user found.'}; const temp='reset'+Math.floor(1000+Math.random()*9000); users[i].password=temp; save('users',users); return {ok:true,temp};
 }
 
-// ---------- Sidebar + Topbar ----------
+// Sidebar + Topbar
 function renderSidebar(active='home'){
   const links = [
     { route:'home',      icon:'ri-home-5-line',              label:'Home' },
@@ -358,12 +241,12 @@ function renderSidebar(active='home'){
     { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
   ];
   const pages = [
-    { route:'about',   icon:'ri-information-line',        label:'About' },
-    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
-    { route:'license', icon:'ri-copyright-line',          label:'License' },
-    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
-    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
-    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
+    { route:'about',   icon:'ri-information-line',         label:'About' },
+    { route:'policy',  icon:'ri-shield-check-line',        label:'Policy' },
+    { route:'license', icon:'ri-copyright-line',           label:'License' },
+    { route:'setup',   icon:'ri-guide-line',               label:'Setup Guide' },
+    { route:'contact', icon:'ri-customer-service-2-line',  label:'Contact' },
+    { route:'guide',   icon:'ri-video-line',               label:'User Guide' },
   ];
   return `
     <aside class="sidebar" id="sidebar">
@@ -407,13 +290,11 @@ function renderSidebar(active='home'){
 
 function renderTopbar(){
   const socialsCompact = `
-    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
+    <div class="socials-compact">
       <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
       <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
       <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
     </div>`;
-  // PWA install button placeholder (shown only when available)
-  const installBtn = `<button class="btn secondary" id="btnInstallPWA" style="display:none"><i class="ri-download-2-line"></i> Install</button>`;
   return `
     <div class="topbar">
       <div class="left">
@@ -421,8 +302,8 @@ function renderTopbar(){
         <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
       </div>
       <div class="right">
-        ${installBtn}
         ${socialsCompact}
+        <button class="btn secondary" id="btnInstallApp" style="display:none"><i class="ri-download-2-line"></i> Install</button>
         <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
         <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
       </div>
@@ -431,23 +312,17 @@ function renderTopbar(){
   `;
 }
 
-// delegated nav clicks + close sidebar on mobile
+// Nav & generic clicks
 document.addEventListener('click', (e)=>{
   const item = e.target.closest('.sidebar .item[data-route]');
-  if (!item) return;
-  const r = item.getAttribute('data-route');
-  if (r) { go(r); closeSidebar(); }
-});
+  if (item){ const r=item.getAttribute('data-route'); if(r){ go(r); closeSidebar(); } return; }
 
-// close buttons in modals (generic)
-document.addEventListener('click', (e) => {
+  // modal close buttons
   const btn = e.target.closest('[data-close]');
-  if (!btn) return;
-  const id = btn.getAttribute('data-close');
-  if (id && typeof closeModal === 'function') { closeModal(id); }
+  if (btn){ const id=btn.getAttribute('data-close'); if(id) closeModal(id); }
 });
 
-// Sidebar search
+/* ---------- Sidebar search ---------- */
 function hookSidebarInteractions(){
   const input   = $('#globalSearch');
   const results = $('#searchResults');
@@ -455,7 +330,7 @@ function hookSidebarInteractions(){
 
   let searchTimer;
   const openResultsPage = (q)=>{
-    window.searchQuery = q; save && save('_searchQ', q);
+    window.searchQuery = q; save('_searchQ', q);
     if (window.currentRoute !== 'search') go('search'); else renderApp();
   };
 
@@ -500,13 +375,12 @@ function hookSidebarInteractions(){
   });
 }
 
-function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('hover-suppressed'); }
-function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('hover-suppressed'); }
+function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('ui-layer-open'); }
+function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('ui-layer-open'); }
 
 /* =========================
    Part B.5 — App renderer
    ========================= */
-
 function safeView(route) {
   switch ((route || 'home')) {
     case 'home':       return viewHome();
@@ -529,89 +403,79 @@ function safeView(route) {
 
 function wireRoute(route) {
   // Topbar actions
-  document.getElementById('btnLogout')?.addEventListener('click', doLogout);
-  document.getElementById('btnHome')?.addEventListener('click', () => go('home'));
+  $('#btnLogout')?.addEventListener('click', doLogout);
+  $('#btnHome')?.addEventListener('click', () => go('home'));
+  $('#burger')?.addEventListener('click', openSidebar);
+  $('#backdrop')?.addEventListener('click', closeSidebar);
 
-  // Sidebar open/close
-  document.getElementById('burger')?.addEventListener('click', openSidebar);
-  document.getElementById('backdrop')?.addEventListener('click', closeSidebar);
+  // PWA install button
+  const installBtn = $('#btnInstallApp');
+  if (installBtn) {
+    installBtn.style.display = window.__pwaCanPrompt ? 'inline-flex' : 'none';
+    installBtn.onclick = async ()=>{
+      if (!window.__pwaDeferredPrompt) return;
+      window.__pwaDeferredPrompt.prompt();
+      const { outcome } = await window.__pwaDeferredPrompt.userChoice.catch(()=>({outcome:'dismissed'}));
+      notify(outcome==='accepted'?'Installing…':'Install dismissed', outcome==='accepted'?'ok':'warn');
+      window.__pwaDeferredPrompt = null;
+      window.__pwaCanPrompt = false;
+      installBtn.style.display = 'none';
+    };
+  }
 
-  // In-content navigation buttons like: <button data-go="inventory">
-  document.querySelectorAll('[data-go]').forEach(el => {
-    el.addEventListener('click', () => {
-      const r  = el.getAttribute('data-go');
-      const id = el.getAttribute('data-id');
-      if (r) {
-        go(r);
-        if (id) setTimeout(() => { try { scrollToRow(id); } catch(_) {} }, 80);
-      }
+  // In-content nav buttons
+  document.querySelectorAll('[data-go]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const r=el.getAttribute('data-go'); const id=el.getAttribute('data-id');
+      if (r){ go(r); if(id) setTimeout(()=>{ try{scrollToRow(id);}catch{} },80); }
     });
   });
 
-  // Global helpers
+  // Helpers
   hookSidebarInteractions();
   ensureGlobalModals();
   enableMobileImagePreview();
-  enhanceHoverPreviews();
-  wirePWAInstallButton(); // show install button if ready
 
-  // Route-specific wiring
+  // Route-specific
   switch ((route || 'home')) {
-    case 'home':
-      wireHome();
-      break;
-    case 'dashboard':
-      wireDashboard();
-      wirePosts();
-      break;
-    case 'inventory':
-      wireInventory();
-      break;
-    case 'products':
-      wireProducts();
-      break;
-    case 'cogs':
-      wireCOGS();
-      break;
-    case 'tasks':
-      wireTasks();
-      break;
-    case 'settings':
-      wireSettings();
-      break;
-    case 'contact':
-      wireContact();
-      break;
+    case 'home':      wireHome(); break;
+    case 'dashboard': wireDashboard(); wirePosts(); break;
+    case 'inventory': wireInventory(); break;
+    case 'products':  wireProducts(); break;
+    case 'cogs':      wireCOGS(); break;
+    case 'tasks':     wireTasks(); break;
+    case 'settings':  wireSettings(); break;
+    case 'contact':   wireContact(); break;
   }
 }
 
 function renderApp() {
-  try {
-    if (!session) { renderLogin(); return; }
+  if (!session) { renderLogin(); return; }
+  const root = $('#root'); if (!root) return;
+  const route = currentRoute || 'home';
 
-    const root = document.getElementById('root');
-    if (!root) return;
-
-    const route = currentRoute || 'home';
-
-    root.innerHTML = `
-      <div class="app">
-        ${renderSidebar(route)}
-        <div>
-          ${renderTopbar()}
-          <div class="main" id="main">
-            ${safeView(route)}
-          </div>
+  root.innerHTML = `
+    <div class="app">
+      ${renderSidebar(route)}
+      <div>
+        ${renderTopbar()}
+        <div class="main" id="main">
+          ${safeView(route)}
         </div>
       </div>
-    `;
+    </div>
+    <div id="notification" class="notification"></div>
+    <div id="installBanner" class="card"><div class="card-body"><button class="btn secondary" id="btnInstallApp2"><i class="ri-download-2-line"></i> Install App</button></div></div>
+  `;
 
-    wireRoute(route);
-  } catch (e) {
-    console.error('[renderApp] crash:', e);
-    notify(e?.message || 'Render failed', 'danger');
-    showRescue(e);
+  // mini banner install hook
+  const b2 = $('#btnInstallApp2');
+  if (b2){
+    $('#installBanner').classList.toggle('show', !!window.__pwaCanPrompt);
+    b2.onclick = ()=> $('#btnInstallApp')?.click();
   }
+
+  wireRoute(route);
 }
 
 /* =========================
@@ -619,7 +483,7 @@ function renderApp() {
    ========================= */
 
 function renderLogin() {
-  const root = document.getElementById('root');
+  const root = $('#root');
   root.innerHTML = `
     <div class="login">
       <div class="card login-card">
@@ -641,7 +505,7 @@ function renderLogin() {
             </div>
 
             <div class="login-note" style="margin-top:6px">
-              Tip: you can log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
+              Tip: demo admin <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local).
             </div>
           </div>
         </div>
@@ -675,192 +539,155 @@ function renderLogin() {
     </div>
   `;
 
-  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('hover-suppressed'); };
-  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('hover-suppressed'); };
+  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('ui-layer-open'); };
+  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('ui-layer-open'); };
 
-  // ---------- Sign in ----------
-  const doSignIn = async () => {
-    const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
-    const pass  = document.getElementById('li-pass')?.value || '';
-    const btn   = document.getElementById('btnLogin');
+  async function doSignIn(){
+    const email = ($('#li-email')?.value || '').trim().toLowerCase();
+    const pass  = $('#li-pass')?.value || '';
+    const btn   = $('#btnLogin');
+    if (!email || !pass) return notify('Enter email & password','warn');
 
-    if (!email || !pass) { notify('Enter email & password','warn'); return; }
-
-    // Local demo admin (render immediately)
-    if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
+    if (email===DEMO_ADMIN_EMAIL && pass===DEMO_ADMIN_PASS){
       let users = load('users', []);
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
-      if (!prof) {
-        prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
-        users.push(prof); save('users', users);
-      }
-      session = { ...prof, authMode: 'local' };
-      save('session', session);
-      notify('Welcome, Admin (local mode)');
-      try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
-      return;
+      if (!prof) { prof = { name:'Admin', username:'admin', email: email, contact:'', role:'admin', password:'', img:'' }; users.push(prof); save('users',users); }
+      session = { ...prof, authMode:'local' }; save('session', session);
+      notify('Welcome, Admin (local)');
+      ensureSessionAndRender(null); return;
     }
 
     try {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
-      btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
-
-      const cred = await auth.signInWithEmailAndPassword(email, pass);
-      console.log('[auth] signIn OK:', cred.user?.uid);
-      notify('Welcome!');
-
-      setTimeout(() => {
-        const rendered = !!document.querySelector('.app');
-        if (!rendered) {
-          try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); notify('Render failed','danger'); }
-        }
-      }, 600);
-
-      btn.disabled = false; btn.innerHTML = keep;
-    } catch (e) {
+      btn.disabled = true; const keep=btn.innerHTML; btn.innerHTML='Signing in…';
+      await auth.signInWithEmailAndPassword(email, pass);
+      btn.disabled=false; btn.innerHTML=keep;
+    } catch(e){
       const map = {
-        'auth/invalid-email': 'Invalid email format.',
-        'auth/user-disabled': 'This user is disabled.',
-        'auth/user-not-found': 'No account found. Use Create account.',
-        'auth/wrong-password': 'Incorrect password.',
-        'auth/too-many-requests': 'Too many attempts. Try again later.',
-        'auth/operation-not-allowed': 'Email/password sign-in is disabled.',
-        'auth/network-request-failed': 'Network error. Check your connection.'
+        'auth/invalid-email':'Invalid email format.',
+        'auth/user-disabled':'This user is disabled.',
+        'auth/user-not-found':'No account found. Use Create account.',
+        'auth/wrong-password':'Incorrect password.',
+        'auth/too-many-requests':'Too many attempts. Try later.',
+        'auth/network-request-failed':'Network error. Check connection.'
       };
-      notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
-      console.error('[auth] signIn error:', e?.code, e?.message);
+      notify(map[e?.code] || (e?.message || 'Login failed'),'danger');
     }
-  };
+  }
 
-  // ---------- Sign up ----------
-  const doSignup = async () => {
+  const doSignup = async()=>{
     const name  = ($('#su-name')?.value || '').trim();
     const email = ($('#su-email')?.value || '').trim().toLowerCase();
-    const pass  = ($('#su-pass')?.value  || '');
-    const pass2 = ($('#su-pass2')?.value || '');
+    const pass  = $('#su-pass')?.value || '';
+    const pass2 = $('#su-pass2')?.value || '';
     if (!email || !pass) return notify('Email and password are required','warn');
     if (pass !== pass2)  return notify('Passwords do not match','warn');
-
     try {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
       await auth.createUserWithEmailAndPassword(email, pass);
       try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
-      notify('Account created — you are signed in');
-      closeAuthModal();
-    } catch (e) {
-      console.warn('[auth] Firebase signup failed; creating local account', e?.code, e?.message);
-      localSignup({name,email,pass});
-      closeAuthModal();
+      notify('Account created'); closeAuthModal();
+    } catch(e){
+      // local fallback
+      localSignup({name,email,pass}); closeAuthModal();
     }
   };
 
-  // ---------- Reset password ----------
-  const doReset = async () => {
+  const doReset = async()=>{
     const email = ($('#fp-email')?.value || '').trim().toLowerCase();
     if (!email) return notify('Enter your email','warn');
     try {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
       await auth.sendPasswordResetEmail(email);
-      notify('Reset email sent — check your inbox','ok');
-      closeAuthModal();
-    } catch (e) {
-      console.warn('[auth] Firebase reset failed; doing local reset', e?.code, e?.message);
+      notify('Reset email sent','ok'); closeAuthModal();
+    } catch(e){
       const r = localResetPassword(email);
-      if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
-      else { notify('Reset failed: '+ (r.msg || e?.message || 'Unknown'), 'danger'); }
+      if (r.ok) notify(`Local reset. Temp password: ${r.temp}`,'ok');
+      else      notify('Reset failed: '+(r.msg||e?.message||'Unknown'),'danger');
     }
   };
 
-  // ---------- Bindings ----------
-  const emailEl  = document.getElementById('li-email');
-  const passEl   = document.getElementById('li-pass');
-  const btnLogin = document.getElementById('btnLogin');
-
-  btnLogin?.addEventListener('click', doSignIn);
-  passEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
-
-  document.getElementById('link-forgot')?.addEventListener('click', (e)=>{ 
-    e.preventDefault(); 
-    openAuthModal('#m-reset'); 
-    const fp = document.getElementById('fp-email'); if (fp) fp.value = (emailEl?.value || '');
-  });
-  document.getElementById('link-register')?.addEventListener('click', (e)=>{ 
-    e.preventDefault(); 
-    openAuthModal('#m-signup'); 
-    const su = document.getElementById('su-email'); if (su) su.value = (emailEl?.value || '');
-  });
-
-  document.getElementById('cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
-  document.getElementById('cl-reset')?.addEventListener('click',  (e)=>{ e.preventDefault(); closeAuthModal(); });
-
-  document.getElementById('btnSignupDo')?.addEventListener('click', doSignup);
-  document.getElementById('btnResetDo')?.addEventListener('click',  doReset);
+  $('#btnLogin')?.addEventListener('click', doSignIn);
+  $('#li-pass')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doSignIn(); });
+  $('#link-register')?.addEventListener('click', e=>{ e.preventDefault(); openAuthModal('#m-signup'); $('#su-email').value=$('#li-email')?.value||''; });
+  $('#link-forgot')?.addEventListener('click',   e=>{ e.preventDefault(); openAuthModal('#m-reset'); $('#fp-email').value=$('#li-email')?.value||''; });
+  $('#cl-signup')?.addEventListener('click', ()=> closeAuthModal());
+  $('#cl-reset')?.addEventListener('click',  ()=> closeAuthModal());
+  $('#btnSignupDo')?.addEventListener('click', doSignup);
+  $('#btnResetDo')?.addEventListener('click',  doReset);
 }
 
 async function doLogout(){
   try { cloud?.disable?.(); } catch {}
   try { await auth.signOut(); } catch {}
-  if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
-  session = null; save('session', null);
-  currentRoute = 'home'; save('_route','home');
-  notify('Signed out');
-  try { renderLogin(); } catch (e) { console.error(e); }
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  session = null; save('session', null); currentRoute = 'home';
+  notify('Signed out'); renderLogin();
 }
 
-/* ===================== Part C.1 — Home (Hot music videos) ===================== */
+/* ========= Part C.1 — Home (Random videos daily + per-login) ========= */
 
-// ===== Music library -> weekly rotating set of 10 =====
 (function(){
-  // Full library of music video IDs (safe to embed)
-  if (!window.HOT_MUSIC_LIBRARY) window.HOT_MUSIC_LIBRARY = [
-    { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
-    { title:'DEAF KEV – Invincible (NCS Release)', id:'J2X5mJ3HDYE' },
-    { title:'Ikson – Anywhere (NCM)', id:'OZLUa8JUR18' },
-    { title:'Elektronomia – Sky High (NCS)', id:'TW9d8vYrVFQ' },
-    { title:'Janji – Heroes Tonight (NCS)', id:'3nQNiWdeH2Q' },
-    { title:'Jim Yosef – Firefly (NCS)', id:'x_OwcYTNbHs' },
-    { title:'Syn Cole – Feel Good (NCS)', id:'q1ULJ92aldE' },
-    { title:'Itro & Tobu – Cloud 9 (NCS)', id:'VtKbiyyVZks' },
+  // Update this with your favorite IDs (music + movies/trailers).
+  // Keep them legal-to-embed. Titles are for display only.
+  if (!window.GLOBAL_VIDEOS) window.GLOBAL_VIDEOS = [
     { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
-    { title:'Tobu – Candyland (NCS)', id:'IIrCDAV3EgI' },
+    { title:'DEAF KEV – Invincible (NCS)', id:'J2X5mJ3HDYE' },
+    { title:'LAKEY INSPIRED – Better Days', id:'RXLzvo6kvVQ' },
+    { title:'Ikson – Anywhere', id:'OZLUa8JUR18' },
+    { title:'Tobu – Candyland', id:'IIrCDAV3EgI' },
+    { title:'Elektronomia – Sky High', id:'TW9d8vYrVFQ' },
+    { title:'Janji – Heroes Tonight', id:'3nQNiWdeH2Q' },
+    { title:'Jim Yosef – Firefly', id:'x_OwcYTNbHs' },
+    { title:'Syn Cole – Feel Good', id:'q1ULJ92aldE' },
+    { title:'Itro & Tobu – Cloud 9', id:'VtKbiyyVZks' },
+    // Movies/trailers (examples; replace with legal-embed IDs you like)
+    { title:'Inception – Trailer', id:'YoHD9XEInc0' },
+    { title:'Interstellar – Trailer', id:'zSWdZVtXT7E' },
+    { title:'Bohemian Rhapsody (Queen – live)', id:'fJ9rUzIMcZQ' },
+    { title:'Michael Jackson – Beat It', id:'oRdxUFDoQe0' },
+    { title:'Elvis Presley – Suspicious Minds', id:'uo2aW9LqCjo' },
+    { title:'Amy Winehouse – Back To Black', id:'TJAfLE39ZZ8' },
+    { title:'Smokie – Living Next Door to Alice', id:'SmoyzD3tSRI' },
+    { title:'ABBA – Dancing Queen', id:'xFrGuyw1V8s' },
+    { title:'The Beatles – Let It Be', id:'QDYfEBY9NM4' },
+    { title:'Whitney Houston – I Will Always Love You', id:'3JWTaaS7LdU' }
   ];
 
-  // Build a weekly set of N items from the library (rotates deterministically by ISO week)
-  if (!window.buildWeeklyMusicSet) window.buildWeeklyMusicSet = (size = 10) => {
-    const lib = window.HOT_MUSIC_LIBRARY || [];
+  // PRNG seeded by yyyy-mm-dd for stable daily shuffle
+  function seedPRNG(seedStr){
+    let h=2166136261>>>0;
+    for(let i=0;i<seedStr.length;i++){ h^=seedStr.charCodeAt(i); h=(h*16777619)>>>0; }
+    return ()=> (h = (h*1664525 + 1013904223)>>>0) / 2**32;
+  }
+
+  if (!window.buildDailyRandomSet) window.buildDailyRandomSet = (size=10)=>{
+    const lib = window.GLOBAL_VIDEOS||[];
     if (!lib.length) return [];
-    const week = getISOWeek(new Date());
-    const start = week % lib.length;
-    const out = [];
-    for (let i=0; i<size; i++) out.push(lib[(start + i) % lib.length]);
-    return out;
+    const day = new Date(); const key = `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`;
+    const rnd = seedPRNG(key);
+    const idxs = lib.map((_,i)=>i);
+    // Fisher-Yates with seeded PRNG
+    for (let i=idxs.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [idxs[i],idxs[j]]=[idxs[j],idxs[i]]; }
+    return idxs.slice(0, Math.min(size, lib.length)).map(i=>lib[i]);
   };
 
-  // Expose this week’s 10
-  window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
-
-  // Stable weekly index in this set
-  if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
-    const weekOfYear = getISOWeek(new Date());
-    const n = Math.max(1, (window.HOT_MUSIC_VIDEOS||[]).length);
-    return weekOfYear % n;
-  };
-
-  // === YouTube blacklist helpers (skip broken / non-embeddable) ===============
+  // Blacklist for un-embeddable videos
   function _ytBlacklistLoad(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
   function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
   window.ytBlacklistAdd = (id)=>{ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
   window.ytIsBlacklisted= (id)=>{ const m=_ytBlacklistLoad(); return !!m[id]; };
-  window.ytBlacklistClear=()=> _ytBlacklistSave({});
+  window.ytBlacklistClear= ()=> _ytBlacklistSave({});
 })();
 
 function viewHome(){
-  const weeklyIdx = pickWeeklyVideoIndex();
+  const set = buildDailyRandomSet(10); // new set each day
+  const start = Math.floor(Math.random() * Math.max(1, set.length)); // new pick each login
   return `
     <div class="card">
       <div class="card-body">
-        <h3 style="margin-top:0">Welcome 👋</h3>
-        <p class="muted">Pick a section or watch this week’s hot music video. Tap Shuffle to change.</p>
+        <h3 style="margin-top:0">Hi ${session?.name||'there'} 👋</h3>
+        <p class="muted">Your quick tiles + a random pick from today’s world-wide videos. Shuffle to roll again.</p>
 
         <div class="grid cols-4 auto" style="margin-bottom:12px">
           <div class="card tile" data-go="inventory"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-archive-2-line"></i><div>Inventory</div></div></div>
@@ -873,17 +700,17 @@ function viewHome(){
           <div class="card">
             <div class="card-body">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <h4 style="margin:0">Hot Music Videos</h4>
+                <h4 style="margin:0">Random Music & Movies</h4>
                 <div style="display:flex;gap:8px">
                   <button class="btn ghost" id="btnShuffleVideo"><i class="ri-shuffle-line"></i> Shuffle</button>
                   <a class="btn secondary" id="btnOpenYouTube" href="#" target="_blank" rel="noopener"><i class="ri-youtube-fill"></i> Open on YouTube</a>
                 </div>
               </div>
 
-              <div id="musicVideoWrap" data-vid-index="${weeklyIdx}">
+              <div id="musicVideoWrap" data-vid-index="${start}">
                 <div id="ytPlayerHost" style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px;overflow:hidden"></div>
                 <div style="margin-top:8px;font-weight:700" id="mvTitle"></div>
-                <div class="muted" style="font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
+                <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, tap to play. We auto-skip blocked videos.</div>
               </div>
             </div>
           </div>
@@ -901,72 +728,52 @@ function wireHome(){
   const hostId = 'ytPlayerHost';
   if (!wrap || !title || !openYT) return;
 
-  // Load the YouTube Iframe API once
-  function loadYT(){
-    return new Promise((resolve)=>{
-      if (window.YT && YT.Player) return resolve();
-      const s = document.createElement('script');
-      s.src = "https://www.youtube.com/iframe_api";
-      document.head.appendChild(s);
-      window.onYouTubeIframeAPIReady = ()=> resolve();
-    });
-  }
+  // prepare today's set globally for wiring
+  const todaySet = buildDailyRandomSet(10);
+  window.HOME_TODAY_VIDEOS = todaySet;
 
-  // Pick next non-blacklisted candidate; if all bad, clear blacklist.
+  function loadYT(){ return new Promise((resolve)=>{ if (window.YT && YT.Player) return resolve(); const s=document.createElement('script'); s.src="https://www.youtube.com/iframe_api"; document.head.appendChild(s); window.onYouTubeIframeAPIReady=()=>resolve(); }); }
   function nextValidIndex(start){
-    const list = window.HOT_MUSIC_VIDEOS || [];
+    const list = HOME_TODAY_VIDEOS || [];
     if (!list.length) return 0;
-    for (let k=0; k<list.length; k++){
-      const i = (start + k) % list.length;
-      if (!ytIsBlacklisted(list[i].id)) return i;
-    }
-    ytBlacklistClear();
-    return start % list.length;
+    for (let k=0;k<list.length;k++){ const i=(start+k)%list.length; if (!ytIsBlacklisted(list[i].id)) return i; }
+    ytBlacklistClear(); return start%list.length;
   }
 
-  let player = null;
-
+  let player=null;
   function setVideoByIndex(idx){
-    const list = window.HOT_MUSIC_VIDEOS || [];
-    if (!list.length) return;
-
+    const list = HOME_TODAY_VIDEOS || []; if(!list.length) return;
     const i = nextValidIndex(idx);
     const { id, title: t } = list[i];
-
     wrap.setAttribute('data-vid-index', String(i));
-    title.textContent = t || 'Hot music';
+    title.textContent = t || 'Now playing';
     openYT.href = `https://www.youtube.com/watch?v=${id}`;
 
     const options = {
       host: 'https://www.youtube-nocookie.com',
       videoId: id,
-      playerVars: { rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
-      events: {
-        onError: ()=>{ try { ytBlacklistAdd(id); } catch {} notify('Video not available. Skipping…','warn'); setVideoByIndex(i + 1); }
-      }
+      playerVars: { rel:0, modestbranding:1, playsinline:1, origin: location.origin },
+      events: { onError: ()=>{ try{ ytBlacklistAdd(id); }catch{}; notify('Video not available. Skipping…','warn'); setVideoByIndex(i+1); } }
     };
 
-    if (!player){ player = new YT.Player(hostId, options); }
-    else { player.loadVideoById(id); }
+    if (!player) player = new YT.Player(hostId, options);
+    else player.loadVideoById(id);
   }
 
   loadYT().then(()=>{
-    const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
+    const startIdx = parseInt(wrap.getAttribute('data-vid-index')||'0',10) || 0;
     setVideoByIndex(startIdx);
     btn?.addEventListener('click', ()=>{
-      const list = window.HOT_MUSIC_VIDEOS || [];
-      if (!list.length) return;
+      const list = HOME_TODAY_VIDEOS || []; if (!list.length) return;
       const curr = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
       let next = Math.floor(Math.random()*list.length);
-      if (list.length > 1 && next === curr) next = (next+1) % list.length;
-      setVideoByIndex(next);
-      notify('Shuffled music video','ok');
+      if (list.length>1 && next===curr) next=(next+1)%list.length;
+      setVideoByIndex(next); notify('Shuffled','ok');
     });
   }).catch(()=> notify('YouTube player couldn’t load','warn'));
 }
 
 /* ===================== Part C.2 — Search ===================== */
-
 function viewSearch(){
   const q = (window.searchQuery || '').trim();
   const index = buildSearchIndex();
@@ -988,7 +795,6 @@ function viewSearch(){
 }
 
 /* ===================== Part C.3 — Dashboard + Posts ===================== */
-
 function viewDashboard(){
   const posts = load('posts', []);
   const inv   = load('inventory', []);
@@ -1006,11 +812,7 @@ function viewDashboard(){
 
   const today=new Date(); const cy=today.getFullYear(), cm=today.getMonth()+1;
   const py = cm===1? (cy-1) : cy; const pm = cm===1? 12 : (cm-1); const ly=cy-1, lm=cm;
-
-  const totalThisMonth=sumForMonth(cy,cm),
-        totalPrevMonth=sumForMonth(py,pm),
-        totalLY=sumForMonth(ly,lm);
-
+  const totalThisMonth=sumForMonth(cy,cm), totalPrevMonth=sumForMonth(py,pm), totalLY=sumForMonth(ly,lm);
   const pct=(a,b)=> (b>0 ? ((a-b)/b)*100 : (a>0? 100 : 0));
   const mom=pct(totalThisMonth,totalPrevMonth), yoy=pct(totalThisMonth,totalLY);
   const fmtPct = (v)=> `${v>=0?'+':''}${v.toFixed(1)}%`;
@@ -1064,7 +866,6 @@ function viewDashboard(){
       </div>
     </div>`;
 }
-
 function wireDashboard(){ $('#addPost')?.addEventListener('click', ()=> openModal('m-post')); }
 function wirePosts(){
   const sec = document.querySelector('[data-section="posts"]'); if (!sec) return;
@@ -1094,7 +895,7 @@ function wirePosts(){
 
 /* ===================== Part D — Inventory / Products / COGS / Tasks ===================== */
 
-// CSV export
+// CSV helper
 function downloadCSV(filename, rows, headers) {
   try {
     const csvRows = [];
@@ -1118,18 +919,13 @@ function downloadCSV(filename, rows, headers) {
   } catch (e) { notify('Export failed', 'danger'); }
 }
 
-// Generic image upload helper (file -> dataURL -> set into text input)
+// Image upload: file -> dataURL -> set to input
 function attachImageUpload(fileInputSel, textInputSel){
   const f = $(fileInputSel), t = $(textInputSel); if (!f || !t) return;
-  f.onchange = ()=>{
-    const file = f.files && f.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ()=>{ t.value = reader.result; };
-    reader.readAsDataURL(file);
-  };
+  f.onchange = ()=>{ const file=f.files && f.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=()=>{ t.value=reader.result; }; reader.readAsDataURL(file); };
 }
 
-// Inventory
+/* ----- Inventory ----- */
 function viewInventory(){
   const items = load('inventory', []);
   return `
@@ -1175,40 +971,46 @@ function wireInventory(){
   const sec = document.querySelector('[data-section="inventory"]'); if (!sec) return;
 
   $('#export-inventory')?.addEventListener('click', ()=>{
-    const items = load('inventory', []);
-    downloadCSV('inventory.csv', items, ['id','name','code','type','price','stock','threshold','img']);
+    downloadCSV('inventory.csv', load('inventory', []), ['id','name','code','type','price','stock','threshold','img']);
   });
 
+  // Add: empty values, placeholders only
   $('#addInv')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-inv'); document.body.classList.add('hover-suppressed');
-    $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value=''; $('#inv-type').value='Other';
-    $('#inv-price').value='0'; $('#inv-stock').value='0'; $('#inv-threshold').value='0'; $('#inv-img').value='';
+    openModal('m-inv');
+    $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value='';
+    $('#inv-type').value='Other'; $('#inv-price').value=''; $('#inv-stock').value=''; $('#inv-threshold').value=''; $('#inv-img').value='';
     attachImageUpload('#inv-imgfile', '#inv-img');
   });
 
+  // Save (robust)
   $('#save-inv')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
+    const toF = v => { const n = parseFloat(String(v||'').trim()); return Number.isFinite(n) ? n : 0; };
+    const toI = v => { const n = parseInt(String(v||'').trim(), 10); return Number.isFinite(n) ? n : 0; };
+
     const items = load('inventory', []);
-    const id = $('#inv-id').value || ('inv_'+Date.now());
+    const id = ($('#inv-id')?.value || '').trim() || ('inv_'+Date.now());
     const obj = {
       id,
-      name: $('#inv-name').value.trim(),
-      code: $('#inv-code').value.trim(),
-      type: $('#inv-type').value.trim(),
-      price: parseFloat($('#inv-price').value || '0'),
-      stock: parseInt($('#inv-stock').value || '0'),
-      threshold: parseInt($('#inv-threshold').value || '0'),
-      img: $('#inv-img').value.trim(),
+      name: ($('#inv-name')?.value || '').trim(),
+      code: ($('#inv-code')?.value || '').trim(),
+      type: ($('#inv-type')?.value || 'Other').trim(),
+      price: toF($('#inv-price')?.value),
+      stock: toI($('#inv-stock')?.value),
+      threshold: toI($('#inv-threshold')?.value),
+      img: ($('#inv-img')?.value || '').trim()
     };
     if (!obj.name) return notify('Name required','warn');
+
     const i = items.findIndex(x=>x.id===id);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); items[i]=obj; }
     else items.push(obj);
-    save('inventory', items);
-    closeModal('m-inv'); notify('Saved'); renderApp();
+
+    save('inventory', items); closeModal('m-inv'); notify('Saved'); renderApp();
   });
 
+  // Row actions
   sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const items = load('inventory', []);
@@ -1218,9 +1020,13 @@ function wireInventory(){
       if (!canEdit()) return notify('No permission','warn');
       const id = btn.getAttribute('data-edit');
       const it = get(id); if (!it) return;
-      openModal('m-inv'); document.body.classList.add('hover-suppressed');
-      $('#inv-id').value=id; $('#inv-name').value=it.name; $('#inv-code').value=it.code; $('#inv-type').value=it.type || 'Other';
-      $('#inv-price').value=it.price; $('#inv-stock').value=it.stock; $('#inv-threshold').value=it.threshold; $('#inv-img').value=it.img || '';
+      openModal('m-inv');
+      $('#inv-id').value=id; $('#inv-name').value=it.name; $('#inv-code').value=it.code;
+      $('#inv-type').value=it.type || 'Other';
+      $('#inv-price').value=(it.price ?? '').toString();
+      $('#inv-stock').value=(it.stock ?? '').toString();
+      $('#inv-threshold').value=(it.threshold ?? '').toString();
+      $('#inv-img').value=it.img||'';
       attachImageUpload('#inv-imgfile', '#inv-img');
       return;
     }
@@ -1235,16 +1041,16 @@ function wireInventory(){
     if (!id) return; if (!canAdd()) return notify('No permission','warn');
     const it = get(id); if (!it) return;
 
-    if (btn.hasAttribute('data-inc')) it.stock++;
-    if (btn.hasAttribute('data-dec')) it.stock = Math.max(0, it.stock-1);
-    if (btn.hasAttribute('data-inc-th')) it.threshold++;
-    if (btn.hasAttribute('data-dec-th')) it.threshold = Math.max(0, it.threshold-1);
+    if (btn.hasAttribute('data-inc')) it.stock = (parseInt(it.stock||0,10)||0) + 1;
+    if (btn.hasAttribute('data-dec')) it.stock = Math.max(0, (parseInt(it.stock||0,10)||0) - 1);
+    if (btn.hasAttribute('data-inc-th')) it.threshold = (parseInt(it.threshold||0,10)||0) + 1;
+    if (btn.hasAttribute('data-dec-th')) it.threshold = Math.max(0, (parseInt(it.threshold||0,10)||0) - 1);
 
     save('inventory', items); renderApp();
   });
 }
 
-// Products
+/* ----- Products ----- */
 function viewProducts(){
   const items = load('products', []);
   return `
@@ -1282,41 +1088,42 @@ function wireProducts(){
   const sec = document.querySelector('[data-section="products"]'); if (!sec) return;
 
   $('#export-products')?.addEventListener('click', ()=>{
-    const items = load('products', []);
-    downloadCSV('products.csv', items, ['id','name','barcode','price','type','ingredients','instructions','img']);
+    downloadCSV('products.csv', load('products', []), ['id','name','barcode','price','type','ingredients','instructions','img']);
   });
 
   $('#addProd')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-prod'); document.body.classList.add('hover-suppressed');
-    $('#prod-id').value=''; $('#prod-name').value=''; $('#prod-barcode').value=''; $('#prod-price').value='0';
-    $('#prod-type').value=''; $('#prod-ingredients').value=''; $('#prod-instructions').value=''; $('#prod-img').value='';
+    openModal('m-prod');
+    $('#prod-id').value=''; $('#prod-name').value=''; $('#prod-barcode').value='';
+    $('#prod-price').value=''; $('#prod-type').value=''; $('#prod-ingredients').value=''; $('#prod-instructions').value=''; $('#prod-img').value='';
     attachImageUpload('#prod-imgfile', '#prod-img');
   });
 
   $('#save-prod')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
+    const toF = v => { const n = parseFloat(String(v||'').trim()); return Number.isFinite(n) ? n : 0; };
     const items = load('products', []);
-    const id = $('#prod-id').value || ('p_'+Date.now());
+    const id = ($('#prod-id')?.value || '').trim() || ('p_'+Date.now());
     const obj = {
       id,
-      name: $('#prod-name').value.trim(),
-      barcode: $('#prod-barcode').value.trim(),
-      price: parseFloat($('#prod-price').value || '0'),
-      type: $('#prod-type').value.trim(),
-      ingredients: $('#prod-ingredients').value.trim(),
-      instructions: $('#prod-instructions').value.trim(),
-      img: $('#prod-img').value.trim()
+      name: ($('#prod-name')?.value || '').trim(),
+      barcode: ($('#prod-barcode')?.value || '').trim(),
+      price: toF($('#prod-price')?.value),
+      type: ($('#prod-type')?.value || '').trim(),
+      ingredients: ($('#prod-ingredients')?.value || '').trim(),
+      instructions: ($('#prod-instructions')?.value || '').trim(),
+      img: ($('#prod-img')?.value || '').trim()
     };
     if (!obj.name) return notify('Name required','warn');
+
     const i = items.findIndex(x=>x.id===id);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); items[i]=obj; }
     else items.push(obj);
-    save('products', items);
-    closeModal('m-prod'); notify('Saved'); renderApp();
+
+    save('products', items); closeModal('m-prod'); notify('Saved'); renderApp();
   });
 
-  // Product card + row actions
+  // Card & row actions
   sec.addEventListener('click', (e)=>{
     const prodCard = e.target.closest('.prod-thumb');
     if (prodCard){
@@ -1330,8 +1137,7 @@ function wireProducts(){
       $('#pc-type').textContent = it.type || '';
       $('#pc-ingredients').textContent = it.ingredients || '';
       $('#pc-instructions').textContent = it.instructions || '';
-      openModal('m-card'); document.body.classList.add('hover-suppressed');
-      return;
+      openModal('m-card'); return;
     }
 
     const btn = e.target.closest('button'); if (!btn) return;
@@ -1341,9 +1147,9 @@ function wireProducts(){
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const it = items.find(x=>x.id===id); if (!it) return;
-      openModal('m-prod'); document.body.classList.add('hover-suppressed');
+      openModal('m-prod');
       $('#prod-id').value=id; $('#prod-name').value=it.name; $('#prod-barcode').value=it.barcode||'';
-      $('#prod-price').value=it.price; $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||'';
+      $('#prod-price').value=(it.price ?? '').toString(); $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||'';
       $('#prod-instructions').value=it.instructions||''; $('#prod-img').value=it.img||'';
       attachImageUpload('#prod-imgfile', '#prod-img');
     } else {
@@ -1353,7 +1159,7 @@ function wireProducts(){
   });
 }
 
-// COGS
+/* ----- COGS ----- */
 function viewCOGS(){
   const rows = load('cogs', []);
   const totals = rows.reduce((a,r)=>({grossIncome:a.grossIncome+(+r.grossIncome||0),produceCost:a.produceCost+(+r.produceCost||0),itemCost:a.itemCost+(+r.itemCost||0),freight:a.freight+(+r.freight||0),delivery:a.delivery+(+r.delivery||0),other:a.other+(+r.other||0)}),{grossIncome:0,produceCost:0,itemCost:0,freight:0,delivery:0,other:0});
@@ -1397,27 +1203,25 @@ function viewCOGS(){
 function wireCOGS(){
   const sec = document.querySelector('[data-section="cogs"]'); if (!sec) return;
 
-  $('#export-cogs')?.addEventListener('click', ()=>{
-    const rows = load('cogs', []);
-    downloadCSV('cogs.csv', rows, ['id','date','grossIncome','produceCost','itemCost','freight','delivery','other']);
-  });
+  $('#export-cogs')?.addEventListener('click', ()=> downloadCSV('cogs.csv', load('cogs', []), ['id','date','grossIncome','produceCost','itemCost','freight','delivery','other']) );
 
   $('#addCOGS')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-cogs'); document.body.classList.add('hover-suppressed');
+    openModal('m-cogs');
     $('#cogs-id').value=''; $('#cogs-date').value=new Date().toISOString().slice(0,10);
-    $('#cogs-grossIncome').value='0'; $('#cogs-produceCost').value='0'; $('#cogs-itemCost').value='0';
-    $('#cogs-freight').value='0'; $('#cogs-delivery').value='0'; $('#cogs-other').value='0';
+    $('#cogs-grossIncome').value=''; $('#cogs-produceCost').value=''; $('#cogs-itemCost').value='';
+    $('#cogs-freight').value=''; $('#cogs-delivery').value=''; $('#cogs-other').value='';
   });
 
   $('#save-cogs')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
+    const toF=v=>{const n=parseFloat(String(v||'').trim());return Number.isFinite(n)?n:0;};
     const rows = load('cogs', []);
     const id = $('#cogs-id').value || ('c_'+Date.now());
     const row = { id, date: $('#cogs-date').value || new Date().toISOString().slice(0,10),
-      grossIncome:+($('#cogs-grossIncome').value||0), produceCost:+($('#cogs-produceCost').value||0),
-      itemCost:+($('#cogs-itemCost').value||0), freight:+($('#cogs-freight').value||0),
-      delivery:+($('#cogs-delivery').value||0), other:+($('#cogs-other').value||0) };
+      grossIncome:toF($('#cogs-grossIncome').value), produceCost:toF($('#cogs-produceCost').value),
+      itemCost:toF($('#cogs-itemCost').value), freight:toF($('#cogs-freight').value),
+      delivery:toF($('#cogs-delivery').value), other:toF($('#cogs-other').value) };
     const i = rows.findIndex(x=>x.id===id);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); rows[i]=row; } else rows.push(row);
     save('cogs', rows); closeModal('m-cogs'); notify('Saved'); renderApp();
@@ -1430,7 +1234,7 @@ function wireCOGS(){
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const r = load('cogs', []).find(x=>x.id===id); if (!r) return;
-      openModal('m-cogs'); document.body.classList.add('hover-suppressed');
+      openModal('m-cogs');
       $('#cogs-id').value=id; $('#cogs-date').value=r.date; $('#cogs-grossIncome').value=r.grossIncome;
       $('#cogs-produceCost').value=r.produceCost; $('#cogs-itemCost').value=r.itemCost; $('#cogs-freight').value=r.freight;
       $('#cogs-delivery').value=r.delivery; $('#cogs-other').value=r.other;
@@ -1441,7 +1245,7 @@ function wireCOGS(){
   });
 }
 
-// Tasks (DnD + mobile tap-to-move)
+/* ----- Tasks ----- */
 function viewTasks(){
   const items = load('tasks', []);
   const lane = (key, label, color)=>`
@@ -1471,14 +1275,28 @@ function viewTasks(){
     ${lane('done','Done','#10b981')}
   </div>`;
 }
-
+function setupDnD(){
+  const lanes = ['todo','inprogress','done'];
+  document.querySelectorAll('[data-task]').forEach(card=>{
+    card.ondragstart = (e)=> { e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); e.dataTransfer.dropEffect='move'; };
+  });
+  lanes.forEach(k=>{
+    const laneGrid  = $('#lane-'+k); const parentCard = laneGrid?.closest('.lane-row'); if (!laneGrid) return;
+    laneGrid.ondragover  = (e)=>{ e.preventDefault(); parentCard?.classList.add('drop'); };
+    laneGrid.ondragleave = ()=> parentCard?.classList.remove('drop');
+    laneGrid.ondrop      = (e)=>{ e.preventDefault(); parentCard?.classList.remove('drop');
+      if (!canAdd()) return notify('No permission','warn');
+      const id = e.dataTransfer.getData('text/plain'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
+      t.status = k; save('tasks', items); renderApp();
+    };
+  });
+}
 function wireTasks(){
   const root = document.querySelector('[data-section="tasks"]'); if (!root) return;
 
   $('#addTask')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-task'); document.body.classList.add('hover-suppressed');
-    $('#task-id').value=''; $('#task-title').value=''; $('#task-status').value='todo';
+    openModal('m-task'); $('#task-id').value=''; $('#task-title').value=''; $('#task-status').value='todo';
   });
 
   $('#save-task')?.addEventListener('click', ()=>{
@@ -1493,7 +1311,6 @@ function wireTasks(){
     save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
   });
 
-  // row actions
   root.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
@@ -1501,8 +1318,7 @@ function wireTasks(){
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const t = items.find(x=>x.id===id); if (!t) return;
-      openModal('m-task'); document.body.classList.add('hover-suppressed');
-      $('#task-id').value=t.id; $('#task-title').value=t.title; $('#task-status').value=t.status;
+      openModal('m-task'); $('#task-id').value=t.id; $('#task-title').value=t.title; $('#task-status').value=t.status;
     } else {
       if (!canDelete()) return notify('No permission','warn');
       save('tasks', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
@@ -1511,7 +1327,6 @@ function wireTasks(){
 
   setupDnD();
 
-  // Mobile/touch fallback: tap a card cycles lane
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   if (isTouch) {
     $$('.task-card').forEach(card=>{
@@ -1526,32 +1341,10 @@ function wireTasks(){
   }
 }
 
-function setupDnD(){
-  const lanes = ['todo','inprogress','done'];
-  document.querySelectorAll('[data-task]').forEach(card=>{
-    card.ondragstart = (e)=> {
-      e.dataTransfer.setData('text/plain', card.getAttribute('data-task'));
-      e.dataTransfer.dropEffect = 'move';
-    };
-  });
-  lanes.forEach(k=>{
-    const laneGrid  = document.getElementById('lane-'+k);
-    const parentCard = laneGrid?.closest('.lane-row'); if (!laneGrid) return;
-    laneGrid.ondragover  = (e)=>{ e.preventDefault(); parentCard?.classList.add('drop'); };
-    laneGrid.ondragleave = ()=> parentCard?.classList.remove('drop');
-    laneGrid.ondrop      = (e)=>{
-      e.preventDefault(); parentCard?.classList.remove('drop');
-      if (!canAdd()) return notify('No permission','warn');
-      const id = e.dataTransfer.getData('text/plain'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
-      t.status = k; save('tasks', items); renderApp();
-    };
-  });
-}
+/* ===================== Part E — Settings / Contact / Pages / Modals ===================== */
 
-/* ===================== Part E — Settings / Contact / Modals ===================== */
-
-function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); document.body.classList.add('hover-suppressed'); }
-function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); document.body.classList.remove('hover-suppressed'); }
+function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); document.body.classList.add('ui-layer-open'); }
+function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); document.body.classList.remove('ui-layer-open'); }
 
 function enableMobileImagePreview(){
   const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
@@ -1564,223 +1357,94 @@ function enableMobileImagePreview(){
   });
 }
 
-// Static pages + Contact
+/* Static/link pages (About, Policy, etc.) */
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
   about: `
-    <div class="prose">
-      <div class="hero">
-        <span class="badge">Fast · Offline · Private</span>
-        <h1>About Inventory</h1>
-        <p>Inventory is a lightweight, installable app for everyday stock control. From <strong>home businesses</strong> and <strong>food trucks</strong> to <strong>cafés</strong> and <strong>retail counters</strong>, it helps you track items, costs, and tasks without the bloat.</p>
+    <div class="page-frame">
+      <h2>About Inventory</h2>
+      <p>Inventory is a fast, offline-friendly web app built for everyday operations — from small shops to growing mid-sized teams.</p>
+      <div class="grid cols-3">
+        <div class="card"><div class="card-body"><strong>Track Stock</strong><p class="muted">Add items, update stock/thresholds, and spot low or critical levels instantly.</p></div></div>
+        <div class="card"><div class="card-body"><strong>Manage Products</strong><p class="muted">Images, barcodes, ingredients, and instructions — all in one place.</p></div></div>
+        <div class="card"><div class="card-body"><strong>COGS & Posts</strong><p class="muted">Record daily costs & gross income; share updates with your team.</p></div></div>
       </div>
-
-      <div class="grid-2">
-        <div class="feature">
-          <h3>Why you’ll love it</h3>
-          <ul>
-            <li>Super fast UI with image previews and global search.</li>
-            <li>Products and COGS in one place, exportable to CSV.</li>
-            <li>Works offline; install it like an app (PWA).</li>
-            <li>Optional Cloud Sync via your own Firebase project.</li>
-          </ul>
-        </div>
-        <div class="feature">
-          <h3>Perfect for</h3>
-          <ul>
-            <li>Small to medium shops managing daily stock.</li>
-            <li>Pop-ups, markets, and mobile vendors.</li>
-            <li>Studios & workshops tracking supplies.</li>
-            <li>Teams who want simple, reliable tools.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="grid-2" style="margin-top:12px">
-        <div class="kpi"><i class="ri-flashlight-line"></i> <div><strong>Instant</strong><div class="muted">No page reloads, no fuss.</div></div></div>
-        <div class="kpi"><i class="ri-shield-check-line"></i> <div><strong>Yours</strong><div class="muted">You own your Firebase data.</div></div></div>
-      </div>
+      <p class="muted">Built-in login, optional Cloud Sync (Firebase), PWA install, and an accessible UI that works great on mobile.</p>
     </div>`,
-
-  guide: `
-    <div class="prose">
-      <div class="hero">
-        <span class="badge">Start here</span>
-        <h1>User Guide</h1>
-        <p>Everything you need to get productive fast.</p>
-      </div>
-
-      <div class="grid-2">
-        <div class="feature">
-          <h3>Navigation</h3>
-          <ul>
-            <li><strong>Inventory</strong>: items, stock, thresholds, quick +/- buttons.</li>
-            <li><strong>Products</strong>: sellable items with barcode, price & images.</li>
-            <li><strong>COGS</strong>: enter daily/weekly numbers and see profit.</li>
-            <li><strong>Tasks</strong>: drag cards across To-do → In progress → Done.</li>
-          </ul>
-        </div>
-        <div class="feature">
-          <h3>Tips</h3>
-          <ul>
-            <li>Hover a thumbnail to preview; tap on phones to open a large view.</li>
-            <li>Use the global search in the sidebar to find anything instantly.</li>
-            <li>Export CSV from Inventory/Products/COGS to share with accounting.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="callout">
-        <strong>Offline & Install:</strong> It’s a PWA. On desktop/Android you’ll see an Install button; on iPhone use <em>Share → Add to Home Screen</em>.
-      </div>
-
-      <h3>FAQ</h3>
-      <ul>
-        <li><strong>Where is my data?</strong> In your browser. Turn on Cloud Sync to back up to your Firebase.</li>
-        <li><strong>Multi-device?</strong> Sign into the same Firebase account and turn Cloud Sync ON.</li>
-        <li><strong>Team accounts?</strong> Each user has their own silo by default. Ask us to enable a shared workspace.</li>
-      </ul>
-    </div>`,
-
-  setup: `
-    <div class="prose">
-      <div class="hero">
-        <span class="badge">Step-by-step</span>
-        <h1>Setup Guide</h1>
-        <p>From zero to running in a few minutes.</p>
-      </div>
-      <ol>
-        <li><strong>Firebase</strong>
-          <ul>
-            <li>Create a project → Build → Authentication → Sign-in method → enable <em>Email/Password</em>.</li>
-            <li>Build → Realtime Database → Create database (in test mode is fine for dev).</li>
-            <li>Project settings → copy the Web config and paste it into <code>app.js</code> (already scaffolded).</li>
-          </ul>
-        </li>
-        <li><strong>Cloud Sync</strong>
-          <ul>
-            <li>Sign in (top-right → Login).</li>
-            <li>Go to <em>Settings → Cloud Sync</em> and switch it ON.</li>
-            <li>Click <em>Sync Now</em> once to push current local data.</li>
-          </ul>
-        </li>
-        <li><strong>PWA (Installable)</strong>
-          <ul>
-            <li>Keep <code>manifest.webmanifest</code> and <code>service-worker.js</code> in the web root.</li>
-            <li>Desktop/Android will show an <em>Install</em> button automatically.</li>
-            <li>On iPhone: <em>Share → Add to Home Screen</em>.</li>
-          </ul>
-        </li>
-        <li><strong>EmailJS (optional)</strong>
-          <ul>
-            <li>Create a Service + Template on EmailJS; copy the <em>Public key</em>, <em>Service ID</em>, <em>Template ID</em>.</li>
-            <li>Paste them in <em>Settings → Email Delivery</em> and click <em>Save Keys</em>.</li>
-            <li>Now the <em>Contact</em> page can send in-app messages.</li>
-          </ul>
-        </li>
-      </ol>
-    </div>`,
-
-  policy: `
-    <div class="prose">
-      <div class="hero"><span class="badge">Trust</span><h1>Policy</h1><p>Your data, your control.</p></div>
-      <h3>Data Storage</h3>
-      <ul>
-        <li><strong>Local by default:</strong> Your data lives in your browser.</li>
-        <li><strong>Cloud Sync (optional):</strong> If enabled, an encrypted copy is stored in <em>your</em> Firebase Realtime Database under your user ID.</li>
-      </ul>
-      <h3>Security</h3>
-      <ul>
-        <li>Sign-in via Firebase (Email/Password). Passwords are handled by Firebase — not by this app.</li>
-        <li>We use HTTPS, service workers, and browser storage APIs.</li>
-      </ul>
-      <h3>Portability</h3>
-      <ul>
-        <li>Export CSV any time (Inventory, Products, COGS).</li>
-        <li>Disable Cloud Sync and delete your Firebase data at will.</li>
-      </ul>
-    </div>`,
-
-  license: `
-    <div class="prose">
-      <div class="hero"><span class="badge">Open</span><h1>License</h1><p>Simple terms for real-world use.</p></div>
-      <p>Use, modify, self-host, and deploy commercially. Attribution appreciated but not required. No warranty — use at your own risk.</p>
-      <div class="callout"><strong>Tip:</strong> Keep your Firebase keys private and rotate them if exposed.</div>
-    </div>`,
-
-  contact: `
-    <div class="prose">
-      <div class="hero"><span class="badge">We’re here</span><h1>Contact</h1><p>Have questions or feature ideas? Reach out.</p></div>
-      <div class="grid-2">
-        <div class="feature">
-          <h3>Email</h3>
-          <p class="muted">Prefer your own email app?</p>
-          <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Inventory%20Support&body=Hi%2C%20I%20need%20help%20with..." target="_blank" rel="noopener"><i class="ri-mail-send-line"></i> Email us</a>
-        </div>
-        <div class="feature">
-          <h3>In-app message (EmailJS)</h3>
-          <p class="muted">Set keys in Settings → Email Delivery, then send below.</p>
-          <div class="grid">
+  policy:  `<div class="page-frame"><h2>Policy</h2><iframe class="page-embed" src="policy.html"></iframe></div>`,
+  license: `<div class="page-frame"><h2>License</h2><iframe class="page-embed" src="license.html"></iframe></div>`,
+  setup:   `<div class="page-frame"><h2>Setup Guide</h2><iframe class="page-embed" src="setup-guide.html"></iframe></div>`,
+  guide:   `<div class="page-frame"><h2>User Guide</h2><iframe class="page-embed" src="guide.html"></iframe></div>`,
+  contact: (()=>{
+    const to = 'minmaung0307@gmail.com';
+    const emailBtn = `<a class="btn" href="mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent('Hello from Inventory')}" target="_blank" rel="noopener"><i class="ri-mail-send-line"></i> Contact via email</a>`;
+    // Only admin sees EmailJS form (optional)
+    const isAdmin = (session?.role==='admin');
+    const showForm = isAdmin && hasEmailJsCfg();
+    return `
+      <div class="page-frame">
+        <h2>Contact</h2>
+        <p class="muted">We’d love to hear from you.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${emailBtn}</div>
+        ${ showForm ? `
+          <div class="card"><div class="card-body grid">
+            <h3 style="margin:0">Send quick message (admin)</h3>
             <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
             <input id="ct-subj"  class="input" placeholder="Subject"/>
-            <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
+            <textarea id="ct-msg" class="input" rows="5" placeholder="Message"></textarea>
             <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
             <div id="ct-note" class="muted" style="font-size:12px"></div>
-          </div>
-        </div>
-      </div>
-      <div class="callout"><strong>Support hours:</strong> Mon–Fri, 9am–5pm (your local time).</div>
-    </div>`
+          </div></div>` : `
+          <p class="muted">Tip: Admins can enable EmailJS in Settings to send from the app.</p>`}
+      </div>`;
+  })()
 });
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
 
+/* EmailJS config (admin-only panel + contact form send) */
+function getEmailJsCfg(){ return _lsGet('_emailjsCfg', { pk:'', service:'', template:'' }); }
+function setEmailJsCfg(cfg){ save('_emailjsCfg', cfg); }
+function hasEmailJsCfg(){ const c=getEmailJsCfg(); return !!(c.pk && c.service && c.template); }
+
 function wireContact(){
-  const btn = $('#ct-send'); if (!btn) return;
+  const btn = $('#ct-send'); if (!btn) return; // only if admin + configured
   btn.onclick = async ()=>{
     const fromEmail = ($('#ct-email')?.value || '').trim();
     const subject   = ($('#ct-subj')?.value  || '').trim();
     const message   = ($('#ct-msg')?.value   || '').trim();
     const note      = $('#ct-note');
-
-    if (!fromEmail || !subject || !message) { notify('Fill email, subject & message','warn'); return; }
+    if (!fromEmail || !subject || !message) { notify('Please fill your email, subject and message','warn'); return; }
 
     const TO = 'minmaung0307@gmail.com';
-    const hasKeys = EMAILJS.PUBLIC_KEY && EMAILJS.SERVICE_ID && EMAILJS.TEMPLATE_ID;
+    const cfg = getEmailJsCfg();
 
     try{
-      if (!hasKeys || !window.emailjs || !window.emailjs.send) {
-        notify('EmailJS not configured. Use the Email button above or add keys in Settings.','warn');
-        if (note) note.textContent = 'Tip: Settings → Email Delivery.';
-        return;
-      }
-      if (!window.__emailjs_inited){ window.emailjs.init(EMAILJS.PUBLIC_KEY); window.__emailjs_inited = true; }
-      await window.emailjs.send(EMAILJS.SERVICE_ID, EMAILJS.TEMPLATE_ID, {
-        from_name: fromEmail,
-        reply_to: fromEmail,
-        subject,
-        message,
-        to_email: TO
+      if (!window.emailjs){ const s=document.createElement('script'); s.src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"; document.head.appendChild(s); await new Promise(r=> s.onload=r); }
+      if (!window.__emailjs_inited){ window.emailjs.init(cfg.pk); window.__emailjs_inited = true; }
+      await window.emailjs.send(cfg.service, cfg.template, {
+        from_name: fromEmail, reply_to: fromEmail, subject, message, to_email: TO
       });
       notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
       $('#ct-msg').value=''; $('#ct-subj').value='';
     }catch(e){
-      notify('Failed to send message','danger');
-      if (note) note.textContent = e?.message || 'Unknown error';
+      notify('Failed to send message','danger'); if (note) note.textContent = e?.message || 'Unknown error';
     }
   };
 }
 
-// Settings (Cloud/Theme + Users + EmailJS)
+/* Settings (Cloud/Theme + Users + EmailJS admin panel) */
 function viewSettings(){
   const users = load('users', []);
   const theme = getTheme();
   const cloudOn = cloud.isOn();
-  const ej = EMAILJS;
+  const cfg = getEmailJsCfg();
+  const isAdmin = (session?.role==='admin');
+
   return `
     <div class="grid">
       <div class="card"><div class="card-body">
         <h3 style="margin-top:0">Cloud Sync</h3>
-        <p class="muted">Keep your data in Firebase Realtime Database.</p>
+        <p class="muted">Keep your data in Firebase Realtime Database (per user account).</p>
         <div class="theme-inline">
           <div><label style="font-size:12px" class="muted">Status</label>
             <select id="cloud-toggle" class="input"><option value="off" ${!cloudOn?'selected':''}>Off</option><option value="on" ${cloudOn?'selected':''}>On</option></select>
@@ -1789,7 +1453,7 @@ function viewSettings(){
             <button class="btn" id="cloud-sync-now"><i class="ri-cloud-line"></i> Sync Now</button>
           </div>
         </div>
-        <p class="muted" style="font-size:12px;margin-top:8px">Cloud Sync requires Firebase sign-in.</p>
+        <p class="muted" style="font-size:12px;margin-top:8px">Cloud Sync is user-isolated. Admins can see all users in Settings list but not their private cloud data.</p>
       </div></div>
 
       <div class="card"><div class="card-body">
@@ -1808,25 +1472,21 @@ function viewSettings(){
         </div>
       </div></div>
 
+      ${ isAdmin ? `
       <div class="card"><div class="card-body">
-        <h3 style="margin-top:0">Email Delivery (EmailJS)</h3>
-        <div class="theme-inline">
-          <div>
-            <label class="muted" style="font-size:12px">Public Key</label>
-            <input id="ej-public" class="input" placeholder="e.g. 0aBc..." value="${ej.PUBLIC_KEY||''}">
-          </div>
-          <div>
-            <label class="muted" style="font-size:12px">Service ID</label>
-            <input id="ej-service" class="input" placeholder="service_xxx" value="${ej.SERVICE_ID||''}">
-          </div>
-          <div>
-            <label class="muted" style="font-size:12px">Template ID</label>
-            <input id="ej-template" class="input" placeholder="template_xxx" value="${ej.TEMPLATE_ID||''}">
-          </div>
+        <h3 style="margin-top:0">Email Delivery (Admin)</h3>
+        <p class="muted">Configure <strong>EmailJS</strong> for the Contact page (only admin sees the form).</p>
+        <div class="grid cols-3">
+          <input id="ej-pk" class="input" placeholder="Public Key (pk_xxx)" value="${cfg.pk||''}">
+          <input id="ej-service" class="input" placeholder="Service ID (service_xxx)" value="${cfg.service||''}">
+          <input id="ej-template" class="input" placeholder="Template ID (template_xxx)" value="${cfg.template||''}">
         </div>
-        <div style="margin-top:8px"><button class="btn" id="ej-save"><i class="ri-save-3-line"></i> Save Keys</button></div>
-        <p class="muted" style="font-size:12px;margin-top:6px">Optional. If unset, Contact uses your email app via <code>mailto:</code>.</p>
-      </div></div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="btn" id="ej-save"><i class="ri-save-3-line"></i> Save</button>
+          <button class="btn ghost" id="ej-clear"><i class="ri-eraser-line"></i> Clear</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:6px">Not configured? Users still get a simple “Contact via email” button.</p>
+      </div></div>` : '' }
 
       <div class="card"><div class="card-body">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -1834,17 +1494,12 @@ function viewSettings(){
           ${canAdd()? `<button class="btn" id="addUser"><i class="ri-add-line"></i> Add User</button>`:''}
         </div>
         <table class="table" data-section="users">
-          <thead><tr><th>Avatar</th><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
           <tbody>
             ${users.map(u=>`
               <tr id="${u.email}">
-                <td>
-                  <div class="thumb-wrap">
-                    ${ u.img ? `<img class="thumb" src="${u.img}" alt="">` : `<div class="thumb" style="display:grid;place-items:center">👤</div>` }
-                    <img class="thumb-large" src="${u.img||'icons/icon-512.png'}" alt="">
-                  </div>
-                </td>
-                <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
+                <td><div style="display:flex;align-items:center"><img class="avatar" src="${u.img||'icons/icon-192.png'}" alt=""><span>${u.name}</span></div></td>
+                <td>${u.email}</td><td>${u.role}</td>
                 <td>
                   ${canEdit()? `<button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>`:''}
                   ${canDelete()? `<button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button>`:''}
@@ -1865,12 +1520,12 @@ function allowedRoleOptions(){
 }
 
 function wireSettings(){
-  // Theme instant apply
+  // Theme
   const mode = $('#theme-mode'), size = $('#theme-size');
   const applyThemeNow = ()=>{ save('_theme2', { mode: mode.value, size: size.value }); applyTheme(); renderApp(); };
   mode?.addEventListener('change', applyThemeNow); size?.addEventListener('change', applyThemeNow);
 
-  // Cloud controls
+  // Cloud
   const toggle = $('#cloud-toggle'), syncNow = $('#cloud-sync-now');
   toggle?.addEventListener('change', async (e)=>{
     const val = e.target.value;
@@ -1884,24 +1539,20 @@ function wireSettings(){
   syncNow?.addEventListener('click', async ()=>{
     try{
       if (!auth.currentUser){ notify('Sign in with Firebase to use Cloud Sync.','warn'); return; }
-      if (!cloud.isOn()){ notify('Turn Cloud Sync ON first.','warn'); return; }
+      if (!cloud.isOn()){ notify('Turn Cloud Sync ON first in Settings.','warn'); return; }
       if (!navigator.onLine){ notify('You appear to be offline.','warn'); return; }
       await firebase.database().goOnline(); await cloud.pushAll(); notify('Synced');
     }catch(e){ notify((e && e.message) || 'Sync failed','danger'); }
   });
 
-  // EmailJS saves
+  // EmailJS admin panel
   $('#ej-save')?.addEventListener('click', ()=>{
-    const obj = {
-      PUBLIC_KEY : ($('#ej-public')?.value || '').trim(),
-      SERVICE_ID : ($('#ej-service')?.value || '').trim(),
-      TEMPLATE_ID: ($('#ej-template')?.value || '').trim()
-    };
-    _saveEmailJSCfg(obj);
-    notify('EmailJS keys saved','ok');
+    const pk=($('#ej-pk')?.value||'').trim(), service=($('#ej-service')?.value||'').trim(), template=($('#ej-template')?.value||'').trim();
+    setEmailJsCfg({pk,service,template}); notify('EmailJS saved','ok'); renderApp();
   });
+  $('#ej-clear')?.addEventListener('click', ()=>{ setEmailJsCfg({pk:'',service:'',template:''}); notify('Cleared','ok'); renderApp(); });
 
-  // Users wiring
+  // Users
   wireUsers();
 }
 
@@ -1910,9 +1561,9 @@ function wireUsers(){
 
   addBtn?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    openModal('m-user'); document.body.classList.add('hover-suppressed');
+    openModal('m-user');
     $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-img').value='';
-    const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions()[0];
+    const sel = $('#user-role'); const opts=allowedRoleOptions(); sel.innerHTML = opts.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = opts[0];
     attachImageUpload('#user-imgfile', '#user-img');
   });
 
@@ -1942,9 +1593,8 @@ function wireUsers(){
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const u = load('users', []).find(x=>x.email===email); if (!u) return;
-      openModal('m-user'); document.body.classList.add('hover-suppressed');
-      $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
-      const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions().includes(u.role) ? u.role : 'user';
+      openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
+      const sel = $('#user-role'); const opts=allowedRoleOptions(); sel.innerHTML = opts.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = opts.includes(u.role) ? u.role : 'user';
       attachImageUpload('#user-imgfile', '#user-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
@@ -1953,7 +1603,7 @@ function wireUsers(){
   });
 }
 
-// ---------- Modals (global, always present) ----------
+/* ---------- Modals (global) ---------- */
 function postModal(){ return `
   <div class="modal-backdrop" id="mb-post"></div>
   <div class="modal" id="m-post">
@@ -1977,12 +1627,12 @@ function invModal(){ return `
       <div class="head"><strong>Inventory Item</strong><button class="btn ghost" data-close="m-inv">Close</button></div>
       <div class="body grid">
         <input id="inv-id" type="hidden" />
-        <input id="inv-name" class="input" placeholder="Name" />
-        <input id="inv-code" class="input" placeholder="Code" />
+        <input id="inv-name" class="input" placeholder="Name (e.g. Fresh Salmon)" />
+        <input id="inv-code" class="input" placeholder="Code (e.g. SAL-300)" />
         <select id="inv-type" class="input"><option>Raw</option><option>Cooked</option><option>Dry</option><option>Other</option></select>
-        <input id="inv-price" class="input" type="number" step="0.01" placeholder="Price" />
-        <input id="inv-stock" class="input" type="number" placeholder="Stock" />
-        <input id="inv-threshold" class="input" type="number" placeholder="Threshold" />
+        <input id="inv-price" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Price (e.g. 7.80)" />
+        <input id="inv-stock" class="input" type="number" inputmode="numeric" placeholder="Stock (e.g. 12)" />
+        <input id="inv-threshold" class="input" type="number" inputmode="numeric" placeholder="Threshold (e.g. 10)" />
         <input id="inv-img" class="input" placeholder="Image URL or upload below" />
         <input id="inv-imgfile" type="file" accept="image/*" class="input"/>
       </div>
@@ -1997,12 +1647,12 @@ function prodModal(){ return `
       <div class="head"><strong>Product</strong><button class="btn ghost" data-close="m-prod">Close</button></div>
       <div class="body grid">
         <input id="prod-id" type="hidden" />
-        <input id="prod-name" class="input" placeholder="Name" />
-        <input id="prod-barcode" class="input" placeholder="Barcode" />
-        <input id="prod-price" class="input" type="number" step="0.01" placeholder="Price" />
-        <input id="prod-type" class="input" placeholder="Type" />
-        <textarea id="prod-ingredients" class="input" placeholder="Ingredients"></textarea>
-        <textarea id="prod-instructions" class="input" placeholder="Instructions"></textarea>
+        <input id="prod-name" class="input" placeholder="Name (e.g. Salmon Nigiri)" />
+        <input id="prod-barcode" class="input" placeholder="Barcode (optional)" />
+        <input id="prod-price" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Price (e.g. 5.99)" />
+        <input id="prod-type" class="input" placeholder="Type (e.g. Nigiri, Roll)" />
+        <textarea id="prod-ingredients" class="input" placeholder="Ingredients (comma separated)"></textarea>
+        <textarea id="prod-instructions" class="input" placeholder="Instructions / notes"></textarea>
         <input id="prod-img" class="input" placeholder="Image URL or upload below" />
         <input id="prod-imgfile" type="file" accept="image/*" class="input"/>
       </div>
@@ -2036,12 +1686,12 @@ function cogsModal(){ return `
       <div class="body grid cols-2">
         <input id="cogs-id" type="hidden" />
         <input id="cogs-date" class="input" type="date" />
-        <input id="cogs-grossIncome" class="input" type="number" step="0.01" placeholder="Gross Income" />
-        <input id="cogs-produceCost" class="input" type="number" step="0.01" placeholder="Produce Cost" />
-        <input id="cogs-itemCost" class="input" type="number" step="0.01" placeholder="Item Cost" />
-        <input id="cogs-freight" class="input" type="number" step="0.01" placeholder="Freight" />
-        <input id="cogs-delivery" class="input" type="number" step="0.01" placeholder="Delivery" />
-        <input id="cogs-other" class="input" type="number" step="0.01" placeholder="Other" />
+        <input id="cogs-grossIncome" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Gross Income" />
+        <input id="cogs-produceCost" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Produce Cost" />
+        <input id="cogs-itemCost" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Item Cost" />
+        <input id="cogs-freight" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Freight" />
+        <input id="cogs-delivery" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Delivery" />
+        <input id="cogs-other" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Other" />
       </div>
       <div class="foot"><button class="btn" id="save-cogs">Save</button></div>
     </div>
@@ -2091,31 +1741,12 @@ function ensureGlobalModals(){
   if ($('#__modals')) return;
   const wrap = document.createElement('div');
   wrap.id = '__modals';
-  wrap.innerHTML = postModal()+invModal()+prodModal()+prodCardModal()+cogsModal()+taskModal()+userModal()+imgPreviewModal()+iosInstallModal();
+  wrap.innerHTML = postModal()+invModal()+prodModal()+prodCardModal()+cogsModal()+taskModal()+userModal()+imgPreviewModal();
   document.body.appendChild(wrap);
   attachImageUpload('#post-imgfile', '#post-img');
 }
 
-function iosInstallModal(){ return `
-  <div class="modal-backdrop" id="mb-ios"></div>
-  <div class="modal" id="m-ios">
-    <div class="dialog">
-      <div class="head"><strong>Install on iPhone</strong><button class="btn ghost" data-close="m-ios">Close</button></div>
-      <div class="body prose">
-        <div class="callout">
-          <strong>Heads-up:</strong> On iOS, Safari doesn’t show an install icon. Use <em>Share → Add to Home Screen</em>.
-        </div>
-        <ol>
-          <li>Open this site in Safari.</li>
-          <li>Tap the <strong>Share</strong> icon (square with an up arrow).</li>
-          <li>Choose <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
-        </ol>
-        <p class="muted">Once installed, it launches full-screen and works offline.</p>
-      </div>
-    </div>
-  </div>`; }
-
-/* ===================== Part F — Search utils + PWA + Boot ===================== */
+/* ===================== Part F — Search utils + PWA + SW + Boot ===================== */
 window.buildSearchIndex = function(){
   const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
   const pages = [
@@ -2134,60 +1765,31 @@ window.buildSearchIndex = function(){
   pages.forEach(p=>ix.push(p));
   return ix;
 };
-window.searchAll = function(index,q){
+window.searchAll = (index,q)=>{
   const term = (q || '').toLowerCase();
-  return index
-    .map(item=>{
-      const score =
-        ((item.label||'').toLowerCase().includes(term) ? 2 : 0) +
-        ((item.text ||'').toLowerCase().includes(term)  ? 1 : 0);
+  return index.map(item=>{
+      const score = ((item.label||'').toLowerCase().includes(term) ? 2 : 0) + ((item.text||'').toLowerCase().includes(term) ? 1 : 0);
       return { item, score };
-    })
-    .filter(x=>x.score>0)
-    .sort((a,b)=>b.score-a.score)
-    .map(x=>x.item);
+    }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).map(x=>x.item);
 };
-window.scrollToRow = function(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
+window.scrollToRow = id => { const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
 
 // Online / offline hints
 window.addEventListener('online',  ()=> notify('Back online','ok'));
 window.addEventListener('offline', ()=> notify('You are offline','warn'));
 
-// PWA: capture beforeinstallprompt & show topbar button
-const _pwa = { deferredPrompt: null, canInstall: false };
+// PWA install UI (omnibox + custom button)
+window.__pwaDeferredPrompt = null; window.__pwaCanPrompt = false;
 window.addEventListener('beforeinstallprompt', (e)=>{
   e.preventDefault();
-  _pwa.deferredPrompt = e;
-  _pwa.canInstall = true;
-  const b = document.getElementById('btnInstallPWA');
-  if (b) b.style.display = 'inline-flex';
+  window.__pwaDeferredPrompt = e;
+  window.__pwaCanPrompt = true;
+  // if app already rendered, show the inline button
+  $('#btnInstallApp')?.style && ($('#btnInstallApp').style.display = 'inline-flex');
+  $('#installBanner')?.classList?.add('show');
 });
 
-function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent); }
-function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone; }
-
-function wirePWAInstallButton(){
-  const b = document.getElementById('btnInstallPWA');
-  if (!b) return;
-
-  // iOS: no beforeinstallprompt; show an info modal instead
-  if (isIOS()) {
-    b.style.display = isStandalone() ? 'none' : 'inline-flex';
-    b.onclick = () => openModal('m-ios');
-    return;
-  }
-
-  // Other platforms
-  b.style.display = _pwa.canInstall ? 'inline-flex' : 'none';
-  b.onclick = async ()=>{
-    if (!_pwa.deferredPrompt) return;
-    _pwa.deferredPrompt.prompt();
-    try{ await _pwa.deferredPrompt.userChoice; }catch{}
-    _pwa.deferredPrompt = null; _pwa.canInstall = false; b.style.display='none';
-  };
-}
-
-// Service Worker (safe fetch)
+// SW registration (avoid HEAD)
 (function(){
   if (!('serviceWorker' in navigator)) return;
   const swUrl = 'service-worker.js';
