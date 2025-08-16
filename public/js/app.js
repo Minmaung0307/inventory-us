@@ -508,9 +508,9 @@ function renderLogin() {
               <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
             </div>
 
-            <div class="login-note" style="margin-top:6px">
+            <!-- <div class="login-note" style="margin-top:6px">
               Tip: demo admin <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local).
-            </div>
+            </div> -->
           </div>
         </div>
       </div>
