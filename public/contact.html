@@ -1,73 +1,75 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Contact</title>
-  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-  <style>
-    body{margin:0;background:#0c1116;color:#e8f1f1;font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Inter,Arial}
-    .wrap{padding:16px}
-    .grid{display:grid;gap:10px}
-    .input,textarea,button{width:100%;padding:10px 12px;border-radius:12px;border:1px solid #1f2a37;background:#0f1520;color:#e8f1f1}
-    button{background:#0ea5a5;color:#fff;border:none;cursor:pointer}
-    .note{color:#9ab0b0;font-size:12px}
-  </style>
+    <!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Contact</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4.4.1/dist/email.min.js"></script>
+<style>
+:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --ok:#10b981; --border:#1f2a37; }
+@media (prefers-color-scheme: light){ :root{ --bg:#f7fafc; --panel:#fff; --panel2:#f2f5f8; --text:#0b1220; --muted:#51606f; --border:#e6edf3; } }
+*{box-sizing:border-box} body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,ui-sans-serif }
+.wrap{ max-width:720px; margin:24px auto; padding:0 16px 40px }
+.card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0 }
+h1{ margin:6px 0 12px; font-size:26px } .muted{ color:var(--muted) }
+.input{ width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:10px 12px; border-radius:12px; }
+.btn{ display:inline-flex; gap:8px; align-items:center; padding:10px 14px; border-radius:12px; border:1px solid var(--border); background:var(--panel2); color:var(--text); cursor:pointer }
+.btn.primary{ background:var(--brand); border-color:transparent; color:#fff }
+.row{ display:grid; gap:10px }
+</style>
 </head>
 <body>
   <div class="wrap">
-    <h3 style="margin:0 0 8px 0">Contact</h3>
-    <div class="grid">
-      <input id="email" class="input" type="email" placeholder="Your email">
-      <input id="subject" class="input" placeholder="Subject">
+    <h1>Contact</h1>
+    <div class="card row">
+      <div class="muted">Send a message to <strong>minmaung0307@gmail.com</strong>.</div>
+      <input id="fromEmail" class="input" placeholder="Your email (reply-to)"/>
+      <input id="subject" class="input" placeholder="Subject"/>
       <textarea id="message" class="input" rows="6" placeholder="Message"></textarea>
-      <div style="display:flex;justify-content:flex-end">
-        <button id="send"><i class="ri-send-plane-line"></i> Send</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="sendBtn" class="btn primary"><i class="ri-send-plane-line"></i> Send</button>
+        <a id="mailtoBtn" class="btn" href="#"><i class="ri-mail-line"></i> Open mail app</a>
       </div>
-      <div id="resp" class="note"></div>
+      <div id="note" class="muted"></div>
     </div>
   </div>
 
-  <!-- EmailJS (optional) -->
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-  <script>
-    // Fill these if you want real sending without mail client:
-    // const SERVICE_ID  = ""; // e.g. "service_xxx"
-    // const TEMPLATE_ID = ""; // e.g. "template_xxx"
-    // const PUBLIC_KEY  = ""; // e.g. "YOUR_PUBLIC_KEY"
-    // const TO_EMAIL    = "minmaung0307@gmail.com";
+<script>
+  // 👉 Fill these if you want EmailJS:
+  const EMAILJS_PUBLIC_KEY  = 'WT0GOYrL9HnDKvLUf'; // e.g. 'YOUR_PUBLIC_KEY'
+  const EMAILJS_SERVICE_ID  = 'service_z9tkmvr'; // e.g. 'service_xxx'
+  const EMAILJS_TEMPLATE_ID = 'template_q5q471f'; // e.g. 'template_xxx'
+  const TO = 'minmaung0307@gmail.com';
 
-    const SERVICE_ID  = "service_z9tkmvr";
-    const TEMPLATE_ID = "template_q5q471f";
-    const PUBLIC_KEY  = "WT0GOYrL9HnDKvLUf";
-    const TO_EMAIL    = "minmaung0307@gmail.com";
+  const note = document.getElementById('note');
+  const sendBtn = document.getElementById('sendBtn');
+  const mailtoBtn = document.getElementById('mailtoBtn');
 
-    if (PUBLIC_KEY) emailjs.init(PUBLIC_KEY);
+  function mailtoFallback(){
+    const from = document.getElementById('fromEmail').value.trim();
+    const sub  = document.getElementById('subject').value.trim();
+    const msg  = document.getElementById('message').value.trim();
+    const url = `mailto:${encodeURIComponent(TO)}?subject=${encodeURIComponent(sub)}&body=${encodeURIComponent('From: '+from+'\n\n'+msg)}`;
+    mailtoBtn.href = url;
+    mailtoBtn.click();
+  }
 
-    document.getElementById('send').addEventListener('click', async ()=>{
-      const email = document.getElementById('email').value.trim();
-      const subject = document.getElementById('subject').value.trim();
-      const message = document.getElementById('message').value.trim();
-      const r = document.getElementById('resp');
+  sendBtn.addEventListener('click', async ()=>{
+    const from = document.getElementById('fromEmail').value.trim();
+    const sub  = document.getElementById('subject').value.trim();
+    const msg  = document.getElementById('message').value.trim();
+    if (!from || !sub || !msg){ note.textContent='Please fill your email, subject and message.'; return; }
 
-      if (!email || !subject || !message){
-        r.textContent = 'Please fill your email, subject and a message.'; return;
-      }
-      r.textContent = 'Sending…';
+    if (EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID){
       try{
-        if (SERVICE_ID && TEMPLATE_ID && PUBLIC_KEY) {
-          await emailjs.send(SERVICE_ID, TEMPLATE_ID, { from_name: email, reply_to: email, subject, message, to_email: TO_EMAIL });
-          r.textContent = 'Sent! We’ll get back to you soon.';
-        } else {
-          // Fallback: open mail client
-          const mail = `mailto:${encodeURIComponent(TO_EMAIL)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent('From: '+email+'\n\n'+message)}`;
-          window.location.href = mail;
-          r.textContent = 'Opening your mail app…';
-        }
-      }catch(e){
-        r.textContent = 'Failed to send: ' + (e?.text || e?.message || 'Unknown error');
-      }
-    });
-  </script>
-</body>
-</html>
+        if (!window.emailjs.__inited){ window.emailjs.init(EMAILJS_PUBLIC_KEY); window.emailjs.__inited = true; }
+        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, { from_name: from, reply_to: from, subject: sub, message: msg, to_email: TO });
+        note.textContent = 'Message sent via EmailJS.'; document.getElementById('message').value=''; document.getElementById('subject').value='';
+      }catch(e){ note.textContent = 'EmailJS failed, opening mail app…'; mailtoFallback(); }
+    }else{
+      note.textContent = 'EmailJS keys not set. Opening your mail app…';
+      mailtoFallback();
+    }
+  });
+</script>
+</body></html>

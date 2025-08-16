@@ -84,20 +84,4 @@ precache-manifest.*.js
 # ------------------------------
 *.local
 
-contact0.html
-guide0.html
-index0.html
-index1.html
-license0.html
-manifest.json
-manifest0.webmanifest
-policy0.html
-service-worker0.js
-service-worker1.js
-setup-guide0.html
-setup-guide1.html
-styles0.css
-styles1.css
-app0.js
-app1.js
-app2.js
+oldFiles/

@@ -1,9 +1,34 @@
-<!doctype html><meta charset="utf-8"><title>User Guide</title>
-<style>body{font-family:system-ui;padding:20px;line-height:1.6}</style>
-<h2>User Guide</h2>
-<ul>
-  <li>Use the sidebar to navigate.</li>
-  <li>Add/edit items and products; upload images or paste URLs.</li>
-  <li>Use the Tasks page to manage work with drag & drop.</li>
-  <li>Open Settings to switch themes and manage users.</li>
-</ul>
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>User Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet"/>
+<style>
+:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --border:#1f2a37; }
+@media (prefers-color-scheme: light){ :root{ --bg:#f7fafc; --panel:#fff; --panel2:#f2f5f8; --text:#0b1220; --muted:#51606f; --border:#e6edf3; } }
+*{box-sizing:border-box} body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,ui-sans-serif }
+.wrap{ max-width:1000px; margin:24px auto; padding:0 16px 40px }
+.card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px; margin:14px 0 }
+h1{ margin:6px 0 12px; font-size:26px } h2{ font-size:18px; margin:18px 0 8px } .muted{ color:var(--muted) }
+ul{ margin:8px 0 0 18px }
+</style></head>
+<body>
+  <div class="wrap">
+    <h1>User Guide</h1>
+    <div class="card">
+      <h2>Getting started</h2>
+      <ul>
+        <li>Sign in (or use the demo admin shown on the login page).</li>
+        <li>Open <strong>Inventory</strong> or <strong>Products</strong> to add items and upload images.</li>
+        <li>Use <strong>Tasks</strong> to plan your day with drag & drop.</li>
+      </ul>
+      <h2>Tips</h2>
+      <ul>
+        <li>Turn on <strong>Cloud Sync</strong> in Settings to mirror your data per user to Firebase.</li>
+        <li>Use <strong>Export CSV</strong> for quick reports.</li>
+        <li>Hover image thumbnails to preview; on phone, tap to open a larger view.</li>
+      </ul>
+    </div>
+  </div>
+</body></html>

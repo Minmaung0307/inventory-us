@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>About – Inventory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet"/>
+<style>
+:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --border:#1f2a37; }
+@media (prefers-color-scheme: light){ :root{ --bg:#f7fafc; --panel:#fff; --panel2:#f2f5f8; --text:#0b1220; --muted:#51606f; --border:#e6edf3; } }
+*{box-sizing:border-box} body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,ui-sans-serif,system-ui }
+.wrap{ max-width:1000px; margin:24px auto; padding:0 16px 40px }
+h1{ margin:6px 0 10px; font-size:28px } h2{ margin:20px 0 10px; font-size:18px }
+.card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0 }
+.badges{ display:flex; gap:8px; flex-wrap:wrap }
+.badge{ padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:var(--panel2); font-weight:600 }
+.grid{ display:grid; gap:12px }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>About Inventory</h1>
+    <div class="card">
+      <p><strong>Inventory</strong> is a fast, offline-friendly web app for everyday stock & sales management —
+         from cafés and food trucks to retail counters and medium-size stores.</p>
+      <div class="badges">
+        <div class="badge">No installs</div>
+        <div class="badge">Works offline</div>
+        <div class="badge">Drag & drop tasks</div>
+        <div class="badge">CSV export</div>
+        <div class="badge">Cloud Sync (optional)</div>
+      </div>
+    </div>
+
+    <div class="card grid">
+      <h2>What you can do</h2>
+      <ul>
+        <li>Track <strong>Inventory</strong> with low/critical alerts.</li>
+        <li>Build a <strong>Product</strong> catalog with images.</li>
+        <li>Log daily <strong>COGS</strong> and see MoM/YoY trends.</li>
+        <li>Organize <strong>Tasks</strong> across lanes (todo → in progress → done).</li>
+        <li>Search everything instantly and export CSVs.</li>
+      </ul>
+    </div>
+
+    <div class="card grid">
+      <h2>Who is it for?</h2>
+      <p>Owners, managers and team members who need a simple, reliable tool:
+         pop up shops, salons, convenience stores, coffee bars, sushi kiosks, you name it.</p>
+    </div>
+
+    <div class="card grid">
+      <h2>Why it’s different</h2>
+      <ul>
+        <li><strong>Zero setup:</strong> open the link, sign in, start working.</li>
+        <li><strong>Offline-first:</strong> local storage keeps you going without signal.</li>
+        <li><strong>Bring-your-own cloud:</strong> optional Firebase sync, per-user.</li>
+        <li><strong>Fast UI:</strong> one small page, no heavy frameworks.</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>
