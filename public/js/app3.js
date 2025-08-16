@@ -1,5 +1,5 @@
 /* =========================
-   Inventory — single-file SPA
+   Inventory — single-file SPA (fixed pack: posts single-save + robust DnD)
    ========================= */
 
 /* ---------- Hoisted helpers ---------- */
@@ -8,12 +8,17 @@ function parseYMD(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?
 function getISOWeek(d){ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); }
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const _lsGet=(k,f)=>{try{const v=localStorage.getItem(k);return v==null?f:JSON.parse(v);}catch{ return f; }};
+const _lsSet=(k,v)=>{try{localStorage.setItem(k, JSON.stringify(v));}catch{}};
+const notify=(m,t='ok')=>{ const n=$('#notification'); if(!n) return; n.textContent=m; n.className=`notification show ${t}`; setTimeout(()=>n.className='notification',2400); };
+function load(k,f){ return _lsGet(k,f); }
+function save(k,v){ _lsSet(k,v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k,v); }catch{} }
 
 /* =========================
    Part A — Core bootstrap
    ========================= */
 
-// --- Firebase (v8) -----------------------------------------------------------
+// Firebase v8
 const firebaseConfig = {
   apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
   authDomain: "inventory-us.firebaseapp.com",
@@ -29,38 +34,151 @@ const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db   = firebase.database();
 
-// --- Namespaced storage (per-user) ------------------------------------------
-let session      = null;
-function ns(){
-  if (!session) return 'global';
-  if (session.authMode==='firebase' && auth.currentUser?.uid) return `uid:${auth.currentUser.uid}`;
-  const e = (session.email||'').toLowerCase();
-  return `user:${e||'local'}`;
+// Theme
+const THEME_MODES = [{key:'light',name:'Light'},{key:'dark',name:'Dark'},{key:'aqua',name:'Aqua'}];
+const THEME_SIZES = [{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
+function getTheme(){ return _lsGet('_theme2', { mode:'aqua', size:'medium' }); }
+function applyTheme(){
+  const t = getTheme();
+  const size = THEME_SIZES.find(s=>s.key===t.size)?.pct ?? 100;
+  document.documentElement.setAttribute('data-theme', t.mode==='light' ? 'light' : (t.mode==='dark' ? 'dark' : ''));
+  document.documentElement.style.setProperty('--font-scale', size + '%');
 }
-function kNS(k){ return `${ns()}:${k}`; }
-function _lsGet(k,f){ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } }
-function _lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
-function load(k,f){
-  const v=_lsGet(kNS(k),'__MISS__');
-  if (v!=='__MISS__') return v;
-  // legacy fallback for first migration
-  return _lsGet(k,f);
-}
-function save(k,v){
-  _lsSet(kNS(k),v);
-  try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k,v); }catch{}
-}
-function setSession(s){ session = s; _lsSet('lastSession', s); }
+applyTheme();
 
-// --- Rescue screen -----------------------------------------------------------
-function notify(msg, type='ok'){
-  const n = $('#notification'); if (!n) return;
-  n.textContent = msg; n.className = `notification show ${type}`;
-  setTimeout(()=>{ n.className='notification'; }, 2400);
+// Cloud Sync (per-user namespace)
+const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2','_emailjsCfg'];
+const cloud = (function(){
+  let liveRefs = [];
+  const on      = ()=> !!_lsGet('_cloudOn', false);
+  const setOn   = v => _lsSet('_cloudOn', !!v);
+  const uid     = ()=> auth.currentUser?.uid;
+  const pathFor = key => db.ref(`tenants/${uid()}/kv/${key}`);
+  async function saveKV(key, val){ if (!on() || !uid()) return; await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP }); }
+  async function pullAllOnce(){ if (!uid()) return; const snap = await db.ref(`tenants/${uid()}/kv`).get(); if (!snap.exists()) return; const all = snap.val() || {}; Object.values(all).forEach(row=>{ if (row && row.key && 'val' in row) _lsSet(row.key, row.val); }); }
+  function subscribeAll(){ if (!uid()) return; unsubscribeAll(); CLOUD_KEYS.forEach(key=>{ const ref = pathFor(key); const handler = ref.on('value',(snap)=>{ const data=snap.val(); if(!data)return; const curr=_lsGet(key,null); if (JSON.stringify(curr)!==JSON.stringify(data.val)){ _lsSet(key,data.val); if (key==='_theme2') applyTheme(); renderApp(); } }); liveRefs.push({ref,handler}); }); }
+  function unsubscribeAll(){ liveRefs.forEach(({ref})=>{ try{ref.off();}catch{} }); liveRefs=[]; }
+  async function pushAll(){ if (!uid()) return; for (const k of CLOUD_KEYS){ const v=_lsGet(k,null); if (v!==null && v!==undefined) await saveKV(k,v); } }
+  async function enable(){ if (!uid()) throw new Error('Sign in first.'); setOn(true); await firebase.database().goOnline(); await pullAllOnce(); await pushAll(); subscribeAll(); }
+  function disable(){ setOn(false); unsubscribeAll(); }
+  return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
+})();
+
+// Roles
+const ROLES = ['user','associate','manager','admin'];
+const SUPER_ADMINS = ['admin@sushi.com','admin@inventory.com'];
+function role(){ return (session?.role)||'user'; }
+function canView(){ return true; }
+function canAdd(){ return ['admin','manager','associate'].includes(role()); }
+function canEdit(){ return ['admin','manager'].includes(role()); }
+function canDelete(){ return ['admin'].includes(role()); }
+
+// Globals
+let session      = load('session', null);
+let currentRoute = load('_route', 'home');
+let searchQuery  = load('_searchQ', '');
+
+// Seed data
+const DEMO_ADMIN_EMAIL='admin@inventory.com';
+const DEMO_ADMIN_PASS='admin123';
+
+(function seedOnFirstRun(){
+  if (load('_seeded_v4', false)) {
+    const users = load('users', []);
+    if (!users.find(u => (u.email||'').toLowerCase() === DEMO_ADMIN_EMAIL)){
+      users.push({ name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:DEMO_ADMIN_PASS, img:'' });
+      save('users', users);
+    }
+    return;
+  }
+  const now = Date.now();
+  save('users', [
+    { name:'Admin',     username:'admin',     email:'admin@sushi.com',     contact:'', role:'admin',     password:'', img:'' },
+    { name:'Admin',     username:'admin',     email:DEMO_ADMIN_EMAIL,      contact:'', role:'admin',     password:DEMO_ADMIN_PASS, img:'' },
+    { name:'Manager',   username:'manager',   email:'manager@sushi.com',   contact:'', role:'manager',   password:'', img:'' },
+    { name:'Associate', username:'associate', email:'associate@sushi.com', contact:'', role:'associate', password:'', img:'' },
+    { name:'Viewer',    username:'viewer',    email:'cashier@sushi.com',   contact:'', role:'user',      password:'', img:'' },
+  ]);
+  save('inventory', [
+    { id:'inv1', img:'', name:'Nori Sheets', code:'NOR-100', type:'Dry', price:3.00, stock:80, threshold:30 },
+    { id:'inv2', img:'', name:'Sushi Rice',  code:'RIC-200', type:'Dry', price:1.50, stock:24, threshold:20 },
+    { id:'inv3', img:'', name:'Fresh Salmon',code:'SAL-300', type:'Raw', price:7.80, stock:10, threshold:12 },
+  ]);
+  save('products', [
+    { id:'p1', img:'', name:'Salmon Nigiri', barcode:'11100001', price:5.99, type:'Nigiri', ingredients:'Rice, Salmon', instructions:'Brush with nikiri.' },
+    { id:'p2', img:'', name:'California Roll', barcode:'11100002', price:7.49, type:'Roll', ingredients:'Rice, Nori, Crab, Avocado', instructions:'8 pcs.' },
+  ]);
+  save('posts', [{ id:'post1', title:'Welcome to Inventory', body:'Track stock, manage products, and work faster.', img:'', createdAt: now }]);
+  save('tasks', [
+    { id:'t1', title:'Prep Salmon', status:'todo' },
+    { id:'t2', title:'Cook Rice', status:'inprogress' },
+    { id:'t3', title:'Sanitize Station', status:'done' },
+  ]);
+  save('cogs', [
+    { id:'c1', date:'2024-08-01', grossIncome:1200, produceCost:280, itemCost:180, freight:45, delivery:30, other:20 },
+    { id:'c2', date:'2024-08-02', grossIncome: 900, produceCost:220, itemCost:140, freight:30, delivery:25, other:10 }
+  ]);
+  save('_seeded_v4', true);
+})();
+
+/* ---------- Router / idle sign-out ---------- */
+function go(route){ currentRoute = route; save('_route', route); renderApp(); }
+let idleTimer = null; const IDLE_LIMIT = 10*60*1000;
+function resetIdleTimer(){
+  if (!session) return;
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(async ()=>{ try{ await auth.signOut(); } finally { notify('Signed out due to inactivity','warn'); } }, IDLE_LIMIT);
 }
+['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
+
+/* ---------- Auth flow ---------- */
+const ALLOW_LOCAL_AUTOLOGIN = true;
+
+auth.onAuthStateChanged(async (user) => {
+  try { await ensureSessionAndRender(user); }
+  catch (err) { console.error('[auth] render fail:', err); showRescue(err); }
+});
+
+async function ensureSessionAndRender(user) {
+  applyTheme();
+
+  // Allow stored local session (no Firebase)
+  const stored = load('session', null);
+  if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
+    session = stored; resetIdleTimer(); currentRoute = 'home'; save('_route','home'); renderApp(); return;
+  }
+
+  if (!user) {
+    session = null; save('session', null);
+    if (idleTimer) clearTimeout(idleTimer);
+    renderLogin(); return;
+  }
+
+  const email = (user.email || '').toLowerCase();
+  let users = load('users', []);
+  let prof = users.find(u => (u.email || '').toLowerCase() === email);
+
+  if (!prof) {
+    const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
+    prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
+    users.push(prof); save('users', users);
+  } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
+    prof.role = 'admin'; save('users', users);
+  }
+
+  session = { ...prof, authMode: 'firebase' }; save('session', session);
+
+  try { if (cloud?.isOn?.()) { await firebase.database().goOnline(); await cloud.pullAllOnce(); cloud.subscribeAll(); } } catch {}
+  resetIdleTimer();
+
+  // Always land on Home after login
+  currentRoute = 'home'; save('_route','home');
+  renderApp();
+}
+
+// Rescue screen
 function showRescue(err){
-  const root = document.getElementById('root');
-  if (!root) return;
+  const root = $('#root'); if (!root) return;
   const msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : 'Unknown error';
   root.innerHTML = `
     <div style="max-width:680px;margin:40px auto;padding:16px;border:1px solid #ddd;border-radius:12px;font-family:system-ui">
@@ -78,219 +196,44 @@ function showRescue(err){
   $('#rz-retry')?.addEventListener('click', ()=>{ try { renderApp(); } catch (e) { console.error(e); notify(e?.message||'Retry failed','danger'); } });
 }
 
-// --- Theme -------------------------------------------------------------------
-const THEME_MODES = [{key:'light',name:'Light'},{key:'dark',name:'Dark'},{key:'aqua',name:'Aqua'}];
-const THEME_SIZES = [{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
-function getTheme(){ return _lsGet('_theme2', { mode:'aqua', size:'medium' }); }
-function applyTheme(){
-  const t = getTheme();
-  const size = THEME_SIZES.find(s=>s.key===t.size)?.pct ?? 100;
-  document.documentElement.setAttribute('data-theme', t.mode==='light' ? 'light' : (t.mode==='dark' ? 'dark' : ''));
-  document.documentElement.style.setProperty('--font-scale', size + '%');
-}
-applyTheme();
-
-// --- Cloud Sync (per-uid) ----------------------------------------------------
-const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2','_emailjs'];
-const cloud = (function(){
-  let liveRefs = [];
-  const on      = ()=> !!_lsGet('_cloudOn', false);
-  const setOn   = v => _lsSet('_cloudOn', !!v);
-  const uid     = ()=> auth.currentUser?.uid;
-  const pathFor = key => db.ref(`tenants/${uid()}/kv/${key}`);
-  async function saveKV(key, val){ if (!on() || !uid()) return; await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP }); }
-  async function pullAllOnce(){
-    if (!uid()) return;
-    const snap = await db.ref(`tenants/${uid()}/kv`).get(); if (!snap.exists()) return;
-    const all = snap.val() || {};
-    Object.values(all).forEach(row=>{ if (row && row.key && 'val' in row) _lsSet(kNS(row.key), row.val); });
-  }
-  function subscribeAll(){
-    if (!uid()) return; unsubscribeAll();
-    CLOUD_KEYS.forEach(key=>{
-      const ref = pathFor(key);
-      const handler = ref.on('value',(snap)=>{
-        const data=snap.val(); if(!data)return;
-        _lsSet(kNS(key), data.val);
-        if (key==='_theme2') applyTheme();
-        renderApp();
-      });
-      liveRefs.push({ref,handler});
-    });
-  }
-  function unsubscribeAll(){ liveRefs.forEach(({ref})=>{ try{ref.off();}catch{} }); liveRefs=[]; }
-  async function pushAll(){ if (!uid()) return; for (const k of CLOUD_KEYS){ const v=_lsGet(kNS(k),null); if (v!==null && v!==undefined) await saveKV(k,v); } }
-  async function enable(){ if (!uid()) throw new Error('Sign in first.'); setOn(true); await firebase.database().goOnline(); await pullAllOnce(); await pushAll(); subscribeAll(); }
-  function disable(){ setOn(false); unsubscribeAll(); }
-  return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
-})();
-
-// --- Roles & permissions ------------------------------------------------------
-const ROLES = ['user','associate','manager','admin'];
-const SUPER_ADMINS = ['admin@sushi.com','admin@inventory.com'];
-function role(){ return (session?.role)||'user'; }
-function canView(){ return true; }
-function canAdd(){ return ['admin','manager','associate'].includes(role()); }
-function canEdit(){ return ['admin','manager'].includes(role()); }
-function canDelete(){ return ['admin'].includes(role()); }
-
-// --- Globals + seed ----------------------------------------------------------
-let currentRoute = 'home';
-let searchQuery  = load('_searchQ', '');
-
-// built-in demo admin (local auth fallback)
-const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
-const DEMO_ADMIN_PASS  = 'admin123';
-
-(function seedOnFirstRun(){
-  if (_lsGet('_seeded_v3', false)) return;
-  const now = Date.now();
-  _lsSet('_seeded_v3', true);
-  // seed to global space only (first-run tour); real data will be per-user after sign-in
-  _lsSet('users', [
-    { name:'Admin',     username:'admin',     email:'admin@sushi.com',     contact:'', role:'admin',     password:'', img:'' },
-    { name:'Admin',     username:'admin',     email:DEMO_ADMIN_EMAIL,      contact:'', role:'admin',     password:DEMO_ADMIN_PASS, img:'' },
-    { name:'Manager',   username:'manager',   email:'manager@sushi.com',   contact:'', role:'manager',   password:'', img:'' },
-    { name:'Associate', username:'associate', email:'associate@sushi.com', contact:'', role:'associate', password:'', img:'' },
-    { name:'Viewer',    username:'viewer',    email:'cashier@sushi.com',   contact:'', role:'user',      password:'', img:'' },
-  ]);
-  _lsSet('inventory', [
-    { id:'inv1', img:'', name:'Nori Sheets', code:'NOR-100', type:'Dry', price:3.00, stock:80, threshold:30 },
-    { id:'inv2', img:'', name:'Sushi Rice',  code:'RIC-200', type:'Dry', price:1.50, stock:24, threshold:20 },
-    { id:'inv3', img:'', name:'Fresh Salmon',code:'SAL-300', type:'Raw', price:7.80, stock:10, threshold:12 },
-  ]);
-  _lsSet('products', [
-    { id:'p1', img:'', name:'Salmon Nigiri', barcode:'11100001', price:5.99, type:'Nigiri', ingredients:'Rice, Salmon', instructions:'Brush with nikiri.' },
-    { id:'p2', img:'', name:'California Roll', barcode:'11100002', price:7.49, type:'Roll', ingredients:'Rice, Nori, Crab, Avocado', instructions:'8 pcs.' },
-  ]);
-  _lsSet('posts', [{ id:'post1', title:'Welcome to Inventory', body:'Track stock, manage products, and work faster.', img:'', createdAt: now }]);
-  _lsSet('tasks', [
-    { id:'t1', title:'Prep Salmon', status:'todo' },
-    { id:'t2', title:'Cook Rice', status:'inprogress' },
-    { id:'t3', title:'Sanitize Station', status:'done' },
-  ]);
-  _lsSet('cogs', [
-    { id:'c1', date:'2024-08-01', grossIncome:1200, produceCost:280, itemCost:180, freight:45, delivery:30, other:20 },
-    { id:'c2', date:'2024-08-02', grossIncome: 900, produceCost:220, itemCost:140, freight:30, delivery:25, other:10 }
-  ]);
-})();
-
-// --- Router + idle logout ----------------------------------------------------
-function go(route){ currentRoute = route; save('_route', route); renderApp(); }
-let idleTimer = null; const IDLE_LIMIT = 10*60*1000;
-function resetIdleTimer(){
-  if (!session) return;
-  if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(async ()=>{ try{ await auth.signOut(); } finally { notify('Signed out due to inactivity','warn'); } }, IDLE_LIMIT);
-}
-['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
-
-// --- Auth state --------------------------------------------------------------
-const ALLOW_LOCAL_AUTOLOGIN = true;
-
-auth.onAuthStateChanged(async (user) => {
-  try { await ensureSessionAndRender(user); }
-  catch (err) { console.error('[auth] ensureSessionAndRender crashed:', err); notify(err?.message || 'Render failed', 'danger'); showRescue(err); }
-});
-
-async function ensureSessionAndRender(user) {
-  try {
-    applyTheme();
-
-    // local autologin if chosen previously
-    const stored = _lsGet('lastSession', null);
-    if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
-      setSession(stored);
-      resetIdleTimer();
-      currentRoute = 'home'; save('_route','home');
-      renderApp();
-      return;
-    }
-
-    if (!user) {
-      setSession(null);
-      if (idleTimer) clearTimeout(idleTimer);
-      renderLogin();
-      return;
-    }
-
-    // Build/upgrade profile from local users
-    const email = (user.email || '').toLowerCase();
-    let users = load('users', []);
-    let prof = users.find(u => (u.email || '').toLowerCase() === email);
-    if (!prof) {
-      const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
-      prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
-      users.push(prof); save('users', users);
-    } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
-      prof.role = 'admin'; save('users', users);
-    }
-
-    setSession({ ...prof, authMode: 'firebase' });
-
-    try {
-      if (cloud?.isOn?.()) {
-        await firebase.database().goOnline();
-        await cloud.pullAllOnce();
-        cloud.subscribeAll();
-      }
-    } catch {}
-
-    resetIdleTimer();
-    currentRoute = 'home'; save('_route','home');
-    renderApp();
-
-  } catch (outer) {
-    console.error('[ensureSessionAndRender] outer crash:', outer);
-    notify(outer?.message || 'Render failed', 'danger');
-    showRescue(outer);
-  }
-}
+window._diags = ()=>({ user: auth.currentUser ? { email: auth.currentUser.email, uid: auth.currentUser.uid } : null, route: currentRoute, role: session?.role });
 
 /* =========================
    Part B — Login & Shell
    ========================= */
 
+// Local auth helpers
 function localLogin(email, pass){
   const users = load('users', []);
-  const e = (email||'').toLowerCase();
-  // Always allow demo admin
-  if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
-    let u = users.find(x => (x.email||'').toLowerCase() === e);
-    if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
-    setSession({ ...u, authMode: 'local' }); notify('Signed in (Local mode)'); currentRoute='home'; save('_route','home'); renderApp(); return true;
+  const e=(email||'').toLowerCase();
+  if (e===DEMO_ADMIN_EMAIL && pass===DEMO_ADMIN_PASS){
+    let u=users.find(x=>(x.email||'').toLowerCase()===e);
+    if(!u){u={name:'Admin',username:'admin',email:DEMO_ADMIN_EMAIL,role:'admin',password:DEMO_ADMIN_PASS,img:'',contact:''};users.push(u);save('users',users);}
+    session={...u,authMode:'local'}; save('session',session);
+    currentRoute='home'; save('_route','home');
+    notify('Signed in (Local mode)'); renderApp(); return true;
   }
-  const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
-  if (u2) { setSession({ ...u2, authMode: 'local' }); notify('Signed in (Local mode)'); currentRoute='home'; save('_route','home'); renderApp(); return true; }
+  const u2=users.find(x=>(x.email||'').toLowerCase()===e && (x.password||'')===pass);
+  if(u2){session={...u2,authMode:'local'}; save('session',session); currentRoute='home'; save('_route','home'); notify('Signed in (Local mode)'); renderApp(); return true;}
   return false;
 }
-
 function localSignup({name,email,pass}){
-  const e = (email||'').toLowerCase();
-  const users = load('users', []);
-  if (users.find(x => (x.email||'').toLowerCase() === e)) {
-    if (localLogin(email, pass)) return true;
-    notify('User already exists locally. Use Sign In.', 'warn');
-    return false;
-  }
-  const role = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
-  const u = { name: name || e.split('@')[0], username: e.split('@')[0], email: e, role, password: pass, img:'', contact:'' };
-  users.push(u); save('users', users);
-  setSession({ ...u, authMode: 'local' });
-  notify('Account created (Local mode)'); currentRoute='home'; save('_route','home'); renderApp(); return true;
+  const e=(email||'').toLowerCase();
+  const users=load('users',[]);
+  if(users.find(x=>(x.email||'').toLowerCase()===e)){ if(localLogin(email,pass))return true; notify('User already exists locally. Use Sign In.','warn'); return false; }
+  const r = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
+  const u={name:name||e.split('@')[0],username:e.split('@')[0],email:e,role:r,password:pass,img:'',contact:''};
+  users.push(u); save('users',users);
+  session={...u,authMode:'local'}; save('session',session);
+  currentRoute='home'; save('_route','home');
+  notify('Account created (Local mode)'); renderApp(); return true;
 }
-
 function localResetPassword(email){
-  const e = (email||'').toLowerCase();
-  const users = load('users', []);
-  const i = users.findIndex(x => (x.email||'').toLowerCase() === e);
-  if (i < 0) return { ok:false, msg:'No local user found.' };
-  const temp = 'reset' + Math.floor(1000 + Math.random()*9000);
-  users[i].password = temp; save('users', users);
-  return { ok:true, temp };
+  const e=(email||'').toLowerCase(); const users=load('users',[]); const i=users.findIndex(x=>(x.email||'').toLowerCase()===e);
+  if(i<0) return {ok:false,msg:'No local user found.'}; const temp='reset'+Math.floor(1000+Math.random()*9000); users[i].password=temp; save('users',users); return {ok:true,temp};
 }
 
-// ---------- Sidebar + Topbar ----------
+// Sidebar + Topbar
 function renderSidebar(active='home'){
   const links = [
     { route:'home',      icon:'ri-home-5-line',              label:'Home' },
@@ -302,12 +245,12 @@ function renderSidebar(active='home'){
     { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
   ];
   const pages = [
-    { route:'about',   icon:'ri-information-line',        label:'About' },
-    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
-    { route:'license', icon:'ri-copyright-line',          label:'License' },
-    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
-    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
-    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
+    { route:'about',   icon:'ri-information-line',         label:'About' },
+    { route:'policy',  icon:'ri-shield-check-line',        label:'Policy' },
+    { route:'license', icon:'ri-copyright-line',           label:'License' },
+    { route:'setup',   icon:'ri-guide-line',               label:'Setup Guide' },
+    { route:'contact', icon:'ri-customer-service-2-line',  label:'Contact' },
+    { route:'guide',   icon:'ri-video-line',               label:'User Guide' },
   ];
   return `
     <aside class="sidebar" id="sidebar">
@@ -348,6 +291,7 @@ function renderSidebar(active='home'){
     </aside>
   `;
 }
+
 function renderTopbar(){
   const socialsCompact = `
     <div class="socials-compact">
@@ -363,6 +307,7 @@ function renderTopbar(){
       </div>
       <div class="right">
         ${socialsCompact}
+        <button class="btn secondary" id="btnInstallApp" style="display:none"><i class="ri-download-2-line"></i> Install</button>
         <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
         <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
       </div>
@@ -371,23 +316,17 @@ function renderTopbar(){
   `;
 }
 
-// delegated sidebar nav + close sidebar on mobile
+// Nav & generic clicks
 document.addEventListener('click', (e)=>{
   const item = e.target.closest('.sidebar .item[data-route]');
-  if (!item) return;
-  const r = item.getAttribute('data-route');
-  if (r) { go(r); closeSidebar(); }
-});
+  if (item){ const r=item.getAttribute('data-route'); if(r){ go(r); closeSidebar(); } return; }
 
-// close buttons in modals (generic)
-document.addEventListener('click', (e) => {
+  // modal close buttons
   const btn = e.target.closest('[data-close]');
-  if (!btn) return;
-  const id = btn.getAttribute('data-close');
-  if (id) closeModal(id);
+  if (btn){ const id=btn.getAttribute('data-close'); if(id) closeModal(id); }
 });
 
-// Sidebar search
+/* ---------- Sidebar search ---------- */
 function hookSidebarInteractions(){
   const input   = $('#globalSearch');
   const results = $('#searchResults');
@@ -399,14 +338,14 @@ function hookSidebarInteractions(){
     if (window.currentRoute !== 'search') go('search'); else renderApp();
   };
 
-  input.onkeydown = (e)=>{
+  input.addEventListener('keydown', (e)=>{
     if (e.key === 'Enter') {
       const q = input.value.trim();
       if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
     }
-  };
+  });
 
-  input.oninput = () => {
+  input.addEventListener('input', () => {
     clearTimeout(searchTimer);
     const q = input.value.trim().toLowerCase();
     if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
@@ -416,7 +355,7 @@ function hookSidebarInteractions(){
       if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
       results.innerHTML = out.map(r => `
         <div class="result" data-route="${r.route}" data-id="${r.id||''}">
-          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
+          <strong>${r.label}</strong> <span class="muted">— ${r.section||''}</span>
         </div>`).join('');
       results.classList.add('active');
 
@@ -431,7 +370,7 @@ function hookSidebarInteractions(){
         };
       });
     }, 120);
-  };
+  });
 
   document.addEventListener('click', (e) => {
     if (!results.contains(e.target) && e.target !== input) {
@@ -440,13 +379,12 @@ function hookSidebarInteractions(){
   });
 }
 
-function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); }
-function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); }
+function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('ui-layer-open'); }
+function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('ui-layer-open'); }
 
 /* =========================
    Part B.5 — App renderer
    ========================= */
-
 function safeView(route) {
   switch ((route || 'home')) {
     case 'home':       return viewHome();
@@ -469,89 +407,79 @@ function safeView(route) {
 
 function wireRoute(route) {
   // Topbar actions
-  $('#btnLogout')?.addEventListener('click', doLogout, { once:true });
-  $('#btnHome')?.addEventListener('click', () => go('home'), { once:true });
+  $('#btnLogout')?.addEventListener('click', doLogout);
+  $('#btnHome')?.addEventListener('click', () => go('home'));
+  $('#burger')?.addEventListener('click', openSidebar);
+  $('#backdrop')?.addEventListener('click', closeSidebar);
 
-  // Sidebar open/close
-  $('#burger')?.addEventListener('click', openSidebar, { once:true });
-  $('#backdrop')?.addEventListener('click', closeSidebar, { once:true });
-
-  // In-content navigation buttons like: <button data-go="inventory">
-  document.querySelectorAll('[data-go]').forEach(el => {
-    el.onclick = () => {
-      const r  = el.getAttribute('data-go');
-      const id = el.getAttribute('data-id');
-      if (r) {
-        go(r);
-        if (id) setTimeout(() => { try { scrollToRow(id); } catch(_) {} }, 80);
-      }
+  // PWA install button
+  const installBtn = $('#btnInstallApp');
+  if (installBtn) {
+    installBtn.style.display = window.__pwaCanPrompt ? 'inline-flex' : 'none';
+    installBtn.onclick = async ()=>{
+      if (!window.__pwaDeferredPrompt) return;
+      window.__pwaDeferredPrompt.prompt();
+      const { outcome } = await window.__pwaDeferredPrompt.userChoice.catch(()=>({outcome:'dismissed'}));
+      notify(outcome==='accepted'?'Installing…':'Install dismissed', outcome==='accepted'?'ok':'warn');
+      window.__pwaDeferredPrompt = null;
+      window.__pwaCanPrompt = false;
+      installBtn.style.display = 'none';
     };
+  }
+
+  // In-content nav buttons
+  document.querySelectorAll('[data-go]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const r=el.getAttribute('data-go'); const id=el.getAttribute('data-id');
+      if (r){ go(r); if(id) setTimeout(()=>{ try{scrollToRow(id);}catch{} },80); }
+    });
   });
 
-  // Global helpers
+  // Helpers
   hookSidebarInteractions();
   ensureGlobalModals();
   enableMobileImagePreview();
-  setupHoverPreview(); // new hover pop
 
-  // Route-specific wiring
+  // Route-specific
   switch ((route || 'home')) {
-    case 'home':
-      wireHome();
-      break;
-    case 'dashboard':
-      wireDashboard();
-      wirePosts();
-      break;
-    case 'inventory':
-      wireInventory();
-      break;
-    case 'products':
-      wireProducts();
-      break;
-    case 'cogs':
-      wireCOGS();
-      break;
-    case 'tasks':
-      wireTasks();
-      break;
-    case 'settings':
-      wireSettings();
-      break;
-    case 'contact':
-      wireContact();
-      break;
+    case 'home':      wireHome(); break;
+    case 'dashboard': wireDashboard(); wirePosts(); break;
+    case 'inventory': wireInventory(); break;
+    case 'products':  wireProducts(); break;
+    case 'cogs':      wireCOGS(); break;
+    case 'tasks':     wireTasks(); break;
+    case 'settings':  wireSettings(); break;
+    case 'contact':   wireContact(); break;
   }
 }
 
 function renderApp() {
-  try {
-    if (!session) { renderLogin(); return; }
+  if (!session) { renderLogin(); return; }
+  const root = $('#root'); if (!root) return;
+  const route = currentRoute || 'home';
 
-    const root = document.getElementById('root');
-    if (!root) return;
-
-    const route = currentRoute || 'home';
-
-    root.innerHTML = `
-      <div class="app">
-        ${renderSidebar(route)}
-        <div>
-          ${renderTopbar()}
-          <div class="main" id="main">
-            ${safeView(route)}
-          </div>
+  root.innerHTML = `
+    <div class="app">
+      ${renderSidebar(route)}
+      <div>
+        ${renderTopbar()}
+        <div class="main" id="main">
+          ${safeView(route)}
         </div>
       </div>
-      <div id="notification" class="notification"></div>
-    `;
+    </div>
+    <div id="notification" class="notification"></div>
+    <div id="installBanner" class="card"><div class="card-body"><button class="btn secondary" id="btnInstallApp2"><i class="ri-download-2-line"></i> Install App</button></div></div>
+  `;
 
-    wireRoute(route);
-  } catch (e) {
-    console.error('[renderApp] crash:', e);
-    notify(e?.message || 'Render failed', 'danger');
-    showRescue(e);
+  // mini banner install hook
+  const b2 = $('#btnInstallApp2');
+  if (b2){
+    $('#installBanner').classList.toggle('show', !!window.__pwaCanPrompt);
+    b2.onclick = ()=> $('#btnInstallApp')?.click();
   }
+
+  wireRoute(route);
 }
 
 /* =========================
@@ -559,7 +487,7 @@ function renderApp() {
    ========================= */
 
 function renderLogin() {
-  const root = document.getElementById('root');
+  const root = $('#root');
   root.innerHTML = `
     <div class="login">
       <div class="card login-card">
@@ -580,9 +508,9 @@ function renderLogin() {
               <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
             </div>
 
-            <div class="login-note" style="margin-top:6px">
-              Tip: you can log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
-            </div>
+            <!-- <div class="login-note" style="margin-top:6px">
+              Tip: demo admin <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local).
+            </div> -->
           </div>
         </div>
       </div>
@@ -615,91 +543,81 @@ function renderLogin() {
     </div>
   `;
 
-  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); };
-  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
+  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('ui-layer-open'); };
+  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('ui-layer-open'); };
 
-  const doSignIn = async () => {
+  async function doSignIn(){
     const email = ($('#li-email')?.value || '').trim().toLowerCase();
     const pass  = $('#li-pass')?.value || '';
     const btn   = $('#btnLogin');
-    if (!email || !pass) { notify('Enter email & password','warn'); return; }
+    if (!email || !pass) return notify('Enter email & password','warn');
 
-    if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
+    if (email===DEMO_ADMIN_EMAIL && pass===DEMO_ADMIN_PASS){
       let users = load('users', []);
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
-      if (!prof) { prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' }; users.push(prof); save('users', users); }
-      setSession({ ...prof, authMode: 'local' });
-      notify('Welcome, Admin (local mode)');
-      currentRoute='home'; save('_route','home'); renderApp();
-      return;
+      if (!prof) { prof = { name:'Admin', username:'admin', email: email, contact:'', role:'admin', password:'', img:'' }; users.push(prof); save('users',users); }
+      session = { ...prof, authMode:'local' }; save('session', session);
+      currentRoute='home'; save('_route','home');
+      notify('Welcome, Admin (local)');
+      ensureSessionAndRender(null); return;
     }
 
     try {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
-      btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
+      btn.disabled = true; const keep=btn.innerHTML; btn.innerHTML='Signing in…';
       await auth.signInWithEmailAndPassword(email, pass);
-      notify('Welcome!');
-
-      setTimeout(() => {
-        const rendered = !!document.querySelector('.app');
-        if (!rendered) { try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); notify('Render failed','danger'); } }
-      }, 700);
-
-      btn.disabled = false; btn.innerHTML = keep;
-    } catch (e) {
+      btn.disabled=false; btn.innerHTML=keep;
+    } catch(e){
       const map = {
-        'auth/invalid-email': 'Invalid email format.',
-        'auth/user-disabled': 'This user is disabled.',
-        'auth/user-not-found': 'No account found. Use Create account.',
-        'auth/wrong-password': 'Incorrect password.',
-        'auth/too-many-requests': 'Too many attempts. Try again later.',
-        'auth/operation-not-allowed': 'Email/password sign-in is disabled.',
-        'auth/network-request-failed': 'Network error. Check your connection.'
+        'auth/invalid-email':'Invalid email format.',
+        'auth/user-disabled':'This user is disabled.',
+        'auth/user-not-found':'No account found. Use Create account.',
+        'auth/wrong-password':'Incorrect password.',
+        'auth/too-many-requests':'Too many attempts. Try later.',
+        'auth/network-request-failed':'Network error. Check connection.'
       };
-      notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
+      notify(map[e?.code] || (e?.message || 'Login failed'),'danger');
     }
-  };
+  }
 
-  const doSignup = async () => {
+  const doSignup = async()=>{
     const name  = ($('#su-name')?.value || '').trim();
     const email = ($('#su-email')?.value || '').trim().toLowerCase();
-    const pass  = ($('#su-pass')?.value  || '');
-    const pass2 = ($('#su-pass2')?.value || '');
+    const pass  = $('#su-pass')?.value || '';
+    const pass2 = $('#su-pass2')?.value || '';
     if (!email || !pass) return notify('Email and password are required','warn');
     if (pass !== pass2)  return notify('Passwords do not match','warn');
     try {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
       await auth.createUserWithEmailAndPassword(email, pass);
       try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
-      notify('Account created — you are signed in');
-      closeAuthModal();
-    } catch (e) {
-      localSignup({name,email,pass});
-      closeAuthModal();
+      notify('Account created'); closeAuthModal();
+    } catch(e){
+      // local fallback
+      localSignup({name,email,pass}); closeAuthModal();
     }
   };
 
-  const doReset = async () => {
+  const doReset = async()=>{
     const email = ($('#fp-email')?.value || '').trim().toLowerCase();
     if (!email) return notify('Enter your email','warn');
     try {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
       await auth.sendPasswordResetEmail(email);
-      notify('Reset email sent — check your inbox','ok');
-      closeAuthModal();
-    } catch (e) {
+      notify('Reset email sent','ok'); closeAuthModal();
+    } catch(e){
       const r = localResetPassword(email);
-      if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
-      else { notify('Reset failed: '+ (r.msg || e?.message || 'Unknown'), 'danger'); }
+      if (r.ok) notify(`Local reset. Temp password: ${r.temp}`,'ok');
+      else      notify('Reset failed: '+(r.msg||e?.message||'Unknown'),'danger');
     }
   };
 
-  $('#btnLogin')?.addEventListener('click', doSignIn, { once:true });
-  $('#li-pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
-  $('#link-forgot')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuthModal('#m-reset'); $('#fp-email').value = ($('#li-email')?.value || ''); });
-  $('#link-register')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuthModal('#m-signup'); $('#su-email').value = ($('#li-email')?.value || ''); });
-  $('#cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); });
-  $('#cl-reset')?.addEventListener('click',  (e)=>{ e.preventDefault(); $('#mb-auth')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); });
+  $('#btnLogin')?.addEventListener('click', doSignIn);
+  $('#li-pass')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doSignIn(); });
+  $('#link-register')?.addEventListener('click', e=>{ e.preventDefault(); openAuthModal('#m-signup'); $('#su-email').value=$('#li-email')?.value||''; });
+  $('#link-forgot')?.addEventListener('click',   e=>{ e.preventDefault(); openAuthModal('#m-reset'); $('#fp-email').value=$('#li-email')?.value||''; });
+  $('#cl-signup')?.addEventListener('click', ()=> closeAuthModal());
+  $('#cl-reset')?.addEventListener('click',  ()=> closeAuthModal());
   $('#btnSignupDo')?.addEventListener('click', doSignup);
   $('#btnResetDo')?.addEventListener('click',  doReset);
 }
@@ -707,78 +625,68 @@ function renderLogin() {
 async function doLogout(){
   try { cloud?.disable?.(); } catch {}
   try { await auth.signOut(); } catch {}
-  if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
-  setSession(null);
-  currentRoute = 'home'; notify('Signed out'); renderLogin();
+  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  session = null; save('session', null); currentRoute = 'home';
+  notify('Signed out'); renderLogin();
 }
 
-/* ===================== Part C.1 — Home (Hot music videos) ===================== */
-/* Weekly random from YouTube Trending (optional), fallback to your library */
+/* ========= Part C.1 — Home (Random videos daily + per-login) ========= */
+
 (function(){
-  const YT_API_KEY = ''; // optional — add your key to include fresh trending picks
-  const REGION     = 'US';
-  window.HOT_MUSIC_LIBRARY = window.HOT_MUSIC_LIBRARY || [
-    { title:'Elvis Presley – Suspicious Minds (Live)', id:'RxOBOhRECoo' },
-    { title:'Michael Jackson – Billie Jean (Motown 25)', id:'Zi_XLOBDo_Y' },
-    { title:'Queen – Don’t Stop Me Now', id:'HgzGwKwLmgM' },
-    { title:'Amy Winehouse – Rehab', id:'KUmZp8pR1uc' },
-    { title:'Smokie – Living Next Door to Alice', id:'O6bOJ9Z1X2w' },
-    { title:'The Beatles – Hey Jude', id:'A_MjCqQoLLA' },
-    { title:'Adele – Rolling in the Deep', id:'rYEDA3JcQqw' },
-    { title:'Whitney Houston – I Wanna Dance with Somebody', id:'eH3giaIzONA' },
-    { title:'Eagles – Hotel California (’77)', id:'EqPtz5qN7HM' },
-    { title:'Toto – Africa', id:'FTQbiNvZqaY' },
-    // ➕ Add hundreds here; app will pick 10/week deterministically
+  if (!window.GLOBAL_VIDEOS) window.GLOBAL_VIDEOS = [
+    { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
+    { title:'DEAF KEV – Invincible (NCS)', id:'J2X5mJ3HDYE' },
+    { title:'LAKEY INSPIRED – Better Days', id:'RXLzvo6kvVQ' },
+    { title:'Ikson – Anywhere', id:'OZLUa8JUR18' },
+    { title:'Tobu – Candyland', id:'IIrCDAV3EgI' },
+    { title:'Elektronomia – Sky High', id:'TW9d8vYrVFQ' },
+    { title:'Janji – Heroes Tonight', id:'3nQNiWdeH2Q' },
+    { title:'Jim Yosef – Firefly', id:'x_OwcYTNbHs' },
+    { title:'Syn Cole – Feel Good', id:'q1ULJ92aldE' },
+    { title:'Itro & Tobu – Cloud 9', id:'VtKbiyyVZks' },
+    { title:'Inception – Trailer', id:'YoHD9XEInc0' },
+    { title:'Interstellar – Trailer', id:'zSWdZVtXT7E' },
+    { title:'Bohemian Rhapsody (Queen – live)', id:'fJ9rUzIMcZQ' },
+    { title:'Michael Jackson – Beat It', id:'oRdxUFDoQe0' },
+    { title:'Elvis Presley – Suspicious Minds', id:'uo2aW9LqCjo' },
+    { title:'Amy Winehouse – Back To Black', id:'TJAfLE39ZZ8' },
+    { title:'Smokie – Living Next Door to Alice', id:'SmoyzD3tSRI' },
+    { title:'ABBA – Dancing Queen', id:'xFrGuyw1V8s' },
+    { title:'The Beatles – Let It Be', id:'QDYfEBY9NM4' },
+    { title:'Whitney Houston – I Will Always Love You', id:'3JWTaaS7LdU' }
   ];
-  function uniqueById(arr){ const seen=new Set(); const out=[]; for(const it of arr||[]){ if(!it||!it.id)continue; if(seen.has(it.id))continue; seen.add(it.id); out.push(it);} return out; }
-  function seededPick(array, size, seed){
-    let s = seed % 2147483647; if (s <= 0) s += 2147483646;
-    const rnd = () => (s = s * 16807 % 2147483647) / 2147483647;
-    const idx = array.map((_, i) => i).sort(() => rnd() - 0.5);
-    const n = Math.min(size, idx.length);
-    return Array.from({ length: n }, (_, k) => array[idx[k]]);
+
+  function seedPRNG(seedStr){
+    let h=2166136261>>>0;
+    for(let i=0;i<seedStr.length;i++){ h^=seedStr.charCodeAt(i); h=(h*16777619)>>>0; }
+    return ()=> (h = (h*1664525 + 1013904223)>>>0) / 2**32;
   }
-  function weekKey(){ const d=new Date(); return `${d.getUTCFullYear()}-W${getISOWeek(d)}`; }
-  function loadCache(){ try { return JSON.parse(localStorage.getItem('_weeklyHotCache') || '{}'); } catch { return {}; } }
-  function saveCache(obj){ try { localStorage.setItem('_weeklyHotCache', JSON.stringify(obj)); } catch {} }
-  async function fetchTrending(){
-    if (!YT_API_KEY) return [];
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&regionCode=${REGION}&videoCategoryId=10&maxResults=50&key=${YT_API_KEY}`;
-    const r = await fetch(url, { cache: 'no-store' }); if (!r.ok) throw new Error('YouTube API failed');
-    const j = await r.json(); return (j.items || []).map(x => ({ id: x.id, title: x.snippet?.title || 'Music' }));
-  }
-  window.ensureWeeklyHotList = async function(){
-    const key = weekKey();
-    const cache = loadCache();
-    if (cache.key === key && Array.isArray(cache.items) && cache.items.length) return cache.items;
-    let trending = [];
-    try { trending = await fetchTrending(); } catch {}
-    const base = uniqueById([ ...(trending||[]), ...(window.HOT_MUSIC_LIBRARY||[]) ]);
-    const seed = key.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-    const weekly = seededPick(base, 10, seed);
-    const out = weekly.length ? weekly : (window.HOT_MUSIC_LIBRARY||[]).slice(0,10);
-    saveCache({ key, items: out });
-    return out;
+
+  if (!window.buildDailyRandomSet) window.buildDailyRandomSet = (size=10)=>{
+    const lib = window.GLOBAL_VIDEOS||[];
+    if (!lib.length) return [];
+    const day = new Date(); const key = `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`;
+    const rnd = seedPRNG(key);
+    const idxs = lib.map((_,i)=>i);
+    for (let i=idxs.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [idxs[i],idxs[j]]=[idxs[j],idxs[i]]; }
+    return idxs.slice(0, Math.min(size, lib.length)).map(i=>lib[i]);
   };
-  if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
-    const list = window.HOT_MUSIC_VIDEOS || []; if (!list.length) return 0;
-    const k = weekKey(); const seed = k.split('').reduce((a,c)=>a+c.charCodeAt(0),0); return seed % list.length;
-  };
-  // auto-skip blacklist
+
   function _ytBlacklistLoad(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
   function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
-  window.ytBlacklistAdd = id => { const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
-  window.ytIsBlacklisted = id => !!_ytBlacklistLoad()[id];
-  window.ytBlacklistClear = ()=> _ytBlacklistSave({});
+  window.ytBlacklistAdd = (id)=>{ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
+  window.ytIsBlacklisted= (id)=>{ const m=_ytBlacklistLoad(); return !!m[id]; };
+  window.ytBlacklistClear= ()=> _ytBlacklistSave({});
 })();
 
 function viewHome(){
-  const weeklyIdx = pickWeeklyVideoIndex();
+  const set = buildDailyRandomSet(10);
+  const start = Math.floor(Math.random() * Math.max(1, set.length));
   return `
     <div class="card">
       <div class="card-body">
-        <h3 style="margin-top:0">Welcome 👋</h3>
-        <p style="color:var(--muted)">Pick a section or enjoy this week’s hot music video. Tap Shuffle to change.</p>
+        <h3 style="margin-top:0">Hi ${session?.name||'there'} 👋</h3>
+        <p class="muted">Your quick tiles + a random pick from today’s world-wide videos. Shuffle to roll again.</p>
 
         <div class="grid cols-4 auto" style="margin-bottom:12px">
           <div class="card tile" data-go="inventory"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-archive-2-line"></i><div>Inventory</div></div></div>
@@ -791,17 +699,17 @@ function viewHome(){
           <div class="card">
             <div class="card-body">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <h4 style="margin:0">Hot Music Videos</h4>
+                <h4 style="margin:0">Random Music & Movies</h4>
                 <div style="display:flex;gap:8px">
                   <button class="btn ghost" id="btnShuffleVideo"><i class="ri-shuffle-line"></i> Shuffle</button>
                   <a class="btn secondary" id="btnOpenYouTube" href="#" target="_blank" rel="noopener"><i class="ri-youtube-fill"></i> Open on YouTube</a>
                 </div>
               </div>
 
-              <div id="musicVideoWrap" data-vid-index="${weeklyIdx}">
+              <div id="musicVideoWrap" data-vid-index="${start}">
                 <div id="ytPlayerHost" style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px;overflow:hidden"></div>
                 <div style="margin-top:8px;font-weight:700" id="mvTitle"></div>
-                <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
+                <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, tap to play. We auto-skip blocked videos.</div>
               </div>
             </div>
           </div>
@@ -819,63 +727,51 @@ function wireHome(){
   const hostId = 'ytPlayerHost';
   if (!wrap || !title || !openYT) return;
 
-  function loadYT(){
-    return new Promise((resolve)=>{
-      if (window.YT && YT.Player) return resolve();
-      const s = document.createElement('script');
-      s.src = "https://www.youtube.com/iframe_api";
-      document.head.appendChild(s);
-      window.onYouTubeIframeAPIReady = ()=> resolve();
-    });
-  }
+  const todaySet = buildDailyRandomSet(10);
+  window.HOME_TODAY_VIDEOS = todaySet;
+
+  function loadYT(){ return new Promise((resolve)=>{ if (window.YT && YT.Player) return resolve(); const s=document.createElement('script'); s.src="https://www.youtube.com/iframe_api"; document.head.appendChild(s); window.onYouTubeIframeAPIReady=()=>resolve(); }); }
   function nextValidIndex(start){
-    const list = window.HOT_MUSIC_VIDEOS || [];
+    const list = HOME_TODAY_VIDEOS || [];
     if (!list.length) return 0;
-    for (let k=0; k<list.length; k++){
-      const i = (start + k) % list.length;
-      if (!ytIsBlacklisted(list[i].id)) return i;
-    }
-    ytBlacklistClear();
-    return start % list.length;
+    for (let k=0;k<list.length;k++){ const i=(start+k)%list.length; if (!ytIsBlacklisted(list[i].id)) return i; }
+    ytBlacklistClear(); return start%list.length;
   }
-  let player = null;
+
+  let player=null;
   function setVideoByIndex(idx){
-    const list = window.HOT_MUSIC_VIDEOS || []; if (!list.length) return;
+    const list = HOME_TODAY_VIDEOS || []; if(!list.length) return;
     const i = nextValidIndex(idx);
     const { id, title: t } = list[i];
     wrap.setAttribute('data-vid-index', String(i));
-    title.textContent = t || 'Hot music';
+    title.textContent = t || 'Now playing';
     openYT.href = `https://www.youtube.com/watch?v=${id}`;
+
     const options = {
       host: 'https://www.youtube-nocookie.com',
       videoId: id,
-      playerVars: { rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
-      events: { onError: ()=>{ try{ ytBlacklistAdd(id); }catch{}; notify('Video not available. Skipping…','warn'); setVideoByIndex(i + 1); } }
+      playerVars: { rel:0, modestbranding:1, playsinline:1, origin: location.origin },
+      events: { onError: ()=>{ try{ ytBlacklistAdd(id); }catch{}; notify('Video not available. Skipping…','warn'); setVideoByIndex(i+1); } }
     };
+
     if (!player) player = new YT.Player(hostId, options);
     else player.loadVideoById(id);
   }
-  ensureWeeklyHotList().then(list=>{
-    window.HOT_MUSIC_VIDEOS = list || [];
-    const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
-    loadYT().then(()=> setVideoByIndex(startIdx));
-  }).catch(()=>{
-    window.HOT_MUSIC_VIDEOS = window.HOT_MUSIC_LIBRARY || [];
-    const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
-    loadYT().then(()=> setVideoByIndex(startIdx));
-  });
-  btn?.addEventListener('click', ()=>{
-    const list = window.HOT_MUSIC_VIDEOS || []; if (!list.length) return;
-    const curr = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
-    let next = Math.floor(Math.random()*list.length);
-    if (list.length > 1 && next === curr) next = (next+1) % list.length;
-    setVideoByIndex(next);
-    notify('Shuffled music video','ok');
-  });
+
+  loadYT().then(()=>{
+    const startIdx = parseInt(wrap.getAttribute('data-vid-index')||'0',10) || 0;
+    setVideoByIndex(startIdx);
+    btn?.addEventListener('click', ()=>{
+      const list = HOME_TODAY_VIDEOS || []; if (!list.length) return;
+      const curr = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
+      let next = Math.floor(Math.random()*list.length);
+      if (list.length>1 && next===curr) next=(next+1)%list.length;
+      setVideoByIndex(next); notify('Shuffled','ok');
+    });
+  }).catch(()=> notify('YouTube player couldn’t load','warn'));
 }
 
 /* ===================== Part C.2 — Search ===================== */
-
 function viewSearch(){
   const q = (window.searchQuery || '').trim();
   const index = buildSearchIndex();
@@ -884,20 +780,19 @@ function viewSearch(){
     <div class="card"><div class="card-body">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <h3 style="margin:0">Search</h3>
-        <div style="color:var(--muted)">Query: <strong>${q || '(empty)'}</strong></div>
+        <div class="muted">Query: <strong>${q || '(empty)'}</strong></div>
       </div>
       ${out.length ? `<div class="grid">
         ${out.map(r=>`
           <div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
-            <div><div style="font-weight:700">${r.label}</div><div style="color:var(--muted);font-size:12px">${r.section||''}</div></div>
+            <div><div style="font-weight:700">${r.label}</div><div class="muted" style="font-size:12px">${r.section||''}</div></div>
             <button class="btn" data-go="${r.route}" data-id="${r.id||''}">Open</button>
           </div></div>`).join('')}
-      </div>` : `<p style="color:var(--muted)">No results.</p>`}
+      </div>` : `<p class="muted">No results.</p>`}
     </div></div>`;
 }
 
 /* ===================== Part C.3 — Dashboard + Posts ===================== */
-
 function viewDashboard(){
   const posts = load('posts', []);
   const inv   = load('inventory', []);
@@ -915,11 +810,7 @@ function viewDashboard(){
 
   const today=new Date(); const cy=today.getFullYear(), cm=today.getMonth()+1;
   const py = cm===1? (cy-1) : cy; const pm = cm===1? 12 : (cm-1); const ly=cy-1, lm=cm;
-
-  const totalThisMonth=sumForMonth(cy,cm),
-        totalPrevMonth=sumForMonth(py,pm),
-        totalLY=sumForMonth(ly,lm);
-
+  const totalThisMonth=sumForMonth(cy,cm), totalPrevMonth=sumForMonth(py,pm), totalLY=sumForMonth(ly,lm);
   const pct=(a,b)=> (b>0 ? ((a-b)/b)*100 : (a>0? 100 : 0));
   const mom=pct(totalThisMonth,totalPrevMonth), yoy=pct(totalThisMonth,totalLY);
   const fmtPct = (v)=> `${v>=0?'+':''}${v.toFixed(1)}%`;
@@ -934,17 +825,17 @@ function viewDashboard(){
     </div>
 
     <div class="grid cols-4 auto" style="margin-top:12px">
-      <div class="card" style="border-left:4px solid var(--warn)"><div class="card-body"><strong>Low stock</strong><div style="color:var(--muted)">${lowCt}</div></div></div>
-      <div class="card" style="border-left:4px solid var(--danger)"><div class="card-body"><strong>Critical</strong><div style="color:var(--muted)">${critCt}</div></div></div>
+      <div class="card" style="border-left:4px solid var(--warn)"><div class="card-body"><strong>Low stock</strong><div class="muted">${lowCt}</div></div></div>
+      <div class="card" style="border-left:4px solid var(--danger)"><div class="card-body"><strong>Critical</strong><div class="muted">${critCt}</div></div></div>
 
       <div class="card"><div class="card-body">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <strong>Sales (Month-to-Date)</strong>
           <button class="btn ghost" data-go="cogs"><i class="ri-line-chart-line"></i> Details</button>
         </div>
-        <div style="margin-top:6px"><span style="color:var(--muted)">This month:</span> <strong>${USD(totalThisMonth)}</strong></div>
-        <div><span style="color:var(--muted)">Prev month:</span> ${USD(totalPrevMonth)} <span style="color:${trendColor(mom)}">${fmtPct(mom)} MoM</span></div>
-        <div><span style="color:var(--muted)">Same month last year:</span> ${USD(totalLY)} <span style="color:${trendColor(yoy)}">${fmtPct(yoy)} YoY</span></div>
+        <div style="margin-top:6px"><span class="muted">This month:</span> <strong>${USD(totalThisMonth)}</strong></div>
+        <div><span class="muted">Prev month:</span> ${USD(totalPrevMonth)} <span style="color:${trendColor(mom)}">${fmtPct(mom)} MoM</span></div>
+        <div><span class="muted">Same month last year:</span> ${USD(totalLY)} <span style="color:${trendColor(yoy)}">${fmtPct(yoy)} YoY</span></div>
       </div></div>
     </div>
 
@@ -959,7 +850,7 @@ function viewDashboard(){
             <div class="card" id="${p.id}">
               <div class="card-body">
                 <div style="display:flex;justify-content:space-between;align-items:center">
-                  <div><strong>${p.title}</strong><div style="color:var(--muted);font-size:12px">${new Date(p.createdAt).toLocaleString()}</div></div>
+                  <div><strong>${p.title}</strong><div class="muted" style="font-size:12px">${new Date(p.createdAt).toLocaleString()}</div></div>
                   <div>
                     ${canEdit()?`<button class="btn ghost" data-edit="${p.id}"><i class="ri-edit-line"></i></button>`:''}
                     ${canDelete()?`<button class="btn danger" data-del="${p.id}"><i class="ri-delete-bin-6-line"></i></button>`:''}
@@ -973,40 +864,52 @@ function viewDashboard(){
       </div>
     </div>`;
 }
-
-function wireDashboard(){ $('#addPost')?.addEventListener('click', ()=>{ openModal('m-post'); $('#post-id').value=''; $('#post-title').value=''; $('#post-body').value=''; $('#post-img').value=''; }); }
+function wireDashboard(){
+  $('#addPost')?.addEventListener('click', ()=>{
+    // open blank form (ensures new post, no accidental edit mode)
+    openModal('m-post');
+    $('#post-id').value='';
+    $('#post-title').value='';
+    $('#post-body').value='';
+    $('#post-img').value='';
+    attachImageUpload('#post-imgfile', '#post-img');
+  });
+}
 function wirePosts(){
   const sec = document.querySelector('[data-section="posts"]'); if (!sec) return;
 
-  // Use onclick (not addEventListener stacking) — prevents duplicate saves
-  $('#save-post').onclick = ()=>{
+  // IMPORTANT: use .onclick so it never stacks and never saves multiple times
+  const saveBtn = $('#save-post');
+  if (saveBtn) saveBtn.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const posts = load('posts', []);
     const id = ($('#post-id')?.value || '').trim() || ('post_'+Date.now());
     const obj = { id, title: ($('#post-title')?.value||'').trim(), body: ($('#post-body')?.value||'').trim(), img: ($('#post-img')?.value||'').trim(), createdAt: Date.now() };
     if (!obj.title) return notify('Title required','warn');
-    const idx = posts.findIndex(x=>x.id===id);
-    if (idx>=0) { if (!canEdit()) return notify('No permission','warn'); posts[idx]=obj; }
-    else posts.unshift(obj);
+    const i = posts.findIndex(x=>x.id===id);
+    if (i>=0) { if (!canEdit()) return notify('No permission','warn'); posts[i]=obj; } else posts.unshift(obj);
     save('posts', posts); closeModal('m-post'); notify('Saved'); renderApp();
   };
 
-  sec.onclick = (e)=>{
+  // Row edit/delete (delegated to the section that re-renders)
+  sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const p = load('posts', []).find(x=>x.id===id); if (!p) return;
       openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||'';
+      attachImageUpload('#post-imgfile', '#post-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
       save('posts', load('posts', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
-  };
+  });
 }
 
 /* ===================== Part D — Inventory / Products / COGS / Tasks ===================== */
 
+// CSV helper
 function downloadCSV(filename, rows, headers) {
   try {
     const csvRows = [];
@@ -1023,18 +926,20 @@ function downloadCSV(filename, rows, headers) {
     }
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.style.display = 'none'; a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
+    const a = document.createElement('a');
+    a.style.display = 'none'; a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
     notify('Exported CSV', 'ok');
   } catch (e) { notify('Export failed', 'danger'); }
 }
 
+// Image upload: file -> dataURL -> set to input
 function attachImageUpload(fileInputSel, textInputSel){
   const f = $(fileInputSel), t = $(textInputSel); if (!f || !t) return;
-  f.onchange = ()=>{ const file = f.files && f.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ()=>{ t.value = reader.result; }; reader.readAsDataURL(file); };
+  f.onchange = ()=>{ const file=f.files && f.files[0]; if(!file)return; const reader=new FileReader(); reader.onload=()=>{ t.value=reader.result; }; reader.readAsDataURL(file); };
 }
 
-/* ---- Inventory ---- */
+/* ----- Inventory ----- */
 function viewInventory(){
   const items = load('inventory', []);
   return `
@@ -1057,6 +962,7 @@ function viewInventory(){
               return `<tr id="${it.id}" class="${warnClass}">
                 <td><div class="thumb-wrap">
                   ${ it.img ? `<img class="thumb inv-preview" data-src="${it.img}" src="${it.img}" alt=""/>` : `<div class="thumb inv-preview" data-src="icons/icon-512.png" style="display:grid;place-items:center">📦</div>` }
+                  <img class="thumb-large" src="${it.img || 'icons/icon-512.png'}" alt=""/>
                 </div></td>
                 <td>${it.name}</td>
                 <td>${it.code}</td>
@@ -1074,43 +980,50 @@ function viewInventory(){
       </div>
     </div></div>`;
 }
+
 function wireInventory(){
   const sec = document.querySelector('[data-section="inventory"]'); if (!sec) return;
 
-  $('#export-inventory').onclick = ()=> downloadCSV('inventory.csv', load('inventory', []), ['id','name','code','type','price','stock','threshold','img']);
+  $('#export-inventory')?.addEventListener('click', ()=>{
+    downloadCSV('inventory.csv', load('inventory', []), ['id','name','code','type','price','stock','threshold','img']);
+  });
 
-  $('#addInv').onclick = ()=>{
+  $('#addInv')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-inv');
     $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value='';
-    $('#inv-type').value='Other';
-    $('#inv-price').value=''; $('#inv-stock').value=''; $('#inv-threshold').value=''; $('#inv-img').value='';
+    $('#inv-type').value='Other'; $('#inv-price').value=''; $('#inv-stock').value=''; $('#inv-threshold').value=''; $('#inv-img').value='';
     attachImageUpload('#inv-imgfile', '#inv-img');
-  };
+  });
 
-  $('#save-inv').onclick = ()=>{
+  const saveInv = $('#save-inv');
+  if (saveInv) saveInv.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
+    const toF = v => { const n = parseFloat(String(v||'').trim()); return Number.isFinite(n) ? n : 0; };
+    const toI = v => { const n = parseInt(String(v||'').trim(), 10); return Number.isFinite(n) ? n : 0; };
+
     const items = load('inventory', []);
-    const id = $('#inv-id').value || ('inv_'+Date.now());
+    const id = ($('#inv-id')?.value || '').trim() || ('inv_'+Date.now());
     const obj = {
       id,
-      name: ($('#inv-name').value||'').trim(),
-      code: ($('#inv-code').value||'').trim(),
-      type: ($('#inv-type').value||'').trim(),
-      price: parseFloat($('#inv-price').value || '0'),
-      stock: parseInt($('#inv-stock').value || '0'),
-      threshold: parseInt($('#inv-threshold').value || '0'),
-      img: ($('#inv-img').value||'').trim(),
+      name: ($('#inv-name')?.value || '').trim(),
+      code: ($('#inv-code')?.value || '').trim(),
+      type: ($('#inv-type')?.value || 'Other').trim(),
+      price: toF($('#inv-price')?.value),
+      stock: toI($('#inv-stock')?.value),
+      threshold: toI($('#inv-threshold')?.value),
+      img: ($('#inv-img')?.value || '').trim()
     };
     if (!obj.name) return notify('Name required','warn');
+
     const i = items.findIndex(x=>x.id===id);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); items[i]=obj; }
     else items.push(obj);
-    save('inventory', items);
-    closeModal('m-inv'); notify('Saved'); renderApp();
+
+    save('inventory', items); closeModal('m-inv'); notify('Saved'); renderApp();
   };
 
-  sec.onclick = (e)=>{
+  sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const items = load('inventory', []);
     const get = (id)=> items.find(x=>x.id===id);
@@ -1120,8 +1033,12 @@ function wireInventory(){
       const id = btn.getAttribute('data-edit');
       const it = get(id); if (!it) return;
       openModal('m-inv');
-      $('#inv-id').value=id; $('#inv-name').value=it.name; $('#inv-code').value=it.code; $('#inv-type').value=it.type || 'Other';
-      $('#inv-price').value=it.price; $('#inv-stock').value=it.stock; $('#inv-threshold').value=it.threshold; $('#inv-img').value=it.img || '';
+      $('#inv-id').value=id; $('#inv-name').value=it.name; $('#inv-code').value=it.code;
+      $('#inv-type').value=it.type || 'Other';
+      $('#inv-price').value=(it.price ?? '').toString();
+      $('#inv-stock').value=(it.stock ?? '').toString();
+      $('#inv-threshold').value=(it.threshold ?? '').toString();
+      $('#inv-img').value=it.img||'';
       attachImageUpload('#inv-imgfile', '#inv-img');
       return;
     }
@@ -1136,16 +1053,16 @@ function wireInventory(){
     if (!id) return; if (!canAdd()) return notify('No permission','warn');
     const it = get(id); if (!it) return;
 
-    if (btn.hasAttribute('data-inc')) it.stock++;
-    if (btn.hasAttribute('data-dec')) it.stock = Math.max(0, it.stock-1);
-    if (btn.hasAttribute('data-inc-th')) it.threshold++;
-    if (btn.hasAttribute('data-dec-th')) it.threshold = Math.max(0, it.threshold-1);
+    if (btn.hasAttribute('data-inc')) it.stock = (parseInt(it.stock||0,10)||0) + 1;
+    if (btn.hasAttribute('data-dec')) it.stock = Math.max(0, (parseInt(it.stock||0,10)||0) - 1);
+    if (btn.hasAttribute('data-inc-th')) it.threshold = (parseInt(it.threshold||0,10)||0) + 1;
+    if (btn.hasAttribute('data-dec-th')) it.threshold = Math.max(0, (parseInt(it.threshold||0,10)||0) - 1);
 
     save('inventory', items); renderApp();
-  };
+  });
 }
 
-/* ---- Products ---- */
+/* ----- Products ----- */
 function viewProducts(){
   const items = load('products', []);
   return `
@@ -1165,6 +1082,7 @@ function viewProducts(){
               <tr id="${it.id}">
                 <td><div class="thumb-wrap">
                   ${ it.img ? `<img class="thumb prod-thumb" data-card="${it.id}" alt="" src="${it.img}"/>` : `<div class="thumb prod-thumb" data-card="${it.id}" style="display:grid;place-items:center;cursor:pointer">🛒</div>` }
+                  <img class="thumb-large" src="${it.img||'icons/icon-512.png'}" alt=""/>
                 </div></td>
                 <td>${it.name}</td><td>${it.barcode||''}</td><td>${USD(it.price)}</td><td>${it.type||'-'}</td>
                 <td>
@@ -1177,46 +1095,54 @@ function viewProducts(){
       </div>
     </div></div>`;
 }
+
 function wireProducts(){
   const sec = document.querySelector('[data-section="products"]'); if (!sec) return;
 
-  $('#export-products').onclick = ()=> downloadCSV('products.csv', load('products', []), ['id','name','barcode','price','type','ingredients','instructions','img']);
+  $('#export-products')?.addEventListener('click', ()=>{
+    downloadCSV('products.csv', load('products', []), ['id','name','barcode','price','type','ingredients','instructions','img']);
+  });
 
-  $('#addProd').onclick = ()=>{
+  $('#addProd')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-prod');
     $('#prod-id').value=''; $('#prod-name').value=''; $('#prod-barcode').value='';
     $('#prod-price').value=''; $('#prod-type').value=''; $('#prod-ingredients').value=''; $('#prod-instructions').value=''; $('#prod-img').value='';
     attachImageUpload('#prod-imgfile', '#prod-img');
-  };
+  });
 
-  $('#save-prod').onclick = ()=>{
+  const saveProd = $('#save-prod');
+  if (saveProd) saveProd.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
+    const toF = v => { const n = parseFloat(String(v||'').trim()); return Number.isFinite(n) ? n : 0; };
     const items = load('products', []);
-    const id = $('#prod-id').value || ('p_'+Date.now());
+    const id = ($('#prod-id')?.value || '').trim() || ('p_'+Date.now());
     const obj = {
       id,
-      name: ($('#prod-name').value||'').trim(),
-      barcode: ($('#prod-barcode').value||'').trim(),
-      price: parseFloat($('#prod-price').value || '0'),
-      type: ($('#prod-type').value||'').trim(),
-      ingredients: ($('#prod-ingredients').value||'').trim(),
-      instructions: ($('#prod-instructions').value||'').trim(),
-      img: ($('#prod-img').value||'').trim()
+      name: ($('#prod-name')?.value || '').trim(),
+      barcode: ($('#prod-barcode')?.value || '').trim(),
+      price: toF($('#prod-price')?.value),
+      type: ($('#prod-type')?.value || '').trim(),
+      ingredients: ($('#prod-ingredients')?.value || '').trim(),
+      instructions: ($('#prod-instructions')?.value || '').trim(),
+      img: ($('#prod-img')?.value || '').trim()
     };
     if (!obj.name) return notify('Name required','warn');
+
     const i = items.findIndex(x=>x.id===id);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); items[i]=obj; }
     else items.push(obj);
-    save('products', items);
-    closeModal('m-prod'); notify('Saved'); renderApp();
+
+    save('products', items); closeModal('m-prod'); notify('Saved'); renderApp();
   };
 
-  sec.onclick = (e)=>{
+  // Card & row actions
+  sec.addEventListener('click', (e)=>{
     const prodCard = e.target.closest('.prod-thumb');
     if (prodCard){
       const id = prodCard.getAttribute('data-card');
-      const it = load('products', []).find(x=>x.id===id); if (!it) return;
+      const items = load('products', []);
+      const it = items.find(x=>x.id===id); if (!it) return;
       $('#pc-name').textContent = it.name;
       $('#pc-img').src = it.img || 'icons/icon-512.png';
       $('#pc-barcode').textContent = it.barcode || '';
@@ -1236,17 +1162,17 @@ function wireProducts(){
       const it = items.find(x=>x.id===id); if (!it) return;
       openModal('m-prod');
       $('#prod-id').value=id; $('#prod-name').value=it.name; $('#prod-barcode').value=it.barcode||'';
-      $('#prod-price').value=it.price; $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||'';
+      $('#prod-price').value=(it.price ?? '').toString(); $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||'';
       $('#prod-instructions').value=it.instructions||''; $('#prod-img').value=it.img||'';
       attachImageUpload('#prod-imgfile', '#prod-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
       save('products', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
-  };
+  });
 }
 
-/* ---- COGS ---- */
+/* ----- COGS ----- */
 function viewCOGS(){
   const rows = load('cogs', []);
   const totals = rows.reduce((a,r)=>({grossIncome:a.grossIncome+(+r.grossIncome||0),produceCost:a.produceCost+(+r.produceCost||0),itemCost:a.itemCost+(+r.itemCost||0),freight:a.freight+(+r.freight||0),delivery:a.delivery+(+r.delivery||0),other:a.other+(+r.other||0)}),{grossIncome:0,produceCost:0,itemCost:0,freight:0,delivery:0,other:0});
@@ -1286,33 +1212,36 @@ function viewCOGS(){
       </div>
     </div></div>`;
 }
+
 function wireCOGS(){
   const sec = document.querySelector('[data-section="cogs"]'); if (!sec) return;
 
-  $('#export-cogs').onclick = ()=> downloadCSV('cogs.csv', load('cogs', []), ['id','date','grossIncome','produceCost','itemCost','freight','delivery','other']);
+  $('#export-cogs')?.addEventListener('click', ()=> downloadCSV('cogs.csv', load('cogs', []), ['id','date','grossIncome','produceCost','itemCost','freight','delivery','other']) );
 
-  $('#addCOGS').onclick = ()=>{
+  $('#addCOGS')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-cogs');
     $('#cogs-id').value=''; $('#cogs-date').value=new Date().toISOString().slice(0,10);
     $('#cogs-grossIncome').value=''; $('#cogs-produceCost').value=''; $('#cogs-itemCost').value='';
     $('#cogs-freight').value=''; $('#cogs-delivery').value=''; $('#cogs-other').value='';
-  };
+  });
 
-  $('#save-cogs').onclick = ()=>{
+  const saveCogs = $('#save-cogs');
+  if (saveCogs) saveCogs.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
+    const toF=v=>{const n=parseFloat(String(v||'').trim());return Number.isFinite(n)?n:0;};
     const rows = load('cogs', []);
     const id = $('#cogs-id').value || ('c_'+Date.now());
     const row = { id, date: $('#cogs-date').value || new Date().toISOString().slice(0,10),
-      grossIncome:+($('#cogs-grossIncome').value||0), produceCost:+($('#cogs-produceCost').value||0),
-      itemCost:+($('#cogs-itemCost').value||0), freight:+($('#cogs-freight').value||0),
-      delivery:+($('#cogs-delivery').value||0), other:+($('#cogs-other').value||0) };
+      grossIncome:toF($('#cogs-grossIncome').value), produceCost:toF($('#cogs-produceCost').value),
+      itemCost:toF($('#cogs-itemCost').value), freight:toF($('#cogs-freight').value),
+      delivery:toF($('#cogs-delivery').value), other:toF($('#cogs-other').value) };
     const i = rows.findIndex(x=>x.id===id);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); rows[i]=row; } else rows.push(row);
     save('cogs', rows); closeModal('m-cogs'); notify('Saved'); renderApp();
   };
 
-  sec.onclick = (e)=>{
+  sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
 
@@ -1327,10 +1256,10 @@ function wireCOGS(){
       if (!canDelete()) return notify('No permission','warn');
       save('cogs', load('cogs', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
-  };
+  });
 }
 
-/* ---- Tasks (DnD + touch) ---- */
+/* ----- Tasks ----- */
 function viewTasks(){
   const items = load('tasks', []);
   const lane = (key, label, color)=>`
@@ -1360,15 +1289,60 @@ function viewTasks(){
     ${lane('done','Done','#10b981')}
   </div>`;
 }
+
+/* Delegated, resilient DnD — works from any lane to any lane */
+(function wireGlobalDnD(){
+  if (window.__dndWired) return; window.__dndWired = true;
+
+  document.addEventListener('dragstart', (e)=>{
+    const card = e.target.closest('.task-card'); if (!card) return;
+    e.dataTransfer.setData('text/plain', card.getAttribute('data-task') || '');
+    e.dataTransfer.effectAllowed='move';
+    card.classList.add('dragging');
+  });
+
+  document.addEventListener('dragenter', (e)=>{
+    const row = e.target.closest('.lane-row'); if (row) row.classList.add('drop');
+  });
+
+  document.addEventListener('dragover', (e)=>{
+    const grid = e.target.closest('.lane-grid'); if (!grid) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect='move';
+    grid.closest('.lane-row')?.classList.add('drop');
+  });
+
+  document.addEventListener('dragleave', (e)=>{
+    const row = e.target.closest('.lane-row'); if (row) row.classList.remove('drop');
+  });
+
+  document.addEventListener('dragend', (e)=>{
+    const card = e.target.closest('.task-card'); if (card) card.classList.remove('dragging');
+  });
+
+  document.addEventListener('drop', (e)=>{
+    const grid = e.target.closest('.lane-grid'); if (!grid) return;
+    e.preventDefault();
+    grid.closest('.lane-row')?.classList.remove('drop');
+    const id = e.dataTransfer.getData('text/plain'); if (!id) return;
+    const lane = grid.id.replace('lane-','');
+    const items = load('tasks', []);
+    const t = items.find(x=>x.id===id); if (!t) return;
+    if (!canAdd()) { notify('No permission','warn'); return; }
+    t.status = lane; save('tasks', items); renderApp();
+  });
+})();
+
 function wireTasks(){
   const root = document.querySelector('[data-section="tasks"]'); if (!root) return;
 
-  $('#addTask') && ($('#addTask').onclick = ()=>{
+  $('#addTask')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-task'); $('#task-id').value=''; $('#task-title').value=''; $('#task-status').value='todo';
   });
 
-  $('#save-task') && ($('#save-task').onclick = ()=>{
+  const saveTask = $('#save-task');
+  if (saveTask) saveTask.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const items = load('tasks', []);
     const id = $('#task-id').value || ('t_'+Date.now());
@@ -1378,10 +1352,24 @@ function wireTasks(){
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); items[i]=obj; }
     else items.push(obj);
     save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
-  });
+  };
 
-  // row actions
-  root.onclick = (e)=>{
+  // Click-to-advance on touch devices
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  if (isTouch) {
+    $$('.task-card').forEach(card=>{
+      card.addEventListener('click', (e)=>{
+        if (e.target.closest('button')) return;
+        if (!canAdd()) return notify('No permission','warn');
+        const id = card.getAttribute('data-task'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
+        const next = t.status==='todo' ? 'inprogress' : (t.status==='inprogress' ? 'done' : 'todo');
+        t.status = next; save('tasks', items); renderApp();
+      });
+    });
+  }
+
+  // Row edit/delete
+  root.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
     const items = load('tasks', []);
@@ -1393,252 +1381,219 @@ function wireTasks(){
       if (!canDelete()) return notify('No permission','warn');
       save('tasks', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
-  };
-
-  setupDnD();
-  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  if (isTouch) {
-    $$('.task-card').forEach(card=>{
-      card.onclick = (e)=>{
-        if (e.target.closest('button')) return;
-        if (!canAdd()) return notify('No permission','warn');
-        const id = card.getAttribute('data-task'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
-        const next = t.status==='todo' ? 'inprogress' : (t.status==='inprogress' ? 'done' : 'todo');
-        t.status = next; save('tasks', items); renderApp();
-      };
-    });
-  }
-}
-function setupDnD(){
-  const lanes = ['todo','inprogress','done'];
-  document.querySelectorAll('[data-task]').forEach(card=>{
-    card.ondragstart = (e)=> {
-      e.dataTransfer.setData('text/plain', card.getAttribute('data-task'));
-      e.dataTransfer.dropEffect = 'move';
-    };
-  });
-  lanes.forEach(k=>{
-    const laneGrid  = document.getElementById('lane-'+k);
-    const parentCard = laneGrid?.closest('.lane-row'); if (!laneGrid) return;
-    laneGrid.ondragover  = (e)=>{ e.preventDefault(); parentCard?.classList.add('drop'); };
-    laneGrid.ondragleave = ()=> parentCard?.classList.remove('drop');
-    laneGrid.ondrop      = (e)=>{
-      e.preventDefault(); parentCard?.classList.remove('drop');
-      if (!canAdd()) return notify('No permission','warn');
-      const id = e.dataTransfer.getData('text/plain'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
-      t.status = k; save('tasks', items); renderApp();
-    };
   });
 }
 
-/* ===================== Part E — Settings / Contact / Modals ===================== */
+/* ===================== Part E — Settings / Contact / Pages / Modals ===================== */
 
-function openModal(id){ $('#mb-'+(id.split('-')[1]||'')).classList.add('active'); $('#'+id).classList.add('active'); }
-function closeModal(id){ $('#mb-'+(id.split('-')[1]||'')).classList.remove('active'); $('#'+id).classList.remove('active'); }
+function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); document.body.classList.add('ui-layer-open'); }
+function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); document.body.classList.remove('ui-layer-open'); }
 
 function enableMobileImagePreview(){
   const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
   $$('.inv-preview, .prod-thumb').forEach(el=>{
     el.style.cursor = 'pointer';
-    el.onclick = ()=>{
+    el.addEventListener('click', ()=>{
       const src = el.getAttribute('data-src') || el.getAttribute('src') || 'icons/icon-512.png';
       const img = $('#preview-img'); if (img) img.src = src; openModal('m-img');
-    };
+    });
   });
 }
 
-// Global hover preview (prevents sink in table & stays below modals)
-function setupHoverPreview(){
-  if (window.__hoverPopReady) return; window.__hoverPopReady = true;
-  let pop = document.getElementById('hover-pop');
-  if (!pop){
-    pop = document.createElement('div');
-    pop.id = 'hover-pop';
-    pop.innerHTML = '<img alt="preview"/>';
-    document.body.appendChild(pop);
-  }
-  const img = pop.querySelector('img');
-  document.addEventListener('mouseover', (e)=>{
-    const w = e.target.closest('.thumb-wrap');
-    if (!w){ pop.style.display='none'; return; }
-    const src = w.querySelector('.thumb')?.getAttribute('src') || w.querySelector('.thumb')?.getAttribute('data-src') || 'icons/icon-512.png';
-    img.src = src; pop.style.display='block';
-  });
-  document.addEventListener('mousemove', (e)=>{
-    if (pop.style.display!=='block') return;
-    const x = Math.min(window.innerWidth-280, e.clientX+14);
-    const y = Math.min(window.innerHeight-280, Math.max(12, e.clientY-140));
-    pop.style.left = x+'px'; pop.style.top = y+'px';
-  });
-  document.addEventListener('mouseout', (e)=>{ if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('.thumb-wrap')) pop.style.display='none'; });
-  // Hide when overlays open
-  ['mb-post','mb-inv','mb-prod','mb-card','mb-cogs','mb-task','mb-user','mb-img','backdrop'].forEach(id=>{
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener('mouseenter', ()=>{ pop.style.display='none'; }, true);
-  });
-}
-
-/* ---- Static/link pages ---- */
+/* Static/link pages – inlined */
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
   about: `
-    <div class="page-prose">
+    <div class="page-frame">
       <h2>About Inventory</h2>
-      <p>A fast, modern, offline-friendly inventory app that scales from small shops to mid-size teams.</p>
-      <div class="page-note">Works on desktop and mobile. Install as a PWA for a native-like experience.</div>
-      <h3>Why you’ll love it</h3>
-      <ul>
-        <li>⚡ Quick adds & edits with images</li>
-        <li>🔒 Per-user data spaces (each account sees their own data)</li>
-        <li>☁️ Optional Cloud Sync (Firebase)</li>
-        <li>📦 CSV export for reports</li>
-        <li>🎵 Weekly music block to keep you in flow</li>
-      </ul>
-      <h3>Perfect for</h3>
-      <p>Food stands, cafés, salons, small retailers, craft sellers, and growing teams who want speed + simplicity.</p>
-    </div>
-  `,
-  policy: `
-    <div class="page-prose">
-      <h2>Privacy & Policy</h2>
-      <p>We store your data locally on your device. If you enable Cloud Sync, your data is stored per-user in Firebase Realtime Database under your UID. We don’t sell data.</p>
-      <div class="page-note">Tip: Use strong passwords. Sign out if using a shared device.</div>
-      <h3>Data</h3>
-      <ul><li>Local: per-user namespace in your browser</li><li>Cloud (optional): per-user path in Firebase</li></ul>
-    </div>
-  `,
+      <p>Inventory is a fast, offline-friendly web app built for everyday operations — from small shops to growing mid-sized teams.</p>
+      <div class="grid cols-3">
+        <div class="card"><div class="card-body"><strong>Track Stock</strong><p class="muted">Add items, update stock/thresholds, and spot low or critical levels instantly.</p></div></div>
+        <div class="card"><div class="card-body"><strong>Manage Products</strong><p class="muted">Images, barcodes, ingredients, and instructions — all in one place.</p></div></div>
+        <div class="card"><div class="card-body"><strong>COGS & Posts</strong><p class="muted">Record daily costs & gross income; share updates with your team.</p></div></div>
+      </div>
+      <details><summary>Read more</summary>
+        <ul>
+          <li>Works great on phones, tablets, desktops; installable as a PWA.</li>
+          <li>Optional Cloud Sync using your Firebase account; or run fully offline.</li>
+          <li>Role-based controls for admins, managers, associates, and viewers.</li>
+        </ul>
+      </details>
+    </div>`,
+  policy:  `
+    <div class="page-frame">
+      <h2>Policy</h2>
+      <p class="muted">Simple, human-friendly policies for using this app.</p>
+      <div class="grid cols-3">
+        <div class="card"><div class="card-body"><strong>Privacy</strong><p class="muted">Local mode stores data only in your browser. Cloud Sync stores your data in your own Firebase project.</p></div></div>
+        <div class="card"><div class="card-body"><strong>Security</strong><p class="muted">Use strong passwords. Restrict admin roles. Firebase rules isolate each user’s cloud data.</p></div></div>
+        <div class="card"><div class="card-body"><strong>Data</strong><p class="muted">You control your data. Export CSV anytime from Inventory, Products, and COGS.</p></div></div>
+      </div>
+      <details><summary>Know more</summary>
+        <ul>
+          <li>No analytics or tracking scripts are bundled by default.</li>
+          <li>Email is sent only when an admin configures EmailJS and clicks Send.</li>
+          <li>Clear browser storage to reset local data (Settings → Sign out then clear).</li>
+        </ul>
+      </details>
+    </div>`,
   license: `
-    <div class="page-prose">
+    <div class="page-frame">
       <h2>License</h2>
-      <p>MIT — Do whatever you want, but don’t hold the authors liable.</p>
-      <pre style="white-space:pre-wrap;background:var(--panel-2);padding:12px;border-radius:12px;border:1px solid var(--card-border)">Permission is hereby granted, free of charge...</pre>
-    </div>
-  `,
-  setup: `
-    <div class="page-prose">
+      <p class="muted">This template is provided for your business use. You may modify and deploy it for yourself or your company.</p>
+      <details><summary>Read more</summary>
+        <ul>
+          <li>No warranty. Use at your own risk.</li>
+          <li>Attribution appreciated but not required.</li>
+          <li>3rd-party libraries (Firebase, EmailJS, icons) follow their own licenses.</li>
+        </ul>
+      </details>
+    </div>`,
+  setup:   `
+    <div class="page-frame">
       <h2>Setup Guide</h2>
+      <p>Step-by-step instructions for developers and deployers.</p>
       <ol>
-        <li>Open <strong>Settings ➜ Theme</strong> and pick Light/Dark/Aqua + size</li>
-        <li>(Optional) Sign up / Sign in with Firebase to enable <strong>Cloud Sync</strong></li>
-        <li>Toggle <strong>Cloud Sync ON</strong> and click <strong>Sync Now</strong></li>
-        <li>Invite teammates: add them in <strong>Settings ➜ Users</strong></li>
-        <li>Start adding <strong>Inventory</strong>, <strong>Products</strong>, and <strong>COGS</strong></li>
+        <li><strong>Clone files</strong> — keep <code>index.html</code>, <code>css/styles.css</code>, <code>js/app.js</code>, <code>service-worker.js</code>, <code>manifest.webmanifest</code>, and <code>icons/*</code>.</li>
+        <li><strong>Branding</strong> — update <code>icons/*</code> and <code>manifest.webmanifest</code> (name, short_name, theme_color, start_url).</li>
+        <li><strong>Firebase (optional)</strong>
+          <ul>
+            <li>Create a project → enable Email/Password Auth.</li>
+            <li>Create Realtime Database → set rules as in README (user-scoped namespace <code>tenants/{uid}/kv/*</code>).</li>
+            <li>Paste your Firebase config in <code>app.js</code> (firebaseConfig).</li>
+          </ul>
+        </li>
+        <li><strong>EmailJS (admin only, optional)</strong>
+          <ul>
+            <li>Create Service and Template in EmailJS.</li>
+            <li>In Settings → Email Delivery (Admin), paste your <em>Public Key</em>, <em>Service ID</em>, <em>Template ID</em>.</li>
+          </ul>
+        </li>
+        <li><strong>PWA</strong> — ensure <code>manifest.webmanifest</code> is linked in <code>index.html</code>, icons exist, and <code>service-worker.js</code> is in the root.</li>
+        <li><strong>Deploy</strong> — any static host (Firebase Hosting, Netlify, Vercel, GitHub Pages). Use HTTPS.</li>
       </ol>
-      <div class="page-note">PWA install: Use your browser’s “Install app” option. Works best on Android & Desktop. iOS uses “Add to Home Screen.”</div>
-    </div>
-  `,
-  guide: `
-    <div class="page-prose">
+      <details><summary>Know more</summary>
+        <ul>
+          <li>Link the PWA install UI is built-in (topbar Install button + mini banner) and shows when browser is eligible.</li>
+          <li>Cloud Sync is per-user; toggle it in Settings. Admins can see the user list but not their private cloud data.</li>
+          <li>All forms use placeholders only — no “0” pre-fills — to avoid confusion.</li>
+        </ul>
+      </details>
+    </div>`,
+  guide:   `
+    <div class="page-frame">
       <h2>User Guide</h2>
-      <h3>Inventory</h3><p>Add items, upload an image, adjust stock/threshold inline, and export CSV.</p>
-      <h3>Products</h3><p>Keep barcode, price, and recipe notes. Click a thumbnail to view the product card.</p>
-      <h3>COGS</h3><p>Enter costs and income to see profit summaries (MoM & YoY in Dashboard).</p>
-      <h3>Tasks</h3><p>Drag cards between To-do, In-progress, and Done. On mobile, tap to move.</p>
-      <h3>Search</h3><p>Use the left sidebar’s global search to jump anywhere instantly.</p>
-    </div>
-  `,
-  contact: `
-    <div class="page-prose">
-      <h2>Contact</h2>
-      <div id="contact-area"></div>
-    </div>
-  `
+      <div class="grid cols-3">
+        <div class="card"><div class="card-body"><strong>Inventory</strong><p class="muted">Add items, change stock and thresholds, watch for low/critical rows.</p></div></div>
+        <div class="card"><div class="card-body"><strong>Products</strong><p class="muted">Keep product images, barcodes, ingredients, and instructions — plus quick preview.</p></div></div>
+        <div class="card"><div class="card-body"><strong>COGS</strong><p class="muted">Record daily costs and gross income. Totals and profits are calculated for you.</p></div></div>
+      </div>
+      <details><summary>Read more</summary>
+        <ul>
+          <li><strong>Tasks:</strong> drag cards between lanes (or tap on mobile to advance).</li>
+          <li><strong>Posts:</strong> share updates with your team on the Dashboard.</li>
+          <li><strong>Contact:</strong> email button for everyone; admin form if EmailJS is configured.</li>
+        </ul>
+      </details>
+    </div>`,
+  contact: (()=>{
+    const to = 'minmaung0307@gmail.com';
+    const emailBtn = `<a class="btn" href="mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent('Hello from Inventory')}" target="_blank" rel="noopener"><i class="ri-mail-send-line"></i> Contact via email</a>`;
+    const isAdmin = (session?.role==='admin');
+    const configured = hasEmailJsCfg();
+    const warn = isAdmin && !configured ? `<p class="muted">Admin notice: EmailJS isn’t configured yet. Go to <strong>Settings → Email Delivery</strong> and paste your Public Key, Service ID, and Template ID.</p>` : '';
+    return `
+      <div class="page-frame">
+        <h2>Contact</h2>
+        <p class="muted">We’d love to hear from you.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${emailBtn}</div>
+        ${ isAdmin ? `
+          <div class="card"><div class="card-body grid">
+            <h3 style="margin:0">Quick message (Admin)</h3>
+            ${warn}
+            <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
+            <input id="ct-subj"  class="input" placeholder="Subject"/>
+            <textarea id="ct-msg" class="input" rows="5" placeholder="Message"></textarea>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+              <button id="ct-open-settings" class="btn ghost"><i class="ri-settings-3-line"></i> EmailJS Settings</button>
+              <button id="ct-send" class="btn" ${configured?'':'disabled'}><i class="ri-send-plane-line"></i> Send</button>
+            </div>
+            <div id="ct-note" class="muted" style="font-size:12px"></div>
+          </div></div>` : `
+          <p class="muted">Tip: Admins can enable EmailJS in Settings to send from the app.</p>`}
+      </div>`;
+  })()
 });
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
 
-/* ---- Contact wiring (admin EmailJS or mailto for others) ---- */
+/* EmailJS config (admin-only panel + contact form send) */
+function getEmailJsCfg(){ return _lsGet('_emailjsCfg', { pk:'', service:'', template:'' }); }
+function setEmailJsCfg(cfg){ save('_emailjsCfg', cfg); }
+function hasEmailJsCfg(){ const c=getEmailJsCfg(); return !!(c.pk && c.service && c.template); }
+
 function wireContact(){
-  const area = $('#contact-area'); if (!area) return;
+  const openSettings = $('#ct-open-settings'); if (openSettings) openSettings.onclick = ()=> go('settings');
 
-  const cfg = load('_emailjs', null);
-  const isAdmin = role()==='admin';
-  const hasEmailJS = !!(window.emailjs && cfg?.publicKey && cfg?.serviceId && cfg?.templateId && cfg?.toEmail);
+  const btn = $('#ct-send'); if (!btn) return; // only if admin rendered
+  btn.onclick = async ()=>{
+    if (!hasEmailJsCfg()) { notify('Configure EmailJS in Settings first','warn'); return; }
 
-  if (!isAdmin && !hasEmailJS) {
-    // visitors: mailto button
-    area.innerHTML = `
-      <p style="color:var(--muted)">Use your email app to contact the admin.</p>
-      <a class="btn secondary" href="mailto:${encodeURIComponent('minmaung0307@gmail.com')}?subject=${encodeURIComponent('Hello from Inventory')}" target="_blank" rel="noopener"><i class="ri-mail-line"></i> Contact via Email</a>
-    `;
-    return;
-  }
+    const fromEmail = ($('#ct-email')?.value || '').trim();
+    const subject   = ($('#ct-subj')?.value  || '').trim();
+    const message   = ($('#ct-msg')?.value   || '').trim();
+    const note      = $('#ct-note');
+    if (!fromEmail || !subject || !message) { notify('Please fill your email, subject and message','warn'); return; }
 
-  // If admin has configured EmailJS, show form; else show config note
-  if (hasEmailJS) {
-    area.innerHTML = `
-      <p>Send a message to <strong>${cfg.toEmail}</strong>.</p>
-      <div class="grid">
-        <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
-        <input id="ct-subj"  class="input" placeholder="Subject"/>
-        <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
-        <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
-        <div id="ct-note" style="color:var(--muted);font-size:12px"></div>
-      </div>
-    `;
-    $('#ct-send').onclick = async ()=>{
-      const fromEmail = ($('#ct-email')?.value || '').trim();
-      const subject   = ($('#ct-subj')?.value  || '').trim();
-      const message   = ($('#ct-msg')?.value   || '').trim();
-      const note      = $('#ct-note');
-      if (!fromEmail || !subject || !message) { notify('Please fill your email, subject and message','warn'); return; }
-      try{
-        if (!window.__emailjs_inited){ window.emailjs.init(cfg.publicKey); window.__emailjs_inited = true; }
-        await window.emailjs.send(cfg.serviceId, cfg.templateId, {
-          from_name: fromEmail,
-          reply_to: fromEmail,
-          subject,
-          message,
-          to_email: cfg.toEmail
-        });
-        notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
-        $('#ct-msg').value=''; $('#ct-subj').value='';
-      }catch(e){
-        notify('Failed to send message','danger');
-        if (note) note.textContent = e?.message || 'Unknown error';
-      }
-    };
-  } else {
-    area.innerHTML = `
-      <div class="page-note">Admin notice: Configure EmailJS in <strong>Settings ➜ Email Delivery</strong> to enable the contact form.</div>
-      <div style="margin-top:8px">
-        <a class="btn secondary" href="mailto:${encodeURIComponent('minmaung0307@gmail.com')}" target="_blank" rel="noopener"><i class="ri-mail-line"></i> Contact via Email</a>
-      </div>
-    `;
-  }
+    const TO = 'minmaung0307@gmail.com';
+    const cfg = getEmailJsCfg();
+
+    try{
+      if (!window.emailjs){ const s=document.createElement('script'); s.src="https://cdn.jsdelivr.net/npm/emailjs-com@3/dist/email.min.js"; document.head.appendChild(s); await new Promise(r=> s.onload=r); }
+      if (!window.__emailjs_inited){ window.emailjs.init(cfg.pk); window.__emailjs_inited = true; }
+      await window.emailjs.send(cfg.service, cfg.template, {
+        from_name: fromEmail, reply_to: fromEmail, subject, message, to_email: TO
+      });
+      notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
+      $('#ct-msg').value=''; $('#ct-subj').value='';
+    }catch(e){
+      notify('Failed to send message','danger'); if (note) note.textContent = e?.message || 'Unknown error';
+    }
+  };
 }
 
-/* ---- Settings (Theme, Cloud, Users, Email Delivery, etc.) ---- */
+/* Settings (Cloud/Theme + Users + EmailJS admin panel) */
 function viewSettings(){
   const users = load('users', []);
   const theme = getTheme();
   const cloudOn = cloud.isOn();
-  const emailCfg = load('_emailjs', { publicKey:'', serviceId:'', templateId:'', toEmail:'minmaung0307@gmail.com' });
+  const cfg = getEmailJsCfg();
+  const isAdmin = (session?.role==='admin');
+
   return `
     <div class="grid">
       <div class="card"><div class="card-body">
         <h3 style="margin-top:0">Cloud Sync</h3>
-        <p style="color:var(--muted)">Keep your data in Firebase Realtime Database — per user account.</p>
+        <p class="muted">Keep your data in Firebase Realtime Database (per user account).</p>
         <div class="theme-inline">
-          <div><label style="font-size:12px;color:var(--muted)">Status</label>
+          <div><label style="font-size:12px" class="muted">Status</label>
             <select id="cloud-toggle" class="input"><option value="off" ${!cloudOn?'selected':''}>Off</option><option value="on" ${cloudOn?'selected':''}>On</option></select>
           </div>
-          <div><label style="font-size:12px;color:var(--muted)">Actions</label><br/>
+          <div><label style="font-size:12px" class="muted">Actions</label><br/>
             <button class="btn" id="cloud-sync-now"><i class="ri-cloud-line"></i> Sync Now</button>
           </div>
         </div>
-        <p class="page-note" style="margin-top:8px">Cloud Sync requires Firebase login. Data is partitioned by your UID.</p>
+        <p class="muted" style="font-size:12px;margin-top:8px">Cloud Sync is user-isolated. Admins can see all users in Settings list but not their private cloud data.</p>
       </div></div>
 
       <div class="card"><div class="card-body">
         <h3 style="margin-top:0">Theme</h3>
         <div class="theme-inline">
-          <div><label style="font-size:12px;color:var(--muted)">Mode</label>
+          <div><label style="font-size:12px" class="muted">Mode</label>
             <select id="theme-mode" class="input">
               ${THEME_MODES.map(m=>`<option value="${m.key}" ${theme.mode===m.key?'selected':''}>${m.name}</option>`).join('')}
             </select>
           </div>
-          <div><label style="font-size:12px;color:var(--muted)">Font Size</label>
+          <div><label style="font-size:12px" class="muted">Font Size</label>
             <select id="theme-size" class="input">
               ${THEME_SIZES.map(s=>`<option value="${s.key}" ${theme.size===s.key?'selected':''}>${s.label}</option>`).join('')}
             </select>
@@ -1646,21 +1601,21 @@ function viewSettings(){
         </div>
       </div></div>
 
-      ${ role()==='admin' ? `
+      ${ isAdmin ? `
       <div class="card"><div class="card-body">
-        <h3 style="margin-top:0">Email Delivery (Admin · EmailJS)</h3>
-        <div class="grid cols-2">
-          <input id="em-to" class="input" placeholder="To email (admin inbox)" value="${emailCfg.toEmail||''}"/>
-          <input id="em-pk" class="input" placeholder="Public Key" value="${emailCfg.publicKey||''}"/>
-          <input id="em-svc" class="input" placeholder="Service ID" value="${emailCfg.serviceId||''}"/>
-          <input id="em-tpl" class="input" placeholder="Template ID" value="${emailCfg.templateId||''}"/>
+        <h3 style="margin-top:0">Email Delivery (Admin)</h3>
+        <p class="muted">Configure <strong>EmailJS</strong> for the Contact page (only admin sees the form).</p>
+        <div class="grid cols-3">
+          <input id="ej-pk" class="input" placeholder="Public Key (pk_xxx)" value="${cfg.pk||''}">
+          <input id="ej-service" class="input" placeholder="Service ID (service_xxx)" value="${cfg.service||''}">
+          <input id="ej-template" class="input" placeholder="Template ID (template_xxx)" value="${cfg.template||''}">
         </div>
-        <div class="foot" style="padding:0;margin-top:8px;display:flex;gap:8px">
-          <button class="btn" id="save-emailjs"><i class="ri-save-line"></i> Save Email Settings</button>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="btn" id="ej-save"><i class="ri-save-3-line"></i> Save</button>
+          <button class="btn ghost" id="ej-clear"><i class="ri-eraser-line"></i> Clear</button>
         </div>
-        <div class="page-note" style="margin-top:8px">Contact page uses these settings. Others will see a simple “Contact via Email” button.</div>
-      </div></div>
-      ` : '' }
+        <p class="muted" style="font-size:12px;margin-top:6px">Not configured? Users still get a simple “Contact via email” button.</p>
+      </div></div>` : '' }
 
       <div class="card"><div class="card-body">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -1668,16 +1623,12 @@ function viewSettings(){
           ${canAdd()? `<button class="btn" id="addUser"><i class="ri-add-line"></i> Add User</button>`:''}
         </div>
         <table class="table" data-section="users">
-          <thead><tr><th>Avatar</th><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+          <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
           <tbody>
             ${users.map(u=>`
               <tr id="${u.email}">
-                <td>
-                  <div class="thumb-wrap">
-                    ${ u.img ? `<img class="thumb" alt="" src="${u.img}"/>` : `<div class="thumb" style="display:grid;place-items:center">👤</div>` }
-                  </div>
-                </td>
-                <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
+                <td><div style="display:flex;align-items:center"><img class="avatar" src="${u.img||'icons/icon-192.png'}" alt=""><span>${u.name}</span></div></td>
+                <td>${u.email}</td><td>${u.role}</td>
                 <td>
                   ${canEdit()? `<button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>`:''}
                   ${canDelete()? `<button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button>`:''}
@@ -1698,12 +1649,12 @@ function allowedRoleOptions(){
 }
 
 function wireSettings(){
-  // Theme instant apply
+  // Theme
   const mode = $('#theme-mode'), size = $('#theme-size');
-  const applyThemeNow = ()=>{ _lsSet('_theme2', { mode: mode.value, size: size.value }); applyTheme(); renderApp(); };
+  const applyThemeNow = ()=>{ save('_theme2', { mode: mode.value, size: size.value }); applyTheme(); renderApp(); };
   mode?.addEventListener('change', applyThemeNow); size?.addEventListener('change', applyThemeNow);
 
-  // Cloud controls
+  // Cloud
   const toggle = $('#cloud-toggle'), syncNow = $('#cloud-sync-now');
   toggle?.addEventListener('change', async (e)=>{
     const val = e.target.value;
@@ -1723,38 +1674,29 @@ function wireSettings(){
     }catch(e){ notify((e && e.message) || 'Sync failed','danger'); }
   });
 
-  // EmailJS config (admin)
-  const sv = $('#save-emailjs');
-  if (sv){
-    sv.onclick = ()=>{
-      if (role()!=='admin') return notify('Admins only','warn');
-      const cfg = {
-        toEmail: ($('#em-to')?.value||'').trim(),
-        publicKey: ($('#em-pk')?.value||'').trim(),
-        serviceId: ($('#em-svc')?.value||'').trim(),
-        templateId: ($('#em-tpl')?.value||'').trim(),
-      };
-      _lsSet(kNS('_emailjs'), cfg);
-      notify('Email settings saved','ok');
-    };
-  }
+  // EmailJS admin panel — use .onclick to avoid stacking
+  const ejSave = $('#ej-save');
+  if (ejSave) ejSave.onclick = ()=>{ const pk=($('#ej-pk')?.value||'').trim(), service=($('#ej-service')?.value||'').trim(), template=($('#ej-template')?.value||'').trim(); setEmailJsCfg({pk,service,template}); notify('EmailJS saved','ok'); renderApp(); };
+  const ejClear = $('#ej-clear');
+  if (ejClear) ejClear.onclick = ()=>{ setEmailJsCfg({pk:'',service:'',template:''}); notify('Cleared','ok'); renderApp(); };
 
-  // Users wiring
+  // Users
   wireUsers();
 }
 
 function wireUsers(){
   const addBtn = $('#addUser'); const table = document.querySelector('[data-section="users"]');
 
-  if (addBtn) addBtn.onclick = ()=>{
+  addBtn?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-user');
     $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-img').value='';
-    const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions()[0];
+    const sel = $('#user-role'); const opts=allowedRoleOptions(); sel.innerHTML = opts.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = opts[0];
     attachImageUpload('#user-imgfile', '#user-img');
-  };
+  });
 
-  $('#save-user') && ($('#save-user').onclick = ()=>{
+  const saveUser = $('#save-user');
+  if (saveUser) saveUser.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const users = load('users', []);
     const email = ($('#user-email')?.value || '').trim().toLowerCase();
@@ -1772,16 +1714,16 @@ function wireUsers(){
     const i = users.findIndex(x=>x.email.toLowerCase()===email);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); users[i]=obj; } else { users.push(obj); }
     save('users', users); closeModal('m-user'); notify('Saved'); renderApp();
-  });
+  };
 
-  table && (table.onclick = (e)=>{
+  table?.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const email = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!email) return;
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const u = load('users', []).find(x=>x.email===email); if (!u) return;
       openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
-      const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions().includes(u.role) ? u.role : 'user';
+      const sel = $('#user-role'); const opts=allowedRoleOptions(); sel.innerHTML = opts.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = opts.includes(u.role) ? u.role : 'user';
       attachImageUpload('#user-imgfile', '#user-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
@@ -1790,7 +1732,7 @@ function wireUsers(){
   });
 }
 
-/* ---------- Modals (global, persistent) ---------- */
+/* ---------- Modals (global) ---------- */
 function postModal(){ return `
   <div class="modal-backdrop" id="mb-post"></div>
   <div class="modal" id="m-post">
@@ -1814,12 +1756,12 @@ function invModal(){ return `
       <div class="head"><strong>Inventory Item</strong><button class="btn ghost" data-close="m-inv">Close</button></div>
       <div class="body grid">
         <input id="inv-id" type="hidden" />
-        <input id="inv-name" class="input" placeholder="Name" />
-        <input id="inv-code" class="input" placeholder="Code" />
+        <input id="inv-name" class="input" placeholder="Name (e.g. Fresh Salmon)" />
+        <input id="inv-code" class="input" placeholder="Code (e.g. SAL-300)" />
         <select id="inv-type" class="input"><option>Raw</option><option>Cooked</option><option>Dry</option><option>Other</option></select>
-        <input id="inv-price" class="input" type="number" step="0.01" placeholder="e.g. 9.99" />
-        <input id="inv-stock" class="input" type="number" placeholder="Stock (units)" />
-        <input id="inv-threshold" class="input" type="number" placeholder="Low-stock threshold" />
+        <input id="inv-price" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Price (e.g. 7.80)" />
+        <input id="inv-stock" class="input" type="number" inputmode="numeric" placeholder="Stock (e.g. 12)" />
+        <input id="inv-threshold" class="input" type="number" inputmode="numeric" placeholder="Threshold (e.g. 10)" />
         <input id="inv-img" class="input" placeholder="Image URL or upload below" />
         <input id="inv-imgfile" type="file" accept="image/*" class="input"/>
       </div>
@@ -1834,12 +1776,12 @@ function prodModal(){ return `
       <div class="head"><strong>Product</strong><button class="btn ghost" data-close="m-prod">Close</button></div>
       <div class="body grid">
         <input id="prod-id" type="hidden" />
-        <input id="prod-name" class="input" placeholder="Name" />
-        <input id="prod-barcode" class="input" placeholder="Barcode" />
-        <input id="prod-price" class="input" type="number" step="0.01" placeholder="e.g. 5.50" />
-        <input id="prod-type" class="input" placeholder="Type" />
-        <textarea id="prod-ingredients" class="input" placeholder="Ingredients"></textarea>
-        <textarea id="prod-instructions" class="input" placeholder="Instructions"></textarea>
+        <input id="prod-name" class="input" placeholder="Name (e.g. Salmon Nigiri)" />
+        <input id="prod-barcode" class="input" placeholder="Barcode (optional)" />
+        <input id="prod-price" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Price (e.g. 5.99)" />
+        <input id="prod-type" class="input" placeholder="Type (e.g. Nigiri, Roll)" />
+        <textarea id="prod-ingredients" class="input" placeholder="Ingredients (comma separated)"></textarea>
+        <textarea id="prod-instructions" class="input" placeholder="Instructions / notes"></textarea>
         <input id="prod-img" class="input" placeholder="Image URL or upload below" />
         <input id="prod-imgfile" type="file" accept="image/*" class="input"/>
       </div>
@@ -1873,12 +1815,12 @@ function cogsModal(){ return `
       <div class="body grid cols-2">
         <input id="cogs-id" type="hidden" />
         <input id="cogs-date" class="input" type="date" />
-        <input id="cogs-grossIncome" class="input" type="number" step="0.01" placeholder="Gross Income" />
-        <input id="cogs-produceCost" class="input" type="number" step="0.01" placeholder="Produce Cost" />
-        <input id="cogs-itemCost" class="input" type="number" step="0.01" placeholder="Item Cost" />
-        <input id="cogs-freight" class="input" type="number" step="0.01" placeholder="Freight" />
-        <input id="cogs-delivery" class="input" type="number" step="0.01" placeholder="Delivery" />
-        <input id="cogs-other" class="input" type="number" step="0.01" placeholder="Other" />
+        <input id="cogs-grossIncome" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Gross Income" />
+        <input id="cogs-produceCost" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Produce Cost" />
+        <input id="cogs-itemCost" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Item Cost" />
+        <input id="cogs-freight" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Freight" />
+        <input id="cogs-delivery" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Delivery" />
+        <input id="cogs-other" class="input" type="number" step="0.01" inputmode="decimal" placeholder="Other" />
       </div>
       <div class="foot"><button class="btn" id="save-cogs">Save</button></div>
     </div>
@@ -1933,7 +1875,7 @@ function ensureGlobalModals(){
   attachImageUpload('#post-imgfile', '#post-img');
 }
 
-/* ===================== Part F — Search utils + SW + Boot ===================== */
+/* ===================== Part F — Search utils + PWA + SW + Boot ===================== */
 window.buildSearchIndex = function(){
   const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
   const pages = [
@@ -1952,26 +1894,30 @@ window.buildSearchIndex = function(){
   pages.forEach(p=>ix.push(p));
   return ix;
 };
-window.searchAll = function(index,q){
+window.searchAll = (index,q)=>{
   const term = (q || '').toLowerCase();
-  return index
-    .map(item=>{
-      const score =
-        ((item.label||'').toLowerCase().includes(term) ? 2 : 0) +
-        ((item.text ||'').toLowerCase().includes(term)  ? 1 : 0);
+  return index.map(item=>{
+      const score = ((item.label||'').toLowerCase().includes(term) ? 2 : 0) + ((item.text||'').toLowerCase().includes(term) ? 1 : 0);
       return { item, score };
-    })
-    .filter(x=>x.score>0)
-    .sort((a,b)=>b.score-a.score)
-    .map(x=>x.item);
+    }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).map(x=>x.item);
 };
-window.scrollToRow = function(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
+window.scrollToRow = id => { const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
 
 // Online / offline hints
 window.addEventListener('online',  ()=> notify('Back online','ok'));
 window.addEventListener('offline', ()=> notify('You are offline','warn'));
 
-// Service Worker registration (GET, not HEAD)
+// PWA install UI (omnibox + custom button)
+window.__pwaDeferredPrompt = null; window.__pwaCanPrompt = false;
+window.addEventListener('beforeinstallprompt', (e)=>{
+  e.preventDefault();
+  window.__pwaDeferredPrompt = e;
+  window.__pwaCanPrompt = true;
+  $('#btnInstallApp')?.style && ($('#btnInstallApp').style.display = 'inline-flex');
+  $('#installBanner')?.classList?.add('show');
+});
+
+// SW registration (avoid HEAD)
 (function(){
   if (!('serviceWorker' in navigator)) return;
   const swUrl = 'service-worker.js';
@@ -1981,15 +1927,11 @@ window.addEventListener('offline', ()=> notify('You are offline','warn'));
     .catch(() => {});
 })();
 
-// Hover preview root element (once)
-if (!document.getElementById('hover-pop')) { const d=document.createElement('div'); d.id='hover-pop'; d.innerHTML='<img alt="preview"/>'; d.style.display='none'; document.body.appendChild(d); }
-
 // First paint
 (function boot(){
   try {
-    const last = _lsGet('lastSession', null);
-    if (last && last.authMode==='local') { setSession(last); currentRoute='home'; renderApp(); return; }
-    if (typeof renderLogin === 'function') renderLogin();
+    if (typeof renderApp === 'function' && window.session) renderApp();
+    else if (typeof renderLogin === 'function') renderLogin();
   } catch(e){
     notify(e.message || 'Startup error','danger'); if (typeof renderLogin === 'function') renderLogin();
   }
