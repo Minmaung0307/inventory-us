@@ -1,5 +1,5 @@
 /* =========================
-   Inventory — single-file SPA (fixed pack)
+   Inventory — single-file SPA (fixed pack: posts single-save + robust DnD)
    ========================= */
 
 /* ---------- Hoisted helpers ---------- */
@@ -508,9 +508,9 @@ function renderLogin() {
               <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
             </div>
 
-            <!-- <div class="login-note" style="margin-top:6px">
+            <div class="login-note" style="margin-top:6px">
               Tip: demo admin <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local).
-            </div> -->
+            </div>
           </div>
         </div>
       </div>
@@ -866,7 +866,7 @@ function viewDashboard(){
 }
 function wireDashboard(){
   $('#addPost')?.addEventListener('click', ()=>{
-    // open blank form (fix for “edit mode on add”)
+    // open blank form (ensures new post, no accidental edit mode)
     openModal('m-post');
     $('#post-id').value='';
     $('#post-title').value='';
@@ -877,7 +877,10 @@ function wireDashboard(){
 }
 function wirePosts(){
   const sec = document.querySelector('[data-section="posts"]'); if (!sec) return;
-  $('#save-post')?.addEventListener('click', ()=>{
+
+  // IMPORTANT: use .onclick so it never stacks and never saves multiple times
+  const saveBtn = $('#save-post');
+  if (saveBtn) saveBtn.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const posts = load('posts', []);
     const id = ($('#post-id')?.value || '').trim() || ('post_'+Date.now());
@@ -886,7 +889,9 @@ function wirePosts(){
     const i = posts.findIndex(x=>x.id===id);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); posts[i]=obj; } else posts.unshift(obj);
     save('posts', posts); closeModal('m-post'); notify('Saved'); renderApp();
-  });
+  };
+
+  // Row edit/delete (delegated to the section that re-renders)
   sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
@@ -991,7 +996,8 @@ function wireInventory(){
     attachImageUpload('#inv-imgfile', '#inv-img');
   });
 
-  $('#save-inv')?.addEventListener('click', ()=>{
+  const saveInv = $('#save-inv');
+  if (saveInv) saveInv.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const toF = v => { const n = parseFloat(String(v||'').trim()); return Number.isFinite(n) ? n : 0; };
     const toI = v => { const n = parseInt(String(v||'').trim(), 10); return Number.isFinite(n) ? n : 0; };
@@ -1015,7 +1021,7 @@ function wireInventory(){
     else items.push(obj);
 
     save('inventory', items); closeModal('m-inv'); notify('Saved'); renderApp();
-  });
+  };
 
   sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
@@ -1105,7 +1111,8 @@ function wireProducts(){
     attachImageUpload('#prod-imgfile', '#prod-img');
   });
 
-  $('#save-prod')?.addEventListener('click', ()=>{
+  const saveProd = $('#save-prod');
+  if (saveProd) saveProd.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const toF = v => { const n = parseFloat(String(v||'').trim()); return Number.isFinite(n) ? n : 0; };
     const items = load('products', []);
@@ -1127,7 +1134,7 @@ function wireProducts(){
     else items.push(obj);
 
     save('products', items); closeModal('m-prod'); notify('Saved'); renderApp();
-  });
+  };
 
   // Card & row actions
   sec.addEventListener('click', (e)=>{
@@ -1219,7 +1226,8 @@ function wireCOGS(){
     $('#cogs-freight').value=''; $('#cogs-delivery').value=''; $('#cogs-other').value='';
   });
 
-  $('#save-cogs')?.addEventListener('click', ()=>{
+  const saveCogs = $('#save-cogs');
+  if (saveCogs) saveCogs.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const toF=v=>{const n=parseFloat(String(v||'').trim());return Number.isFinite(n)?n:0;};
     const rows = load('cogs', []);
@@ -1231,7 +1239,7 @@ function wireCOGS(){
     const i = rows.findIndex(x=>x.id===id);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); rows[i]=row; } else rows.push(row);
     save('cogs', rows); closeModal('m-cogs'); notify('Saved'); renderApp();
-  });
+  };
 
   sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
@@ -1282,7 +1290,7 @@ function viewTasks(){
   </div>`;
 }
 
-/* Delegated, resilient DnD (fix) */
+/* Delegated, resilient DnD — works from any lane to any lane */
 (function wireGlobalDnD(){
   if (window.__dndWired) return; window.__dndWired = true;
 
@@ -1293,18 +1301,23 @@ function viewTasks(){
     card.classList.add('dragging');
   });
 
-  document.addEventListener('dragend', (e)=>{
-    const card = e.target.closest('.task-card'); if (card) card.classList.remove('dragging');
+  document.addEventListener('dragenter', (e)=>{
+    const row = e.target.closest('.lane-row'); if (row) row.classList.add('drop');
   });
 
   document.addEventListener('dragover', (e)=>{
     const grid = e.target.closest('.lane-grid'); if (!grid) return;
     e.preventDefault();
+    e.dataTransfer.dropEffect='move';
     grid.closest('.lane-row')?.classList.add('drop');
   });
 
   document.addEventListener('dragleave', (e)=>{
     const row = e.target.closest('.lane-row'); if (row) row.classList.remove('drop');
+  });
+
+  document.addEventListener('dragend', (e)=>{
+    const card = e.target.closest('.task-card'); if (card) card.classList.remove('dragging');
   });
 
   document.addEventListener('drop', (e)=>{
@@ -1328,7 +1341,8 @@ function wireTasks(){
     openModal('m-task'); $('#task-id').value=''; $('#task-title').value=''; $('#task-status').value='todo';
   });
 
-  $('#save-task')?.addEventListener('click', ()=>{
+  const saveTask = $('#save-task');
+  if (saveTask) saveTask.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const items = load('tasks', []);
     const id = $('#task-id').value || ('t_'+Date.now());
@@ -1338,7 +1352,7 @@ function wireTasks(){
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); items[i]=obj; }
     else items.push(obj);
     save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
-  });
+  };
 
   // Click-to-advance on touch devices
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -1386,7 +1400,7 @@ function enableMobileImagePreview(){
   });
 }
 
-/* Static/link pages – fully inlined now (bright + detailed) */
+/* Static/link pages – inlined */
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
   about: `
@@ -1488,7 +1502,6 @@ Object.assign(window.pageContent, {
     const isAdmin = (session?.role==='admin');
     const configured = hasEmailJsCfg();
     const warn = isAdmin && !configured ? `<p class="muted">Admin notice: EmailJS isn’t configured yet. Go to <strong>Settings → Email Delivery</strong> and paste your Public Key, Service ID, and Template ID.</p>` : '';
-    // Show admin form regardless; disable send until configured
     return `
       <div class="page-frame">
         <h2>Contact</h2>
@@ -1661,12 +1674,11 @@ function wireSettings(){
     }catch(e){ notify((e && e.message) || 'Sync failed','danger'); }
   });
 
-  // EmailJS admin panel
-  $('#ej-save')?.addEventListener('click', ()=>{
-    const pk=($('#ej-pk')?.value||'').trim(), service=($('#ej-service')?.value||'').trim(), template=($('#ej-template')?.value||'').trim();
-    setEmailJsCfg({pk,service,template}); notify('EmailJS saved','ok'); renderApp();
-  });
-  $('#ej-clear')?.addEventListener('click', ()=>{ setEmailJsCfg({pk:'',service:'',template:''}); notify('Cleared','ok'); renderApp(); });
+  // EmailJS admin panel — use .onclick to avoid stacking
+  const ejSave = $('#ej-save');
+  if (ejSave) ejSave.onclick = ()=>{ const pk=($('#ej-pk')?.value||'').trim(), service=($('#ej-service')?.value||'').trim(), template=($('#ej-template')?.value||'').trim(); setEmailJsCfg({pk,service,template}); notify('EmailJS saved','ok'); renderApp(); };
+  const ejClear = $('#ej-clear');
+  if (ejClear) ejClear.onclick = ()=>{ setEmailJsCfg({pk:'',service:'',template:''}); notify('Cleared','ok'); renderApp(); };
 
   // Users
   wireUsers();
@@ -1683,7 +1695,8 @@ function wireUsers(){
     attachImageUpload('#user-imgfile', '#user-img');
   });
 
-  $('#save-user')?.addEventListener('click', ()=>{
+  const saveUser = $('#save-user');
+  if (saveUser) saveUser.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const users = load('users', []);
     const email = ($('#user-email')?.value || '').trim().toLowerCase();
@@ -1701,7 +1714,7 @@ function wireUsers(){
     const i = users.findIndex(x=>x.email.toLowerCase()===email);
     if (i>=0) { if (!canEdit()) return notify('No permission','warn'); users[i]=obj; } else { users.push(obj); }
     save('users', users); closeModal('m-user'); notify('Saved'); renderApp();
-  });
+  };
 
   table?.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;

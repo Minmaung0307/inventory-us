@@ -256,14 +256,14 @@ body {
 .socials-compact a:hover { background: var(--hover); }
 
 /* PWA mini banner */
-#installBanner {
-  position: fixed; right: 16px; bottom: 16px; z-index: 950;
-  display: none;
-}
+#installBanner { position: fixed; right: 16px; bottom: 16px; z-index: 950; display: none; }
 #installBanner.show { display: block; }
 
-/* Tasks – DnD visual */
+/* Tasks – DnD visual + better cursor */
 .lane-row.drop .card-body { outline: 2px dashed var(--brand); outline-offset: -6px; }
+.lane-grid { min-height: 20px; }
+.task-card { cursor: grab; }
+.task-card.dragging { cursor: grabbing; opacity: 0.9; }
 
 /* Responsive */
 .backdrop { position: fixed; inset:0; background:rgba(0,0,0,.5); display:none; z-index:760; }
