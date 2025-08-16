@@ -1569,71 +1569,168 @@ window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
   about: `
     <div class="prose">
-      <div class="paper">
-        <h2>About Inventory</h2>
-        <p>Inventory is a fast, friendly, privacy-respecting app for everyday stock management. It’s perfect for small and medium businesses — cafés, food trucks, retail counters, studios — and runs beautifully on desktop and mobile.</p>
-        <ul>
-          <li>Track inventory, products, and costs of goods in one place.</li>
-          <li>Add photos, export CSVs, and drag tasks across simple lanes.</li>
-          <li>Cloud sync (optional) via your own Firebase account.</li>
-          <li>Works offline; install it like an app (PWA) and keep going.</li>
-        </ul>
-        <p class="muted">Built as a single-file SPA for easy hosting — drop it on any static server.</p>
+      <div class="hero">
+        <span class="badge">Fast · Offline · Private</span>
+        <h1>About Inventory</h1>
+        <p>Inventory is a lightweight, installable app for everyday stock control. From <strong>home businesses</strong> and <strong>food trucks</strong> to <strong>cafés</strong> and <strong>retail counters</strong>, it helps you track items, costs, and tasks without the bloat.</p>
       </div>
-    </div>`,
 
-  policy: `
-    <div class="prose">
-      <div class="paper">
-        <h2>Policy</h2>
-        <p>We store your data locally in your browser. Enabling Cloud Sync stores an encrypted copy in your Firebase Realtime Database under your account. You control it, you can wipe it any time.</p>
+      <div class="grid-2">
+        <div class="feature">
+          <h3>Why you’ll love it</h3>
+          <ul>
+            <li>Super fast UI with image previews and global search.</li>
+            <li>Products and COGS in one place, exportable to CSV.</li>
+            <li>Works offline; install it like an app (PWA).</li>
+            <li>Optional Cloud Sync via your own Firebase project.</li>
+          </ul>
+        </div>
+        <div class="feature">
+          <h3>Perfect for</h3>
+          <ul>
+            <li>Small to medium shops managing daily stock.</li>
+            <li>Pop-ups, markets, and mobile vendors.</li>
+            <li>Studios & workshops tracking supplies.</li>
+            <li>Teams who want simple, reliable tools.</li>
+          </ul>
+        </div>
       </div>
-    </div>`,
 
-  license: `
-    <div class="prose">
-      <div class="paper">
-        <h2>License</h2>
-        <p>Open-source friendly license. Use, modify, and deploy for personal or commercial use. Attribution appreciated.</p>
-      </div>
-    </div>`,
-
-  setup: `
-    <div class="prose">
-      <div class="paper">
-        <h2>Setup Guide</h2>
-        <ol>
-          <li><strong>Firebase:</strong> create a project, enable Email/Password auth, copy config into <code>app.js</code>.</li>
-          <li><strong>Cloud Sync:</strong> sign in, then turn it on in Settings → Cloud Sync.</li>
-          <li><strong>PWA:</strong> keep <code>manifest.webmanifest</code> + <code>service-worker.js</code> in web root; you’ll get an “Install” button.</li>
-          <li><strong>EmailJS (optional):</strong> create Service + Template, then enter keys in Settings → Email Delivery.</li>
-        </ol>
+      <div class="grid-2" style="margin-top:12px">
+        <div class="kpi"><i class="ri-flashlight-line"></i> <div><strong>Instant</strong><div class="muted">No page reloads, no fuss.</div></div></div>
+        <div class="kpi"><i class="ri-shield-check-line"></i> <div><strong>Yours</strong><div class="muted">You own your Firebase data.</div></div></div>
       </div>
     </div>`,
 
   guide: `
     <div class="prose">
-      <div class="paper">
-        <h2>User Guide</h2>
-        <p>Use the sidebar to jump between Inventory, Products, COGS, and Tasks. Use the global search to find anything fast. Hover over thumbnails to preview images. On mobile, tap a thumbnail to open a large preview.</p>
+      <div class="hero">
+        <span class="badge">Start here</span>
+        <h1>User Guide</h1>
+        <p>Everything you need to get productive fast.</p>
       </div>
+
+      <div class="grid-2">
+        <div class="feature">
+          <h3>Navigation</h3>
+          <ul>
+            <li><strong>Inventory</strong>: items, stock, thresholds, quick +/- buttons.</li>
+            <li><strong>Products</strong>: sellable items with barcode, price & images.</li>
+            <li><strong>COGS</strong>: enter daily/weekly numbers and see profit.</li>
+            <li><strong>Tasks</strong>: drag cards across To-do → In progress → Done.</li>
+          </ul>
+        </div>
+        <div class="feature">
+          <h3>Tips</h3>
+          <ul>
+            <li>Hover a thumbnail to preview; tap on phones to open a large view.</li>
+            <li>Use the global search in the sidebar to find anything instantly.</li>
+            <li>Export CSV from Inventory/Products/COGS to share with accounting.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout">
+        <strong>Offline & Install:</strong> It’s a PWA. On desktop/Android you’ll see an Install button; on iPhone use <em>Share → Add to Home Screen</em>.
+      </div>
+
+      <h3>FAQ</h3>
+      <ul>
+        <li><strong>Where is my data?</strong> In your browser. Turn on Cloud Sync to back up to your Firebase.</li>
+        <li><strong>Multi-device?</strong> Sign into the same Firebase account and turn Cloud Sync ON.</li>
+        <li><strong>Team accounts?</strong> Each user has their own silo by default. Ask us to enable a shared workspace.</li>
+      </ul>
     </div>`,
 
-  contact:`<div class="prose"><div class="paper">
-    <h2>Contact</h2>
-    <p class="muted">Prefer your own email app? Use this:</p>
-    <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Inventory%20Support&body=Hi%2C%20I%20need%20help%20with..." target="_blank" rel="noopener"><i class="ri-mail-send-line"></i> Email us</a>
-    <hr style="border-color:var(--card-border);margin:14px 0" />
-    <h3>Send in-app (EmailJS)</h3>
-    <p class="muted">Configure keys in <em>Settings → Email Delivery (EmailJS)</em>. When set, you can send from here.</p>
-    <div class="grid">
-      <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
-      <input id="ct-subj"  class="input" placeholder="Subject"/>
-      <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
-      <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send via EmailJS</button></div>
-      <div id="ct-note" class="muted" style="font-size:12px"></div>
-    </div>
-  </div></div>`
+  setup: `
+    <div class="prose">
+      <div class="hero">
+        <span class="badge">Step-by-step</span>
+        <h1>Setup Guide</h1>
+        <p>From zero to running in a few minutes.</p>
+      </div>
+      <ol>
+        <li><strong>Firebase</strong>
+          <ul>
+            <li>Create a project → Build → Authentication → Sign-in method → enable <em>Email/Password</em>.</li>
+            <li>Build → Realtime Database → Create database (in test mode is fine for dev).</li>
+            <li>Project settings → copy the Web config and paste it into <code>app.js</code> (already scaffolded).</li>
+          </ul>
+        </li>
+        <li><strong>Cloud Sync</strong>
+          <ul>
+            <li>Sign in (top-right → Login).</li>
+            <li>Go to <em>Settings → Cloud Sync</em> and switch it ON.</li>
+            <li>Click <em>Sync Now</em> once to push current local data.</li>
+          </ul>
+        </li>
+        <li><strong>PWA (Installable)</strong>
+          <ul>
+            <li>Keep <code>manifest.webmanifest</code> and <code>service-worker.js</code> in the web root.</li>
+            <li>Desktop/Android will show an <em>Install</em> button automatically.</li>
+            <li>On iPhone: <em>Share → Add to Home Screen</em>.</li>
+          </ul>
+        </li>
+        <li><strong>EmailJS (optional)</strong>
+          <ul>
+            <li>Create a Service + Template on EmailJS; copy the <em>Public key</em>, <em>Service ID</em>, <em>Template ID</em>.</li>
+            <li>Paste them in <em>Settings → Email Delivery</em> and click <em>Save Keys</em>.</li>
+            <li>Now the <em>Contact</em> page can send in-app messages.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>`,
+
+  policy: `
+    <div class="prose">
+      <div class="hero"><span class="badge">Trust</span><h1>Policy</h1><p>Your data, your control.</p></div>
+      <h3>Data Storage</h3>
+      <ul>
+        <li><strong>Local by default:</strong> Your data lives in your browser.</li>
+        <li><strong>Cloud Sync (optional):</strong> If enabled, an encrypted copy is stored in <em>your</em> Firebase Realtime Database under your user ID.</li>
+      </ul>
+      <h3>Security</h3>
+      <ul>
+        <li>Sign-in via Firebase (Email/Password). Passwords are handled by Firebase — not by this app.</li>
+        <li>We use HTTPS, service workers, and browser storage APIs.</li>
+      </ul>
+      <h3>Portability</h3>
+      <ul>
+        <li>Export CSV any time (Inventory, Products, COGS).</li>
+        <li>Disable Cloud Sync and delete your Firebase data at will.</li>
+      </ul>
+    </div>`,
+
+  license: `
+    <div class="prose">
+      <div class="hero"><span class="badge">Open</span><h1>License</h1><p>Simple terms for real-world use.</p></div>
+      <p>Use, modify, self-host, and deploy commercially. Attribution appreciated but not required. No warranty — use at your own risk.</p>
+      <div class="callout"><strong>Tip:</strong> Keep your Firebase keys private and rotate them if exposed.</div>
+    </div>`,
+
+  contact: `
+    <div class="prose">
+      <div class="hero"><span class="badge">We’re here</span><h1>Contact</h1><p>Have questions or feature ideas? Reach out.</p></div>
+      <div class="grid-2">
+        <div class="feature">
+          <h3>Email</h3>
+          <p class="muted">Prefer your own email app?</p>
+          <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Inventory%20Support&body=Hi%2C%20I%20need%20help%20with..." target="_blank" rel="noopener"><i class="ri-mail-send-line"></i> Email us</a>
+        </div>
+        <div class="feature">
+          <h3>In-app message (EmailJS)</h3>
+          <p class="muted">Set keys in Settings → Email Delivery, then send below.</p>
+          <div class="grid">
+            <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
+            <input id="ct-subj"  class="input" placeholder="Subject"/>
+            <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
+            <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
+            <div id="ct-note" class="muted" style="font-size:12px"></div>
+          </div>
+        </div>
+      </div>
+      <div class="callout"><strong>Support hours:</strong> Mon–Fri, 9am–5pm (your local time).</div>
+    </div>`
 });
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
 
@@ -1994,10 +2091,29 @@ function ensureGlobalModals(){
   if ($('#__modals')) return;
   const wrap = document.createElement('div');
   wrap.id = '__modals';
-  wrap.innerHTML = postModal()+invModal()+prodModal()+prodCardModal()+cogsModal()+taskModal()+userModal()+imgPreviewModal();
+  wrap.innerHTML = postModal()+invModal()+prodModal()+prodCardModal()+cogsModal()+taskModal()+userModal()+imgPreviewModal()+iosInstallModal();
   document.body.appendChild(wrap);
   attachImageUpload('#post-imgfile', '#post-img');
 }
+
+function iosInstallModal(){ return `
+  <div class="modal-backdrop" id="mb-ios"></div>
+  <div class="modal" id="m-ios">
+    <div class="dialog">
+      <div class="head"><strong>Install on iPhone</strong><button class="btn ghost" data-close="m-ios">Close</button></div>
+      <div class="body prose">
+        <div class="callout">
+          <strong>Heads-up:</strong> On iOS, Safari doesn’t show an install icon. Use <em>Share → Add to Home Screen</em>.
+        </div>
+        <ol>
+          <li>Open this site in Safari.</li>
+          <li>Tap the <strong>Share</strong> icon (square with an up arrow).</li>
+          <li>Choose <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
+        </ol>
+        <p class="muted">Once installed, it launches full-screen and works offline.</p>
+      </div>
+    </div>
+  </div>`; }
 
 /* ===================== Part F — Search utils + PWA + Boot ===================== */
 window.buildSearchIndex = function(){
@@ -2046,9 +2162,22 @@ window.addEventListener('beforeinstallprompt', (e)=>{
   const b = document.getElementById('btnInstallPWA');
   if (b) b.style.display = 'inline-flex';
 });
+
+function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone; }
+
 function wirePWAInstallButton(){
   const b = document.getElementById('btnInstallPWA');
   if (!b) return;
+
+  // iOS: no beforeinstallprompt; show an info modal instead
+  if (isIOS()) {
+    b.style.display = isStandalone() ? 'none' : 'inline-flex';
+    b.onclick = () => openModal('m-ios');
+    return;
+  }
+
+  // Other platforms
   b.style.display = _pwa.canInstall ? 'inline-flex' : 'none';
   b.onclick = async ()=>{
     if (!_pwa.deferredPrompt) return;

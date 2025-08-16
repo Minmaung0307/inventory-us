@@ -302,3 +302,35 @@ a.btn {
   border-radius: 16px;
   padding: 18px;
 }
+
+/* Prose upgrades for link pages */
+.prose .hero {
+  padding: 18px;
+  border-radius: 16px;
+  background:
+    radial-gradient(1000px 400px at 0% -10%, rgba(14,165,165,.18), transparent),
+    radial-gradient(800px 320px at 110% 120%, rgba(8,145,178,.18), transparent),
+    var(--panel-2);
+  border: 1px solid var(--card-border);
+  margin-bottom: 12px;
+}
+.prose .hero h1 { margin: 0 0 6px; font-size: 24px; }
+.badge {
+  display: inline-block; font-size: 12px; padding: 4px 8px; border-radius: 999px;
+  background: rgba(14,165,165,.16); border: 1px solid var(--card-border);
+}
+.callout {
+  border: 1px dashed var(--card-border);
+  background: var(--panel-2);
+  padding: 12px; border-radius: 12px; margin: 8px 0;
+}
+.prose .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 740px){ .prose .grid-2 { grid-template-columns: 1fr; } }
+.prose .feature {
+  background: var(--panel-2); border: 1px solid var(--card-border);
+  border-radius: 14px; padding: 12px;
+}
+.prose .kpi {
+  display:flex; align-items:center; gap:10px; padding:10px 12px;
+  border:1px solid var(--card-border); border-radius:14px; background: var(--panel-2);
+}
