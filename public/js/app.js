@@ -1,5 +1,5 @@
 /* =========================
-   Inventory — single-file SPA
+   Inventory — single-file SPA (fixed pack)
    ========================= */
 
 /* ---------- Hoisted helpers ---------- */
@@ -78,7 +78,7 @@ let session      = load('session', null);
 let currentRoute = load('_route', 'home');
 let searchQuery  = load('_searchQ', '');
 
-// Seed data (and demo admin)
+// Seed data
 const DEMO_ADMIN_EMAIL='admin@inventory.com';
 const DEMO_ADMIN_PASS='admin123';
 
@@ -145,7 +145,7 @@ async function ensureSessionAndRender(user) {
   // Allow stored local session (no Firebase)
   const stored = load('session', null);
   if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
-    session = stored; resetIdleTimer(); currentRoute = load('_route','home'); renderApp(); return;
+    session = stored; resetIdleTimer(); currentRoute = 'home'; save('_route','home'); renderApp(); return;
   }
 
   if (!user) {
@@ -209,10 +209,12 @@ function localLogin(email, pass){
   if (e===DEMO_ADMIN_EMAIL && pass===DEMO_ADMIN_PASS){
     let u=users.find(x=>(x.email||'').toLowerCase()===e);
     if(!u){u={name:'Admin',username:'admin',email:DEMO_ADMIN_EMAIL,role:'admin',password:DEMO_ADMIN_PASS,img:'',contact:''};users.push(u);save('users',users);}
-    session={...u,authMode:'local'}; save('session',session); notify('Signed in (Local mode)'); renderApp(); return true;
+    session={...u,authMode:'local'}; save('session',session);
+    currentRoute='home'; save('_route','home');
+    notify('Signed in (Local mode)'); renderApp(); return true;
   }
   const u2=users.find(x=>(x.email||'').toLowerCase()===e && (x.password||'')===pass);
-  if(u2){session={...u2,authMode:'local'}; save('session',session); notify('Signed in (Local mode)'); renderApp(); return true;}
+  if(u2){session={...u2,authMode:'local'}; save('session',session); currentRoute='home'; save('_route','home'); notify('Signed in (Local mode)'); renderApp(); return true;}
   return false;
 }
 function localSignup({name,email,pass}){
@@ -222,7 +224,9 @@ function localSignup({name,email,pass}){
   const r = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
   const u={name:name||e.split('@')[0],username:e.split('@')[0],email:e,role:r,password:pass,img:'',contact:''};
   users.push(u); save('users',users);
-  session={...u,authMode:'local'}; save('session',session); notify('Account created (Local mode)'); renderApp(); return true;
+  session={...u,authMode:'local'}; save('session',session);
+  currentRoute='home'; save('_route','home');
+  notify('Account created (Local mode)'); renderApp(); return true;
 }
 function localResetPassword(email){
   const e=(email||'').toLowerCase(); const users=load('users',[]); const i=users.findIndex(x=>(x.email||'').toLowerCase()===e);
@@ -553,6 +557,7 @@ function renderLogin() {
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
       if (!prof) { prof = { name:'Admin', username:'admin', email: email, contact:'', role:'admin', password:'', img:'' }; users.push(prof); save('users',users); }
       session = { ...prof, authMode:'local' }; save('session', session);
+      currentRoute='home'; save('_route','home');
       notify('Welcome, Admin (local)');
       ensureSessionAndRender(null); return;
     }
@@ -628,8 +633,6 @@ async function doLogout(){
 /* ========= Part C.1 — Home (Random videos daily + per-login) ========= */
 
 (function(){
-  // Update this with your favorite IDs (music + movies/trailers).
-  // Keep them legal-to-embed. Titles are for display only.
   if (!window.GLOBAL_VIDEOS) window.GLOBAL_VIDEOS = [
     { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
     { title:'DEAF KEV – Invincible (NCS)', id:'J2X5mJ3HDYE' },
@@ -641,7 +644,6 @@ async function doLogout(){
     { title:'Jim Yosef – Firefly', id:'x_OwcYTNbHs' },
     { title:'Syn Cole – Feel Good', id:'q1ULJ92aldE' },
     { title:'Itro & Tobu – Cloud 9', id:'VtKbiyyVZks' },
-    // Movies/trailers (examples; replace with legal-embed IDs you like)
     { title:'Inception – Trailer', id:'YoHD9XEInc0' },
     { title:'Interstellar – Trailer', id:'zSWdZVtXT7E' },
     { title:'Bohemian Rhapsody (Queen – live)', id:'fJ9rUzIMcZQ' },
@@ -654,7 +656,6 @@ async function doLogout(){
     { title:'Whitney Houston – I Will Always Love You', id:'3JWTaaS7LdU' }
   ];
 
-  // PRNG seeded by yyyy-mm-dd for stable daily shuffle
   function seedPRNG(seedStr){
     let h=2166136261>>>0;
     for(let i=0;i<seedStr.length;i++){ h^=seedStr.charCodeAt(i); h=(h*16777619)>>>0; }
@@ -667,12 +668,10 @@ async function doLogout(){
     const day = new Date(); const key = `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`;
     const rnd = seedPRNG(key);
     const idxs = lib.map((_,i)=>i);
-    // Fisher-Yates with seeded PRNG
     for (let i=idxs.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1)); [idxs[i],idxs[j]]=[idxs[j],idxs[i]]; }
     return idxs.slice(0, Math.min(size, lib.length)).map(i=>lib[i]);
   };
 
-  // Blacklist for un-embeddable videos
   function _ytBlacklistLoad(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
   function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
   window.ytBlacklistAdd = (id)=>{ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
@@ -681,8 +680,8 @@ async function doLogout(){
 })();
 
 function viewHome(){
-  const set = buildDailyRandomSet(10); // new set each day
-  const start = Math.floor(Math.random() * Math.max(1, set.length)); // new pick each login
+  const set = buildDailyRandomSet(10);
+  const start = Math.floor(Math.random() * Math.max(1, set.length));
   return `
     <div class="card">
       <div class="card-body">
@@ -728,7 +727,6 @@ function wireHome(){
   const hostId = 'ytPlayerHost';
   if (!wrap || !title || !openYT) return;
 
-  // prepare today's set globally for wiring
   const todaySet = buildDailyRandomSet(10);
   window.HOME_TODAY_VIDEOS = todaySet;
 
@@ -866,13 +864,23 @@ function viewDashboard(){
       </div>
     </div>`;
 }
-function wireDashboard(){ $('#addPost')?.addEventListener('click', ()=> openModal('m-post')); }
+function wireDashboard(){
+  $('#addPost')?.addEventListener('click', ()=>{
+    // open blank form (fix for “edit mode on add”)
+    openModal('m-post');
+    $('#post-id').value='';
+    $('#post-title').value='';
+    $('#post-body').value='';
+    $('#post-img').value='';
+    attachImageUpload('#post-imgfile', '#post-img');
+  });
+}
 function wirePosts(){
   const sec = document.querySelector('[data-section="posts"]'); if (!sec) return;
   $('#save-post')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const posts = load('posts', []);
-    const id = $('#post-id').value || ('post_'+Date.now());
+    const id = ($('#post-id')?.value || '').trim() || ('post_'+Date.now());
     const obj = { id, title: ($('#post-title')?.value||'').trim(), body: ($('#post-body')?.value||'').trim(), img: ($('#post-img')?.value||'').trim(), createdAt: Date.now() };
     if (!obj.title) return notify('Title required','warn');
     const i = posts.findIndex(x=>x.id===id);
@@ -886,6 +894,7 @@ function wirePosts(){
       if (!canEdit()) return notify('No permission','warn');
       const p = load('posts', []).find(x=>x.id===id); if (!p) return;
       openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||'';
+      attachImageUpload('#post-imgfile', '#post-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
       save('posts', load('posts', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
@@ -974,7 +983,6 @@ function wireInventory(){
     downloadCSV('inventory.csv', load('inventory', []), ['id','name','code','type','price','stock','threshold','img']);
   });
 
-  // Add: empty values, placeholders only
   $('#addInv')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-inv');
@@ -983,7 +991,6 @@ function wireInventory(){
     attachImageUpload('#inv-imgfile', '#inv-img');
   });
 
-  // Save (robust)
   $('#save-inv')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     const toF = v => { const n = parseFloat(String(v||'').trim()); return Number.isFinite(n) ? n : 0; };
@@ -1010,7 +1017,6 @@ function wireInventory(){
     save('inventory', items); closeModal('m-inv'); notify('Saved'); renderApp();
   });
 
-  // Row actions
   sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const items = load('inventory', []);
@@ -1275,22 +1281,45 @@ function viewTasks(){
     ${lane('done','Done','#10b981')}
   </div>`;
 }
-function setupDnD(){
-  const lanes = ['todo','inprogress','done'];
-  document.querySelectorAll('[data-task]').forEach(card=>{
-    card.ondragstart = (e)=> { e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); e.dataTransfer.dropEffect='move'; };
+
+/* Delegated, resilient DnD (fix) */
+(function wireGlobalDnD(){
+  if (window.__dndWired) return; window.__dndWired = true;
+
+  document.addEventListener('dragstart', (e)=>{
+    const card = e.target.closest('.task-card'); if (!card) return;
+    e.dataTransfer.setData('text/plain', card.getAttribute('data-task') || '');
+    e.dataTransfer.effectAllowed='move';
+    card.classList.add('dragging');
   });
-  lanes.forEach(k=>{
-    const laneGrid  = $('#lane-'+k); const parentCard = laneGrid?.closest('.lane-row'); if (!laneGrid) return;
-    laneGrid.ondragover  = (e)=>{ e.preventDefault(); parentCard?.classList.add('drop'); };
-    laneGrid.ondragleave = ()=> parentCard?.classList.remove('drop');
-    laneGrid.ondrop      = (e)=>{ e.preventDefault(); parentCard?.classList.remove('drop');
-      if (!canAdd()) return notify('No permission','warn');
-      const id = e.dataTransfer.getData('text/plain'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
-      t.status = k; save('tasks', items); renderApp();
-    };
+
+  document.addEventListener('dragend', (e)=>{
+    const card = e.target.closest('.task-card'); if (card) card.classList.remove('dragging');
   });
-}
+
+  document.addEventListener('dragover', (e)=>{
+    const grid = e.target.closest('.lane-grid'); if (!grid) return;
+    e.preventDefault();
+    grid.closest('.lane-row')?.classList.add('drop');
+  });
+
+  document.addEventListener('dragleave', (e)=>{
+    const row = e.target.closest('.lane-row'); if (row) row.classList.remove('drop');
+  });
+
+  document.addEventListener('drop', (e)=>{
+    const grid = e.target.closest('.lane-grid'); if (!grid) return;
+    e.preventDefault();
+    grid.closest('.lane-row')?.classList.remove('drop');
+    const id = e.dataTransfer.getData('text/plain'); if (!id) return;
+    const lane = grid.id.replace('lane-','');
+    const items = load('tasks', []);
+    const t = items.find(x=>x.id===id); if (!t) return;
+    if (!canAdd()) { notify('No permission','warn'); return; }
+    t.status = lane; save('tasks', items); renderApp();
+  });
+})();
+
 function wireTasks(){
   const root = document.querySelector('[data-section="tasks"]'); if (!root) return;
 
@@ -1311,6 +1340,21 @@ function wireTasks(){
     save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
   });
 
+  // Click-to-advance on touch devices
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  if (isTouch) {
+    $$('.task-card').forEach(card=>{
+      card.addEventListener('click', (e)=>{
+        if (e.target.closest('button')) return;
+        if (!canAdd()) return notify('No permission','warn');
+        const id = card.getAttribute('data-task'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
+        const next = t.status==='todo' ? 'inprogress' : (t.status==='inprogress' ? 'done' : 'todo');
+        t.status = next; save('tasks', items); renderApp();
+      });
+    });
+  }
+
+  // Row edit/delete
   root.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
@@ -1324,21 +1368,6 @@ function wireTasks(){
       save('tasks', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
   });
-
-  setupDnD();
-
-  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  if (isTouch) {
-    $$('.task-card').forEach(card=>{
-      card.addEventListener('click', (e)=>{
-        if (e.target.closest('button')) return;
-        if (!canAdd()) return notify('No permission','warn');
-        const id = card.getAttribute('data-task'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
-        const next = t.status==='todo' ? 'inprogress' : (t.status==='inprogress' ? 'done' : 'todo');
-        t.status = next; save('tasks', items); renderApp();
-      });
-    });
-  }
 }
 
 /* ===================== Part E — Settings / Contact / Pages / Modals ===================== */
@@ -1357,7 +1386,7 @@ function enableMobileImagePreview(){
   });
 }
 
-/* Static/link pages (About, Policy, etc.) */
+/* Static/link pages – fully inlined now (bright + detailed) */
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
   about: `
@@ -1369,30 +1398,113 @@ Object.assign(window.pageContent, {
         <div class="card"><div class="card-body"><strong>Manage Products</strong><p class="muted">Images, barcodes, ingredients, and instructions — all in one place.</p></div></div>
         <div class="card"><div class="card-body"><strong>COGS & Posts</strong><p class="muted">Record daily costs & gross income; share updates with your team.</p></div></div>
       </div>
-      <p class="muted">Built-in login, optional Cloud Sync (Firebase), PWA install, and an accessible UI that works great on mobile.</p>
+      <details><summary>Read more</summary>
+        <ul>
+          <li>Works great on phones, tablets, desktops; installable as a PWA.</li>
+          <li>Optional Cloud Sync using your Firebase account; or run fully offline.</li>
+          <li>Role-based controls for admins, managers, associates, and viewers.</li>
+        </ul>
+      </details>
     </div>`,
-  policy:  `<div class="page-frame"><h2>Policy</h2><iframe class="page-embed" src="policy.html"></iframe></div>`,
-  license: `<div class="page-frame"><h2>License</h2><iframe class="page-embed" src="license.html"></iframe></div>`,
-  setup:   `<div class="page-frame"><h2>Setup Guide</h2><iframe class="page-embed" src="setup-guide.html"></iframe></div>`,
-  guide:   `<div class="page-frame"><h2>User Guide</h2><iframe class="page-embed" src="guide.html"></iframe></div>`,
+  policy:  `
+    <div class="page-frame">
+      <h2>Policy</h2>
+      <p class="muted">Simple, human-friendly policies for using this app.</p>
+      <div class="grid cols-3">
+        <div class="card"><div class="card-body"><strong>Privacy</strong><p class="muted">Local mode stores data only in your browser. Cloud Sync stores your data in your own Firebase project.</p></div></div>
+        <div class="card"><div class="card-body"><strong>Security</strong><p class="muted">Use strong passwords. Restrict admin roles. Firebase rules isolate each user’s cloud data.</p></div></div>
+        <div class="card"><div class="card-body"><strong>Data</strong><p class="muted">You control your data. Export CSV anytime from Inventory, Products, and COGS.</p></div></div>
+      </div>
+      <details><summary>Know more</summary>
+        <ul>
+          <li>No analytics or tracking scripts are bundled by default.</li>
+          <li>Email is sent only when an admin configures EmailJS and clicks Send.</li>
+          <li>Clear browser storage to reset local data (Settings → Sign out then clear).</li>
+        </ul>
+      </details>
+    </div>`,
+  license: `
+    <div class="page-frame">
+      <h2>License</h2>
+      <p class="muted">This template is provided for your business use. You may modify and deploy it for yourself or your company.</p>
+      <details><summary>Read more</summary>
+        <ul>
+          <li>No warranty. Use at your own risk.</li>
+          <li>Attribution appreciated but not required.</li>
+          <li>3rd-party libraries (Firebase, EmailJS, icons) follow their own licenses.</li>
+        </ul>
+      </details>
+    </div>`,
+  setup:   `
+    <div class="page-frame">
+      <h2>Setup Guide</h2>
+      <p>Step-by-step instructions for developers and deployers.</p>
+      <ol>
+        <li><strong>Clone files</strong> — keep <code>index.html</code>, <code>css/styles.css</code>, <code>js/app.js</code>, <code>service-worker.js</code>, <code>manifest.webmanifest</code>, and <code>icons/*</code>.</li>
+        <li><strong>Branding</strong> — update <code>icons/*</code> and <code>manifest.webmanifest</code> (name, short_name, theme_color, start_url).</li>
+        <li><strong>Firebase (optional)</strong>
+          <ul>
+            <li>Create a project → enable Email/Password Auth.</li>
+            <li>Create Realtime Database → set rules as in README (user-scoped namespace <code>tenants/{uid}/kv/*</code>).</li>
+            <li>Paste your Firebase config in <code>app.js</code> (firebaseConfig).</li>
+          </ul>
+        </li>
+        <li><strong>EmailJS (admin only, optional)</strong>
+          <ul>
+            <li>Create Service and Template in EmailJS.</li>
+            <li>In Settings → Email Delivery (Admin), paste your <em>Public Key</em>, <em>Service ID</em>, <em>Template ID</em>.</li>
+          </ul>
+        </li>
+        <li><strong>PWA</strong> — ensure <code>manifest.webmanifest</code> is linked in <code>index.html</code>, icons exist, and <code>service-worker.js</code> is in the root.</li>
+        <li><strong>Deploy</strong> — any static host (Firebase Hosting, Netlify, Vercel, GitHub Pages). Use HTTPS.</li>
+      </ol>
+      <details><summary>Know more</summary>
+        <ul>
+          <li>Link the PWA install UI is built-in (topbar Install button + mini banner) and shows when browser is eligible.</li>
+          <li>Cloud Sync is per-user; toggle it in Settings. Admins can see the user list but not their private cloud data.</li>
+          <li>All forms use placeholders only — no “0” pre-fills — to avoid confusion.</li>
+        </ul>
+      </details>
+    </div>`,
+  guide:   `
+    <div class="page-frame">
+      <h2>User Guide</h2>
+      <div class="grid cols-3">
+        <div class="card"><div class="card-body"><strong>Inventory</strong><p class="muted">Add items, change stock and thresholds, watch for low/critical rows.</p></div></div>
+        <div class="card"><div class="card-body"><strong>Products</strong><p class="muted">Keep product images, barcodes, ingredients, and instructions — plus quick preview.</p></div></div>
+        <div class="card"><div class="card-body"><strong>COGS</strong><p class="muted">Record daily costs and gross income. Totals and profits are calculated for you.</p></div></div>
+      </div>
+      <details><summary>Read more</summary>
+        <ul>
+          <li><strong>Tasks:</strong> drag cards between lanes (or tap on mobile to advance).</li>
+          <li><strong>Posts:</strong> share updates with your team on the Dashboard.</li>
+          <li><strong>Contact:</strong> email button for everyone; admin form if EmailJS is configured.</li>
+        </ul>
+      </details>
+    </div>`,
   contact: (()=>{
     const to = 'minmaung0307@gmail.com';
     const emailBtn = `<a class="btn" href="mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent('Hello from Inventory')}" target="_blank" rel="noopener"><i class="ri-mail-send-line"></i> Contact via email</a>`;
-    // Only admin sees EmailJS form (optional)
     const isAdmin = (session?.role==='admin');
-    const showForm = isAdmin && hasEmailJsCfg();
+    const configured = hasEmailJsCfg();
+    const warn = isAdmin && !configured ? `<p class="muted">Admin notice: EmailJS isn’t configured yet. Go to <strong>Settings → Email Delivery</strong> and paste your Public Key, Service ID, and Template ID.</p>` : '';
+    // Show admin form regardless; disable send until configured
     return `
       <div class="page-frame">
         <h2>Contact</h2>
         <p class="muted">We’d love to hear from you.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${emailBtn}</div>
-        ${ showForm ? `
+        ${ isAdmin ? `
           <div class="card"><div class="card-body grid">
-            <h3 style="margin:0">Send quick message (admin)</h3>
+            <h3 style="margin:0">Quick message (Admin)</h3>
+            ${warn}
             <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
             <input id="ct-subj"  class="input" placeholder="Subject"/>
             <textarea id="ct-msg" class="input" rows="5" placeholder="Message"></textarea>
-            <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+              <button id="ct-open-settings" class="btn ghost"><i class="ri-settings-3-line"></i> EmailJS Settings</button>
+              <button id="ct-send" class="btn" ${configured?'':'disabled'}><i class="ri-send-plane-line"></i> Send</button>
+            </div>
             <div id="ct-note" class="muted" style="font-size:12px"></div>
           </div></div>` : `
           <p class="muted">Tip: Admins can enable EmailJS in Settings to send from the app.</p>`}
@@ -1407,8 +1519,12 @@ function setEmailJsCfg(cfg){ save('_emailjsCfg', cfg); }
 function hasEmailJsCfg(){ const c=getEmailJsCfg(); return !!(c.pk && c.service && c.template); }
 
 function wireContact(){
-  const btn = $('#ct-send'); if (!btn) return; // only if admin + configured
+  const openSettings = $('#ct-open-settings'); if (openSettings) openSettings.onclick = ()=> go('settings');
+
+  const btn = $('#ct-send'); if (!btn) return; // only if admin rendered
   btn.onclick = async ()=>{
+    if (!hasEmailJsCfg()) { notify('Configure EmailJS in Settings first','warn'); return; }
+
     const fromEmail = ($('#ct-email')?.value || '').trim();
     const subject   = ($('#ct-subj')?.value  || '').trim();
     const message   = ($('#ct-msg')?.value   || '').trim();
@@ -1784,7 +1900,6 @@ window.addEventListener('beforeinstallprompt', (e)=>{
   e.preventDefault();
   window.__pwaDeferredPrompt = e;
   window.__pwaCanPrompt = true;
-  // if app already rendered, show the inline button
   $('#btnInstallApp')?.style && ($('#btnInstallApp').style.display = 'inline-flex');
   $('#installBanner')?.classList?.add('show');
 });

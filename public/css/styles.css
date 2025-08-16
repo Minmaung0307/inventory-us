@@ -131,6 +131,7 @@ body {
 .btn.warn { background: var(--warn); }
 .btn.danger { background: var(--danger); }
 .btn.ok { background: var(--ok); }
+.btn[disabled] { opacity: .6; cursor: not-allowed; }
 
 .input, select, textarea {
   width: 100%; background: var(--panel-2); border: 1px solid var(--card-border);
@@ -172,10 +173,9 @@ body {
   position: absolute; top: -6px; left: 56px; width: 240px; height: 240px; object-fit: cover; border-radius: 14px;
   border: 1px solid var(--card-border); box-shadow: var(--shadow); background: var(--panel);
   transform: scale(.96); opacity: 0; transition: transform .12s ease, opacity .12s ease;
-  z-index: 200; pointer-events: none; /* never “capture” hover/focus */
+  z-index: 200; pointer-events: none;
 }
-
-/* Suppress hover previews when a modal/side-drawer is open */
+/* Hide hover previews when a modal / sidebar is open */
 .ui-layer-open .thumb-large { display: none !important; }
 
 /* Image modal (phones) */
@@ -207,13 +207,10 @@ body {
   box-shadow: var(--shadow);
 }
 .login-note { color: var(--muted); font-size: 13px; text-align: center; }
-
-/* Login screen link styling + disabled button */
 .login a { color: var(--brand); text-decoration: none; font-weight: 600; }
 .login a:hover { text-decoration: underline; }
-.btn[disabled] { opacity: .6; cursor: not-allowed; }
 
-/* Link pages – readable frame */
+/* Link pages – bright, readable */
 .page-frame {
   background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
   border: 1px solid var(--card-border);
@@ -222,16 +219,20 @@ body {
   color: var(--text);
 }
 .page-frame h2, .page-frame h3 { margin: 0 0 8px; }
-.page-frame p { color: var(--text); opacity: .92; }
+.page-frame p { color: var(--text); opacity: .95; }
 .page-frame .muted { color: var(--muted); }
-.page-embed {
-  height: calc(100vh - 260px);
-  width: 100%;
-  border: none;
-  border-radius: 12px;
+.page-embed { display: none; } /* no iframes now */
+.page-frame details {
   background: var(--panel-2);
   border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 10px;
 }
+.page-frame details > summary {
+  cursor: pointer; font-weight: 700; list-style: none;
+}
+.page-frame ul { margin: 8px 0 0 18px; }
 
 /* Notification */
 .notification {
@@ -246,22 +247,11 @@ body {
 .notification.warn  { border-color: var(--warn); }
 .notification.danger{ border-color: var(--danger); }
 
-/* Make anchor-buttons look like buttons */
-a.btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  text-decoration: none !important; color: inherit !important;
-}
-
-/* Remove default blue/underline where we use icon links */
-.login a, .topbar a, .sidebar .socials-row a, .socials-compact a {
-  text-decoration: none; color: inherit;
-}
-
-/* Compact social icons in topbar */
+/* Compact socials in topbar */
 .socials-compact { display: flex; gap: 8px; align-items: center; }
 .socials-compact a {
   display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center;
-  border: 1px solid var(--card-border); border-radius: 9999px;
+  border: 1px solid var(--card-border); border-radius: 9999px; text-decoration: none; color: inherit;
 }
 .socials-compact a:hover { background: var(--hover); }
 
@@ -271,6 +261,9 @@ a.btn {
   display: none;
 }
 #installBanner.show { display: block; }
+
+/* Tasks – DnD visual */
+.lane-row.drop .card-body { outline: 2px dashed var(--brand); outline-offset: -6px; }
 
 /* Responsive */
 .backdrop { position: fixed; inset:0; background:rgba(0,0,0,.5); display:none; z-index:760; }
