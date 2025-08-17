@@ -1,34 +1,37 @@
 <!doctype html>
-<html lang="en"><head>
+<html><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>User Guide</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --border:#1f2a37; }
-@media (prefers-color-scheme: light){ :root{ --bg:#f7fafc; --panel:#fff; --panel2:#f2f5f8; --text:#0b1220; --muted:#51606f; --border:#e6edf3; } }
-*{box-sizing:border-box} body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,ui-sans-serif }
-.wrap{ max-width:1000px; margin:24px auto; padding:0 16px 40px }
-.card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px; margin:14px 0 }
-h1{ margin:6px 0 12px; font-size:26px } h2{ font-size:18px; margin:18px 0 8px } .muted{ color:var(--muted) }
-ul{ margin:8px 0 0 18px }
-</style></head>
-<body>
-  <div class="wrap">
-    <h1>User Guide</h1>
-    <div class="card">
-      <h2>Getting started</h2>
-      <ul>
-        <li>Sign in or use the demo admin on the login screen.</li>
-        <li>Add items in <strong>Inventory</strong> and <strong>Products</strong>—upload images if you like.</li>
-        <li>Organize work in <strong>Tasks</strong> (drag & drop between lanes).</li>
-      </ul>
-      <h2>Tips</h2>
-      <ul>
-        <li>Turn on <strong>Cloud Sync</strong> in Settings to mirror your data per user to Firebase.</li>
-        <li>Use <strong>Export CSV</strong> for quick reports.</li>
-        <li>Hover thumbnails to preview; on phone, tap for a large view.</li>
-      </ul>
-    </div>
+:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --border:#1f2a37; --brand:#0ea5a5; }
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 Inter,system-ui}
+.wrap{max-width:960px;margin:24px auto;padding:0 16px 40px}
+h1{margin:8px 0 12px} h2{margin:18px 0 10px} .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px;margin:12px 0}
+.badge{display:inline-block;padding:6px 10px;border:1px solid var(--border);border-radius:9999px;background:var(--panel2);margin-right:6px}
+</style>
+</head>
+<body><div class="wrap">
+  <h1>User Guide</h1>
+  <div class="card">
+    <h2>Getting around</h2>
+    <p>Use the sidebar to switch between <span class="badge">Inventory</span><span class="badge">Products</span><span class="badge">COGS</span><span class="badge">Tasks</span> and more.</p>
+    <p><strong>Search</strong> (top of sidebar) finds items across all sections.</p>
   </div>
-</body></html>
+  <div class="card">
+    <h2>Adding items</h2>
+    <ul>
+      <li>Inventory → Add Item → fill name and optional image (supports paste/upload).</li>
+      <li>Products → Add Product → barcode, price, ingredients and instructions optional.</li>
+      <li>COGS → Add Row → the totals update automatically.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>Tasks</h2>
+    <p>Drag cards between lanes, or tap cards on mobile to cycle status.</p>
+  </div>
+  <div class="card">
+    <h2>Sync & Offline</h2>
+    <p>Works offline by default. Turn on Cloud Sync in <strong>Settings</strong> to mirror your data to your Firebase account.</p>
+  </div>
+</div></body></html>

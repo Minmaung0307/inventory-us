@@ -1,62 +1,83 @@
 <!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>About – Inventory</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
 :root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --border:#1f2a37; }
-@media (prefers-color-scheme: light){ :root{ --bg:#f7fafc; --panel:#fff; --panel2:#f2f5f8; --text:#0b1220; --muted:#51606f; --border:#e6edf3; } }
-*{box-sizing:border-box} body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,ui-sans-serif }
-.wrap{ max-width:1000px; margin:24px auto; padding:0 16px 48px }
-h1{ margin:4px 0 12px; font-size:30px } h2{ margin:18px 0 10px; font-size:18px }
-.card{ background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:18px; margin:14px 0 }
-.kpis{ display:grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
-.kpi{ background:var(--panel2); border:1px solid var(--border); border-radius:14px; padding:12px }
+@media (prefers-color-scheme: light){
+  :root{ --bg:#f7fafc; --panel:#fff; --panel2:#f2f5f8; --text:#0b1220; --muted:#51606f; --border:#e6edf3; }
+}
+*{box-sizing:border-box}
+body{ margin:0; background:var(--bg); color:var(--text); font: 14px/1.6 Inter, system-ui, Segoe UI, Roboto, Arial; }
+.wrap{ max-width: 960px; margin: 28px auto; padding: 0 16px 40px; }
+.hero{ display:flex; align-items:center; gap:14px; margin-bottom:10px }
+.logo{ width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background: radial-gradient(ellipse at 30% 30%, var(--brand), #0891b2); color:#fff; font-weight:800;}
+.card{ background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:18px; margin:14px 0; }
+h1{ font-size:28px; margin:6px 0 }
+h2{ font-size:18px; margin:18px 0 10px }
+p,li{ color:var(--text) }
+.muted{ color:var(--muted) }
 .badges{ display:flex; gap:8px; flex-wrap:wrap }
-.badge{ padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:var(--panel2); font-weight:600 }
-.quote{ font-style:italic; color:var(--muted) }
-</style></head>
+.badge{ padding:6px 10px; background:var(--panel2); border:1px solid var(--border); border-radius:9999px; }
+.grid{ display:grid; gap:12px }
+.columns{ display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); }
+</style>
+</head>
 <body>
-  <div class="wrap">
-    <h1>About Inventory</h1>
-    <div class="card">
-      <p><strong>Inventory</strong> is a lightning-fast, offline-first stock & sales app for real businesses:
-         street food, cafés, salons, florists, pop-ups, retail counters, and medium-size teams.</p>
-      <div class="badges">
-        <div class="badge">No install needed</div>
-        <div class="badge">Works offline</div>
-        <div class="badge">CSV reports</div>
-        <div class="badge">Drag & drop tasks</div>
-        <div class="badge">Cloud Sync (optional)</div>
-      </div>
+<div class="wrap">
+  <div class="hero">
+    <div class="logo">📦</div>
+    <div>
+      <h1 style="margin:0">About Inventory</h1>
+      <div class="muted">A fast, everyday tool for small to mid-size teams</div>
     </div>
+  </div>
 
-    <div class="card">
-      <h2>What you can do</h2>
+  <div class="card">
+    <div class="badges">
+      <span class="badge">Offline-friendly</span>
+      <span class="badge">Works on any device</span>
+      <span class="badge">No servers to manage</span>
+      <span class="badge">Role-based access</span>
+      <span class="badge">CSV exports</span>
+      <span class="badge">PWA installable</span>
+    </div>
+  </div>
+
+  <div class="card columns">
+    <div>
+      <h2>Why it’s useful</h2>
       <ul>
-        <li>Manage <strong>Inventory</strong> with live stock & thresholds.</li>
-        <li>Build a <strong>Product</strong> catalog with images & instructions.</li>
-        <li>Track daily <strong>COGS</strong> and see month-over-month trends.</li>
-        <li>Plan your day with <strong>Tasks</strong> across three lanes.</li>
-        <li>Search everything and export clean CSVs anytime.</li>
+        <li><strong>Single source of truth</strong> for stock, products, COGS, and tasks.</li>
+        <li><strong>Zero setup</strong>: drop static files on any host, you’re done.</li>
+        <li><strong>Fast UI</strong> with keyboard-friendly tables and inline actions.</li>
       </ul>
     </div>
-
-    <div class="kpis">
-      <div class="kpi"><div class="quote">“I replaced three spreadsheets.”</div></div>
-      <div class="kpi"><div class="quote">“It just works without Wi-Fi.”</div></div>
-      <div class="kpi"><div class="quote">“Setup took five minutes.”</div></div>
-    </div>
-
-    <div class="card">
-      <h2>Why it’s different</h2>
+    <div>
+      <h2>Where it fits</h2>
       <ul>
-        <li><strong>Zero friction:</strong> open the link and go. No training, no installs.</li>
-        <li><strong>Offline-first:</strong> local-storage keeps you running on the move.</li>
-        <li><strong>Bring-your-own cloud:</strong> optional Firebase sync, per user.</li>
-        <li><strong>Small & fast:</strong> a single page—no heavy frameworks.</li>
+        <li>Food trucks & small restaurants.</li>
+        <li>Retail counters & pop-ups.</li>
+        <li>Studios & maker shops tracking consumables.</li>
       </ul>
     </div>
   </div>
-</body></html>
+
+  <div class="card grid">
+    <h2>What you get</h2>
+    <ul>
+      <li>Inventory & Products with images, CSV export, and quick edit.</li>
+      <li>COGS tracker with automatic totals and dashboard trends.</li>
+      <li>Tasks board with drag-and-drop and mobile tap-to-move.</li>
+      <li>Cloud sync per user (Firebase), or local-only mode.</li>
+      <li>Hot music videos section for a little fun while you work 😊</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

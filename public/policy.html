@@ -1,40 +1,38 @@
 <!doctype html>
-<html lang="en"><head>
+<html><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Policy – Privacy</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet"/>
+<title>Policy (MIT)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --border:#1f2a37; }
-@media (prefers-color-scheme: light){ :root{ --bg:#f7fafc; --panel:#fff; --text:#0b1220; --muted:#51606f; --border:#e6edf3; } }
-*{box-sizing:border-box} body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,ui-sans-serif }
-.wrap{ max-width:900px; margin:24px auto; padding:0 16px 48px }
-.card{ background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:18px; margin:14px 0 }
-h1{ margin:6px 0 12px; font-size:26px } h2{ font-size:18px; margin:18px 0 8px }
-.muted{ color:var(--muted) } a{ color: var(--brand) }
-</style></head>
-<body>
-  <div class="wrap">
-    <h1>Privacy Policy</h1>
-    <div class="card">
-      <h2>How Inventory stores data</h2>
-      <ul>
-        <li><strong>Local first:</strong> your data is stored in your browser’s LocalStorage for speed and offline use.</li>
-        <li><strong>Optional Cloud Sync:</strong> when enabled in Settings, your data is mirrored to your own Firebase Realtime Database under <code>tenants/&lt;uid&gt;/kv</code>.</li>
-        <li><strong>Per-user isolation:</strong> each signed-in user has their own local namespace and cloud path.</li>
-      </ul>
+:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --border:#1f2a37; }
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 Inter,system-ui}
+.wrap{max-width:900px;margin:24px auto;padding:0 16px 40px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px}
+h1{margin:8px 0 14px}
+pre{white-space:pre-wrap;background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px}
+</style>
+</head>
+<body><div class="wrap">
+  <div class="card">
+    <h1>MIT License</h1>
+<pre>
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the “Software”), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-      <h2>What we don’t collect</h2>
-      <p>We don’t run trackers or analytics. Any YouTube embeds load from the official Iframe API (nocookie domain).</p>
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
 
-      <h2>Security</h2>
-      <ul>
-        <li>Use strong passwords. Limit admin roles.</li>
-        <li>Keep Firebase rules locked to authenticated users only.</li>
-      </ul>
-
-      <h2>Contact</h2>
-      <p>Questions? See the <a href="contact.html" target="_blank" rel="noopener">Contact</a> page.</p>
-    </div>
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</pre>
   </div>
-</body></html>
+</div></body></html>

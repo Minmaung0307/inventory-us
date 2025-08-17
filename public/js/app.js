@@ -2,17 +2,20 @@
    Inventory — single-file SPA
    ========================= */
 
-/* ---------- Hoisted helpers (fixes parseYMD crash) ---------- */
+/* ---------- Hoisted helpers ---------- */
 function USD(x){ return `$${Number(x || 0).toFixed(2)}`; }
 function parseYMD(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; }
 function getISOWeek(d){ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); }
-window.USD=USD; window.parseYMD=parseYMD; window.getISOWeek=getISOWeek;
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+function notify(msg, type='ok'){ const n=$('#notification'); if(!n) return; n.textContent=msg; n.className=`notification show ${type}`; setTimeout(()=>{ n.className='notification'; }, 2400); }
+function _lsGet(k,f){ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } }
+function _lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
+function load(k,f){ return _lsGet(k,f); }
+function save(k,v){ _lsSet(k,v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k,v); }catch{} }
+function setSession(s){ session = s; save('session', s); }
 
-/* =========================
-   Part A — Core bootstrap
-   ========================= */
-
-// --- Firebase (v8) -----------------------------------------------------------
+/* ---------- Firebase v8 ---------- */
 const firebaseConfig = {
   apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
   authDomain: "inventory-us.firebaseapp.com",
@@ -28,68 +31,7 @@ const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db   = firebase.database();
 
-// --- Tiny helpers ------------------------------------------------------------
-const $  = (s, r=document) => r.querySelector(s);
-const $$ = (s, r=document) => [...r.querySelectorAll(s)];
-const notify = (msg, type='ok')=>{
-  const n = $('#notification'); if (!n) return;
-  n.textContent = msg; n.className = `notification show ${type}`;
-  setTimeout(()=>{ n.className='notification'; }, 2400);
-};
-const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } };
-const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
-function load(k, f){ return _lsGet(k, f); }
-function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
-function setSession(s){ session = s; save('session', s); }
-
-// --- EmailJS (optional) config ----------------------------------------------
-// Fill these if you want in-app sending (else we fallback to mailto:)
-const CONTACT_EMAIL_TO = 'minmaung0307@gmail.com';
-const EMAILJS_PUBLIC_KEY  = ''; // e.g. 'YOUR_PUBLIC_KEY'
-const EMAILJS_SERVICE_ID  = ''; // e.g. 'service_123'
-const EMAILJS_TEMPLATE_ID = ''; // e.g. 'template_abc'
-
-// --- PWA Install (omnibox + custom button in topbar) -------------------------
-let __deferredPrompt = null;
-window.addEventListener('beforeinstallprompt', (e)=>{
-  e.preventDefault();
-  __deferredPrompt = e;
-  const b = document.getElementById('btnInstall');
-  if (b) b.style.display = 'inline-flex';
-});
-window.addEventListener('appinstalled', ()=>{
-  __deferredPrompt = null;
-  const b = document.getElementById('btnInstall');
-  if (b) b.style.display = 'none';
-});
-
-// --- Rescue screen -----------------------------------------------------------
-function showRescue(err){
-  const root = document.getElementById('root');
-  if (!root) return;
-  const msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : 'Unknown error';
-  root.innerHTML = `
-    <div style="max-width:680px;margin:40px auto;padding:16px;border:1px solid #ddd;border-radius:12px;font-family:system-ui">
-      <h2 style="margin:0 0 8px">Something crashed</h2>
-      <p style="color:#666;margin:0 0 12px">You can recover or sign out below.</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <button id="rz-signout" style="padding:8px 12px">Sign out</button>
-        <button id="rz-clearls" style="padding:8px 12px">Clear LocalStorage</button>
-        <button id="rz-retry"   style="padding:8px 12px">Retry render</button>
-      </div>
-      <pre style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px">${msg}</pre>
-    </div>`;
-  $('#rz-signout')?.addEventListener('click', async ()=>{ try { await auth.signOut(); } catch {} location.reload(); });
-  $('#rz-clearls')?.addEventListener('click', ()=>{ try { localStorage.clear(); } catch {} location.reload(); });
-  $('#rz-retry')?.addEventListener('click', ()=>{ try { renderApp(); } catch (e) { console.error(e); notify(e?.message||'Retry failed','danger'); } });
-}
-window._diags = ()=>({
-  user: auth.currentUser ? { email: auth.currentUser.email, uid: auth.currentUser.uid } : null,
-  route: currentRoute, hasSession: !!session, role: session?.role,
-  authMode: session?.authMode || 'firebase'
-});
-
-// --- Theme -------------------------------------------------------------------
+/* ---------- Theme ---------- */
 const THEME_MODES = [{key:'light',name:'Light'},{key:'dark',name:'Dark'},{key:'aqua',name:'Aqua'}];
 const THEME_SIZES = [{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
 function getTheme(){ return _lsGet('_theme2', { mode:'aqua', size:'medium' }); }
@@ -101,7 +43,7 @@ function applyTheme(){
 }
 applyTheme();
 
-// --- Cloud Sync --------------------------------------------------------------
+/* ---------- Cloud Sync (per-user namespace) ---------- */
 const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2'];
 const cloud = (function(){
   let liveRefs = [];
@@ -119,7 +61,7 @@ const cloud = (function(){
   return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
 })();
 
-// --- Roles & permissions ------------------------------------------------------
+/* ---------- Roles & session ---------- */
 const ROLES = ['user','associate','manager','admin'];
 const SUPER_ADMINS = ['admin@sushi.com','admin@inventory.com'];
 function role(){ return (session?.role)||'user'; }
@@ -128,17 +70,16 @@ function canAdd(){ return ['admin','manager','associate'].includes(role()); }
 function canEdit(){ return ['admin','manager'].includes(role()); }
 function canDelete(){ return ['admin'].includes(role()); }
 
-// --- Globals + seed ----------------------------------------------------------
+/* ---------- Seeds ---------- */
 let session      = load('session', null);
 let currentRoute = load('_route', 'home');
 let searchQuery  = load('_searchQ', '');
 
-// built-in demo admin (local auth fallback)
 const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
 const DEMO_ADMIN_PASS  = 'admin123';
 
 (function seedOnFirstRun(){
-  if (load('_seeded_v3', false)) {
+  if (load('_seeded_v4', false)) {
     const users = load('users', []);
     if (!users.find(u => (u.email||'').toLowerCase() === DEMO_ADMIN_EMAIL)){
       users.push({ name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:DEMO_ADMIN_PASS, img:'' });
@@ -173,131 +114,107 @@ const DEMO_ADMIN_PASS  = 'admin123';
     { id:'c1', date:'2024-08-01', grossIncome:1200, produceCost:280, itemCost:180, freight:45, delivery:30, other:20 },
     { id:'c2', date:'2024-08-02', grossIncome: 900, produceCost:220, itemCost:140, freight:30, delivery:25, other:10 }
   ]);
-  save('_seeded_v3', true);
+  save('_seeded_v4', true);
 })();
 
-// --- Router + idle logout ----------------------------------------------------
+/* ---------- Router + idle logout ---------- */
 function go(route){ currentRoute = route; save('_route', route); renderApp(); }
-let idleTimer = null; // 10 minutes
-const IDLE_LIMIT = 10 * 60 * 1000;
 
+let idleTimer = null;
+const IDLE_LIMIT = 10*60*1000;
 function resetIdleTimer(){
   if (!session) return;
   if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(async () => {
-    try { 
-      // Use full logout so Local mode doesn’t auto-relogin on refresh
-      await doLogout();
-      notify('Signed out due to inactivity', 'warn');
-    } catch (e) {
-      console.error('[idle logout]', e);
-    }
-  }, IDLE_LIMIT);
+  idleTimer = setTimeout(async ()=>{ try{ await auth.signOut(); } finally { notify('Signed out due to inactivity','warn'); } }, IDLE_LIMIT);
 }
+['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
 
-// Listen for common interactions
-['click','mousemove','keydown','touchstart','scroll'].forEach(evt =>
-  window.addEventListener(evt, resetIdleTimer, { passive: true })
-);
-
-// Optional: reset when tab becomes visible again
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') resetIdleTimer();
-});
-
-// --- Auth state --------------------------------------------------------------
-// Local auto-login: keep local users signed-in on refresh
+/* ---------- Auth state ---------- */
 const ALLOW_LOCAL_AUTOLOGIN = true;
 
 auth.onAuthStateChanged(async (user) => {
-  console.log('[auth] onAuthStateChanged:', !!user, user?.email || '');
   try { await ensureSessionAndRender(user); }
-  catch (err) {
-    console.error('[auth] ensureSessionAndRender crashed:', err);
-    notify(err?.message || 'Render failed', 'danger');
-    showRescue(err);
-  }
+  catch (err) { console.error('[auth] crash:', err); notify(err?.message || 'Render failed', 'danger'); showRescue(err); }
 });
 
 async function ensureSessionAndRender(user) {
-  try {
-    applyTheme();
+  applyTheme();
+  const stored = load('session', null);
 
-    // allow local session if enabled
-    const stored = load('session', null);
-    if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
-      session = stored;
-      resetIdleTimer();
-      currentRoute = load('_route','home');
-      renderApp();
-      return;
-    }
-
-    if (!user) {
-      session = null;
-      save('session', null);
-      if (idleTimer) clearTimeout(idleTimer);
-      renderLogin();
-      return;
-    }
-
-    const email = (user.email || '').toLowerCase();
-    let users = load('users', []);
-    let prof = users.find(u => (u.email || '').toLowerCase() === email);
-
-    if (!prof) {
-      const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
-      prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
-      users.push(prof); save('users', users);
-    } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
-      prof.role = 'admin'; save('users', users);
-    }
-
-    session = { ...prof, authMode: 'firebase' };
-    save('session', session);
-
-    try {
-      if (cloud?.isOn?.()) {
-        try{ await firebase.database().goOnline(); }catch{}
-        try{ await cloud.pullAllOnce(); }catch{}
-        try{ cloud.subscribeAll(); }catch{}
-      }
-    } catch {}
-
-    resetIdleTimer();
-    currentRoute = 'home'; // ← always land on Home after sign-in
-    renderApp();
-
-  } catch (outer) {
-    console.error('[ensureSessionAndRender] outer crash:', outer);
-    notify(outer?.message || 'Render failed', 'danger');
-    showRescue(outer);
+  if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
+    session = stored; resetIdleTimer(); currentRoute = 'home'; renderApp(); return;
   }
+
+  if (!user) {
+    session = null; save('session', null);
+    if (idleTimer) clearTimeout(idleTimer);
+    renderLogin(); return;
+  }
+
+  const email = (user.email || '').toLowerCase();
+  let users = load('users', []);
+  let prof = users.find(u => (u.email || '').toLowerCase() === email);
+
+  if (!prof) {
+    const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
+    prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
+    users.push(prof); save('users', users);
+  } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
+    prof.role = 'admin'; save('users', users);
+  }
+
+  session = { ...prof, authMode: 'firebase' };
+  save('session', session);
+
+  try {
+    if (cloud?.isOn?.()) {
+      try{ await firebase.database().goOnline(); }catch{}
+      try{ await cloud.pullAllOnce(); }catch{}
+      try{ cloud.subscribeAll(); }catch{}
+    }
+  } catch {}
+
+  resetIdleTimer();
+  currentRoute = 'home'; save('_route','home');
+  renderApp();
 }
 
-// SAFETY helpers
-if (!window.getCogs) window.getCogs = () => (typeof load === 'function' ? (load('cogs', []) || []) : []);
+/* ---------- Rescue screen ---------- */
+function showRescue(err){
+  const root = document.getElementById('root');
+  if (!root) return;
+  const msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : 'Unknown error';
+  root.innerHTML = `
+    <div style="max-width:680px;margin:40px auto;padding:16px;border:1px solid #ddd;border-radius:12px;font-family:system-ui">
+      <h2 style="margin:0 0 8px">Something crashed</h2>
+      <p style="color:#666;margin:0 0 12px">You can recover or sign out below.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button id="rz-signout" style="padding:8px 12px">Sign out</button>
+        <button id="rz-clearls" style="padding:8px 12px">Clear LocalStorage</button>
+        <button id="rz-retry"   style="padding:8px 12px">Retry render</button>
+      </div>
+      <pre style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px">${msg}</pre>
+    </div>`;
+  $('#rz-signout')?.addEventListener('click', async ()=>{ try { await auth.signOut(); } catch {} location.reload(); });
+  $('#rz-clearls')?.addEventListener('click', ()=>{ try { localStorage.clear(); } catch {} location.reload(); });
+  $('#rz-retry')?.addEventListener('click', ()=>{ try { renderApp(); } catch (e) { console.error(e); notify(e?.message||'Retry failed','danger'); } });
+}
 
 /* =========================
-   Part B — Login & Shell
+   Login
    ========================= */
-
-// ---------- Local Auth helpers ----------
 function localLogin(email, pass){
   const users = load('users', []);
   const e = (email||'').toLowerCase();
-  // Always allow demo admin
   if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
     let u = users.find(x => (x.email||'').toLowerCase() === e);
     if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
     session = { ...u, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); return true;
   }
-  // Regular local user match
   const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
   if (u2) { session = { ...u2, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); return true; }
   return false;
 }
-
 function localSignup({name,email,pass}){
   const e = (email||'').toLowerCase();
   const users = load('users', []);
@@ -306,13 +223,12 @@ function localSignup({name,email,pass}){
     notify('User already exists locally. Use Sign In.', 'warn');
     return false;
   }
-  const role = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
-  const u = { name: name || e.split('@')[0], username: e.split('@')[0], email: e, role, password: pass, img:'', contact:'' };
+  const r = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
+  const u = { name: name || e.split('@')[0], username: e.split('@')[0], email: e, role: r, password: pass, img:'', contact:'' };
   users.push(u); save('users', users);
   session = { ...u, authMode: 'local' }; save('session', session);
   notify('Account created (Local mode)'); renderApp(); return true;
 }
-
 function localResetPassword(email){
   const e = (email||'').toLowerCase();
   const users = load('users', []);
@@ -322,279 +238,6 @@ function localResetPassword(email){
   users[i].password = temp; save('users', users);
   return { ok:true, temp };
 }
-
-// ---------- Sidebar + Topbar ----------
-function renderSidebar(active='home'){
-  const links = [
-    { route:'home',      icon:'ri-home-5-line',              label:'Home' },
-    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
-    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
-    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
-    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
-    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
-    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
-  ];
-  const pages = [
-    { route:'about',   icon:'ri-information-line',         label:'About' },
-    { route:'policy',  icon:'ri-shield-check-line',        label:'Policy' },
-    { route:'license', icon:'ri-copyright-line',           label:'License' },
-    { route:'setup',   icon:'ri-guide-line',               label:'Setup Guide' },
-    { route:'contact', icon:'ri-customer-service-2-line',  label:'Contact' },
-    { route:'guide',   icon:'ri-video-line',               label:'User Guide' },
-  ];
-  return `
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <div class="logo">📦</div>
-        <div class="title">Inventory</div>
-      </div>
-
-      <div class="search-wrap">
-        <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
-        <div id="searchResults" class="search-results"></div>
-      </div>
-
-      <h6>Menu</h6>
-      <nav class="nav">
-        ${links.map(l => `
-          <div class="item ${active===l.route?'active':''}" data-route="${l.route}">
-            <i class="${l.icon}"></i> <span>${l.label}</span>
-          </div>`).join('')}
-      </nav>
-
-      <h6>Links</h6>
-      <div class="links">
-        ${pages.map(p => `
-          <div class="item" data-route="${p.route}">
-            <i class="${p.icon}"></i> <span>${p.label}</span>
-          </div>`).join('')}
-      </div>
-
-      <h6>Social</h6>
-      <div class="socials-row">
-        <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-        <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-        <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-        <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
-        <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
-      </div>
-    </aside>
-  `;
-}
-
-function renderTopbar(){
-  const socialsCompact = `
-    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
-      <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-      <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-      <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-    </div>`;
-  return `
-    <div class="topbar">
-      <div class="left">
-        <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
-        <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
-      </div>
-      <div class="right">
-        ${socialsCompact}
-        <button class="btn ghost" id="btnInstall" style="display:none"><i class="ri-download-2-line"></i> Install</button>
-        <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
-        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
-      </div>
-    </div>
-    <div class="backdrop" id="backdrop"></div>
-  `;
-}
-
-// delegated nav clicks + close sidebar on mobile
-document.addEventListener('click', (e)=>{
-  const item = e.target.closest('.sidebar .item[data-route]');
-  if (!item) return;
-  const r = item.getAttribute('data-route');
-  if (r) { go(r); closeSidebar(); }
-});
-
-// close buttons in modals (generic)
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-close]');
-  if (!btn) return;
-  const id = btn.getAttribute('data-close');
-  if (id && typeof closeModal === 'function') { closeModal(id); }
-});
-
-// Sidebar search
-function hookSidebarInteractions(){
-  const input   = $('#globalSearch');
-  const results = $('#searchResults');
-  if (!input || !results) return;
-
-  let searchTimer;
-  const openResultsPage = (q)=>{
-    window.searchQuery = q; save && save('_searchQ', q);
-    if (window.currentRoute !== 'search') go('search'); else renderApp();
-  };
-
-  input.addEventListener('keydown', (e)=>{
-    if (e.key === 'Enter') {
-      const q = input.value.trim();
-      if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
-    }
-  });
-
-  input.addEventListener('input', () => {
-    clearTimeout(searchTimer);
-    const q = input.value.trim().toLowerCase();
-    if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
-    searchTimer = setTimeout(() => {
-      const indexData = buildSearchIndex();
-      const out = searchAll(indexData, q).slice(0, 12);
-      if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
-      results.innerHTML = out.map(r => `
-        <div class="result" data-route="${r.route}" data-id="${r.id||''}">
-          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
-        </div>`).join('');
-      results.classList.add('active');
-
-      results.querySelectorAll('.result').forEach(row => {
-        row.onclick = () => {
-          const r = row.getAttribute('data-route');
-          const id = row.getAttribute('data-id') || '';
-          const label = row.textContent.trim();
-          openResultsPage(label);
-          results.classList.remove('active'); input.value = ''; closeSidebar();
-          if (id) setTimeout(()=> scrollToRow(id), 80);
-        };
-      });
-    }, 120);
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!results.contains(e.target) && e.target !== input) {
-      results.classList.remove('active');
-    }
-  });
-}
-
-function openModal(id){
-  document.body.classList.add('ui-occluded');
-  const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active');
-}
-function closeModal(id){
-  const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active');
-  const anyOpen = !!document.querySelector('.modal.active');
-  if (!anyOpen) document.body.classList.remove('ui-occluded');
-}
-function openSidebar(){ document.body.classList.add('ui-occluded'); $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); }
-function closeSidebar(){
-  $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active');
-  const anyOpen = !!document.querySelector('.modal.active');
-  if (!anyOpen) document.body.classList.remove('ui-occluded');
-}
-
-/* =========================
-   Part B.5 — App renderer
-   ========================= */
-
-function safeView(route) {
-  switch ((route || 'home')) {
-    case 'home':       return viewHome();
-    case 'search':     return viewSearch();
-    case 'dashboard':  return viewDashboard();
-    case 'inventory':  return viewInventory();
-    case 'products':   return viewProducts();
-    case 'cogs':       return viewCOGS();
-    case 'tasks':      return viewTasks();
-    case 'settings':   return viewSettings();
-    case 'about':
-    case 'policy':
-    case 'license':
-    case 'setup':
-    case 'contact':
-    case 'guide':      return viewPage(route);
-    default:           return viewHome();
-  }
-}
-
-function wireRoute(route) {
-  // Topbar actions
-  document.getElementById('btnLogout')?.addEventListener('click', doLogout);
-  document.getElementById('btnHome')?.addEventListener('click', () => go('home'));
-  const installBtn = document.getElementById('btnInstall');
-  if (installBtn) installBtn.onclick = async ()=>{
-    if (!__deferredPrompt) return;
-    __deferredPrompt.prompt();
-    const { outcome } = await __deferredPrompt.userChoice;
-    if (outcome === 'accepted') notify('Installing…','ok');
-    __deferredPrompt = null;
-    installBtn.style.display = 'none';
-  };
-
-  // Sidebar open/close
-  document.getElementById('burger')?.addEventListener('click', openSidebar);
-  document.getElementById('backdrop')?.addEventListener('click', closeSidebar);
-
-  // In-content navigation buttons like: <button data-go="inventory">
-  document.querySelectorAll('[data-go]').forEach(el => {
-    el.addEventListener('click', () => {
-      const r  = el.getAttribute('data-go');
-      const id = el.getAttribute('data-id');
-      if (r) {
-        go(r);
-        if (id) setTimeout(() => { try { scrollToRow(id); } catch(_) {} }, 80);
-      }
-    });
-  });
-
-  // Global helpers
-  hookSidebarInteractions();
-  ensureGlobalModals();
-  enableMobileImagePreview();
-
-  // Route-specific wiring
-  switch ((route || 'home')) {
-    case 'home':      wireHome(); break;
-    case 'dashboard': wireDashboard(); wirePosts(); break;
-    case 'inventory': wireInventory(); break;
-    case 'products':  wireProducts(); break;
-    case 'cogs':      wireCOGS(); break;
-    case 'tasks':     wireTasks(); break;
-    case 'settings':  wireSettings(); break;
-    case 'contact':   wireContact(); break;
-  }
-}
-
-function renderApp() {
-  try {
-    if (!session) { renderLogin(); return; }
-
-    const root = document.getElementById('root');
-    if (!root) return;
-
-    const route = currentRoute || 'home';
-
-    root.innerHTML = `
-      <div class="app">
-        ${renderSidebar(route)}
-        <div>
-          ${renderTopbar()}
-          <div class="main" id="main">
-            ${safeView(route)}
-          </div>
-        </div>
-      </div>
-    `;
-
-    wireRoute(route);
-  } catch (e) {
-    console.error('[renderApp] crash:', e);
-    notify(e?.message || 'Render failed', 'danger');
-    showRescue(e);
-  }
-}
-
-/* =========================
-   Part C — Login
-   ========================= */
 
 function renderLogin() {
   const root = document.getElementById('root');
@@ -653,87 +296,42 @@ function renderLogin() {
     </div>
   `;
 
-  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); };
-  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
+  const openAuthModal  = (sel)=>{ $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('has-overlay'); };
+  const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('has-overlay'); };
 
-  // ---------- Sign in ----------
-  // ---------- Sign in (Firebase first, then local fallback) ----------
-const doSignIn = async () => {
-  const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
-  const pass  = document.getElementById('li-pass')?.value || '';
-  const btn   = document.getElementById('btnLogin');
+  const doSignIn = async () => {
+    const email = ($('#li-email')?.value || '').trim().toLowerCase();
+    const pass  = $('#li-pass')?.value || '';
+    const btn   = $('#btnLogin');
+    if (!email || !pass) { notify('Enter email & password','warn'); return; }
 
-  if (!email || !pass) { notify('Enter email & password','warn'); return; }
-
-  // Always allow demo admin (pure local)
-  if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
-    let users = load('users', []);
-    let prof = users.find(u => (u.email||'').toLowerCase() === email);
-    if (!prof) {
-      prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:DEMO_ADMIN_PASS, img:'' };
-      users.push(prof); save('users', users);
+    if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
+      let users = load('users', []);
+      let prof = users.find(u => (u.email||'').toLowerCase() === email);
+      if (!prof) { prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' }; users.push(prof); save('users', users); }
+      session = { ...prof, authMode: 'local' }; save('session', session); notify('Welcome, Admin (local mode)'); ensureSessionAndRender(null); return;
     }
-    session = { ...prof, authMode: 'local' }; save('session', session);
-    currentRoute = 'home'; save('_route','home');
-    notify('Welcome, Admin (local mode)');
-    renderApp(); 
-    return;
-  }
 
-  // Helper: attempt local login
-  const tryLocal = () => {
-    if (localLogin(email, pass)) {
-      currentRoute = 'home'; save('_route','home');
-      renderApp();
-      return true;
+    try {
+      if (!navigator.onLine) throw new Error('You appear to be offline.');
+      btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
+      await auth.signInWithEmailAndPassword(email, pass);
+      btn.disabled = false; btn.innerHTML = keep;
+    } catch (e) {
+      const map = {
+        'auth/invalid-email': 'Invalid email format.',
+        'auth/user-disabled': 'This user is disabled.',
+        'auth/user-not-found': 'No account found. Use Create account.',
+        'auth/wrong-password': 'Incorrect password.',
+        'auth/too-many-requests': 'Too many attempts. Try again later.',
+        'auth/operation-not-allowed': 'Email/password sign-in is disabled.',
+        'auth/network-request-failed': 'Network error. Check your connection.'
+      };
+      notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
+      btn.disabled = false; btn.innerHTML = 'Sign In';
     }
-    return false;
   };
 
-  // Try Firebase first
-  try {
-    btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
-
-    // If you’re offline, skip straight to local attempt
-    if (!navigator.onLine) throw { code:'auth/network-request-failed', message:'You appear to be offline.' };
-
-    const cred = await auth.signInWithEmailAndPassword(email, pass);
-    // success → ensure session and go Home
-    notify('Welcome!');
-    currentRoute = 'home'; save('_route','home');
-    await ensureSessionAndRender(cred.user);
-
-    btn.disabled = false; btn.innerHTML = keep;
-  } catch (e) {
-    // Firebase failed → try local
-    const fallbackCodes = new Set([
-      'auth/user-not-found',
-      'auth/wrong-password',
-      'auth/network-request-failed',
-      'auth/too-many-requests',
-      'auth/invalid-email',
-      'auth/operation-not-allowed',
-      'auth/invalid-api-key'
-    ]);
-    if (fallbackCodes.has(e?.code)) {
-      if (tryLocal()) return;
-    }
-    // If local didn’t work, show the Firebase error
-    const map = {
-      'auth/invalid-email': 'Invalid email format.',
-      'auth/user-disabled': 'This user is disabled.',
-      'auth/user-not-found': 'No Firebase account found. If you created a local account earlier, try again — it should log you in locally.',
-      'auth/wrong-password': 'Incorrect password.',
-      'auth/too-many-requests': 'Too many attempts. Try again later.',
-      'auth/operation-not-allowed': 'Email/password sign-in is disabled in Firebase.',
-      'auth/network-request-failed': 'Network error. Check your connection.'
-    };
-    notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
-    console.warn('[auth] signIn error:', e?.code, e?.message);
-  }
-};
-
-  // ---------- Sign up ----------
   const doSignup = async () => {
     const name  = ($('#su-name')?.value || '').trim();
     const email = ($('#su-email')?.value || '').trim().toLowerCase();
@@ -749,82 +347,48 @@ const doSignIn = async () => {
       notify('Account created — you are signed in');
       closeAuthModal();
     } catch (e) {
-      console.warn('[auth] Firebase signup failed; creating local account', e?.code, e?.message);
       localSignup({name,email,pass});
       closeAuthModal();
     }
   };
 
-  // ---------- Reset password ----------
   const doReset = async () => {
     const email = ($('#fp-email')?.value || '').trim().toLowerCase();
     if (!email) return notify('Enter your email','warn');
     try {
       if (!navigator.onLine) throw new Error('You appear to be offline.');
       await auth.sendPasswordResetEmail(email);
-      notify('Reset email sent — check your inbox','ok');
-      closeAuthModal();
+      notify('Reset email sent — check your inbox','ok'); closeAuthModal();
     } catch (e) {
-      console.warn('[auth] Firebase reset failed; doing local reset', e?.code, e?.message);
       const r = localResetPassword(email);
       if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
       else { notify('Reset failed: '+ (r.msg || e?.message || 'Unknown'), 'danger'); }
     }
   };
 
-  // ---------- Bindings ----------
-  const emailEl  = document.getElementById('li-email');
-  const passEl   = document.getElementById('li-pass');
-  const btnLogin = document.getElementById('btnLogin');
-
-  btnLogin?.addEventListener('click', doSignIn);
-  passEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
-
-  document.getElementById('link-forgot')?.addEventListener('click', (e)=>{ 
-    e.preventDefault(); 
-    openAuthModal('#m-reset'); 
-    const fp = document.getElementById('fp-email'); if (fp) fp.value = (emailEl?.value || '');
-  });
-  document.getElementById('link-register')?.addEventListener('click', (e)=>{ 
-    e.preventDefault(); 
-    openAuthModal('#m-signup'); 
-    const su = document.getElementById('su-email'); if (su) su.value = (emailEl?.value || '');
-  });
-
-  document.getElementById('cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
-  document.getElementById('cl-reset')?.addEventListener('click',  (e)=>{ e.preventDefault(); closeAuthModal(); });
-
-  document.getElementById('btnSignupDo')?.addEventListener('click', doSignup);
-  document.getElementById('btnResetDo')?.addEventListener('click',  doReset);
+  $('#btnLogin')?.addEventListener('click', doSignIn);
+  $('#li-pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSignIn(); });
+  $('#link-forgot')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuthModal('#m-reset'); $('#fp-email').value = ($('#li-email')?.value||''); });
+  $('#link-register')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuthModal('#m-signup'); $('#su-email').value = ($('#li-email')?.value||''); });
+  $('#cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuthModal(); });
+  $('#cl-reset')?.addEventListener('click',  (e)=>{ e.preventDefault(); closeAuthModal(); });
+  $('#btnSignupDo')?.addEventListener('click', doSignup);
+  $('#btnResetDo')?.addEventListener('click',  doReset);
 }
 
 async function doLogout(){
   try { cloud?.disable?.(); } catch {}
-  try { await firebase?.database?.().goOffline?.(); } catch {}
   try { await auth.signOut(); } catch {}
   if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
-
-  // Clear session + land on Home next time
   session = null;
   save('session', null);
   currentRoute = 'home';
   save('_route','home');
-
-  // Close any UI overlays (prevents stray backdrops)
-  try {
-    document.querySelectorAll('.modal.active')?.forEach(m => m.classList.remove('active'));
-    document.querySelectorAll('.modal-backdrop.active')?.forEach(b => b.classList.remove('active'));
-    document.getElementById('sidebar')?.classList.remove('open');
-    document.getElementById('backdrop')?.classList.remove('active');
-  } catch {}
-
   notify('Signed out');
   try { renderLogin(); } catch (e) { console.error(e); }
 }
 
-/* ===================== Part C.1 — Home (Hot music videos) ===================== */
-
-// ===== Music library -> weekly rotating set of 10 =====
+/* ===================== Home (Hot music videos) ===================== */
 (function(){
   const DEFAULT_LIB = [
     { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
@@ -849,23 +413,18 @@ async function doLogout(){
     for (let i=0; i<size; i++) out.push(lib[(start + i) % lib.length]);
     return out;
   };
-
-  // Expose this week’s 10
   window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
 
-  // Stable index within this weekly set
   if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
-    const weekOfYear = getISOWeek(new Date());
     const n = Math.max(1, (window.HOT_MUSIC_VIDEOS||[]).length);
-    return weekOfYear % n;
+    return getISOWeek(new Date()) % n;
   };
 
-  // YouTube blacklist helpers
   function _ytBlacklistLoad(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
   function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
-  window.ytBlacklistAdd = function(id){ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
-  window.ytIsBlacklisted= function(id){ const m=_ytBlacklistLoad(); return !!m[id]; };
-  window.ytBlacklistClear=function(){ _ytBlacklistSave({}); };
+  window.ytBlacklistAdd = (id)=>{ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
+  window.ytIsBlacklisted= (id)=>{ const m=_ytBlacklistLoad(); return !!m[id]; };
+  window.ytBlacklistClear=()=> _ytBlacklistSave({});
 })();
 
 function viewHome(){
@@ -915,7 +474,6 @@ function wireHome(){
   const hostId = 'ytPlayerHost';
   if (!wrap || !title || !openYT) return;
 
-  // Load the YouTube Iframe API once
   function loadYT(){
     return new Promise((resolve)=>{
       if (window.YT && YT.Player) return resolve();
@@ -926,7 +484,6 @@ function wireHome(){
     });
   }
 
-  // Pick next non-blacklisted candidate; if all bad, clear blacklist.
   function nextValidIndex(start){
     const list = window.HOT_MUSIC_VIDEOS || [];
     if (!list.length) return 0;
@@ -955,25 +512,18 @@ function wireHome(){
       host: 'https://www.youtube-nocookie.com',
       videoId: id,
       playerVars: { rel:0, modestbranding:1, playsinline:1, origin: location.origin },
-      events: {
-        onError: (e)=>{ try { ytBlacklistAdd(id); } catch {} notify('Video not available. Skipping…','warn'); setVideoByIndex(i + 1); }
-      }
+      events: { onError: ()=>{ try { ytBlacklistAdd(id); } catch {} notify('Video not available. Skipping…','warn'); setVideoByIndex(i + 1); } }
     };
 
-    if (!player){
-      player = new YT.Player(hostId, options);
-    } else {
-      player.loadVideoById(id);
-    }
+    if (!player) player = new YT.Player(hostId, options);
+    else player.loadVideoById(id);
   }
 
   loadYT().then(()=>{
     const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
     setVideoByIndex(startIdx);
-
     btn?.addEventListener('click', ()=>{
-      const list = window.HOT_MUSIC_VIDEOS || [];
-      if (!list.length) return;
+      const list = window.HOT_MUSIC_VIDEOS || []; if (!list.length) return;
       const curr = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
       let next = Math.floor(Math.random()*list.length);
       if (list.length > 1 && next === curr) next = (next+1) % list.length;
@@ -983,7 +533,40 @@ function wireHome(){
   }).catch(()=> notify('YouTube player couldn’t load','warn'));
 }
 
-/* ===================== Part C.2 — Search ===================== */
+/* ===================== Search ===================== */
+window.buildSearchIndex = function(){
+  const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
+  const pages = [
+    { id:'policy',  label:'Policy',      section:'Pages', route:'policy'  },
+    { id:'license', label:'License',     section:'Pages', route:'license' },
+    { id:'setup',   label:'Setup Guide', section:'Pages', route:'setup'   },
+    { id:'contact', label:'Contact',     section:'Pages', route:'contact' },
+    { id:'guide',   label:'User Guide',  section:'Pages', route:'guide'   },
+    { id:'about',   label:'About',       section:'Pages', route:'about'   },
+  ];
+  const ix=[]; posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
+  inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`}));
+  prods.forEach(p=>ix.push({id:p.id,label:p.name,section:'Products',route:'products',text:`${p.name} ${p.barcode} ${p.type} ${p.ingredients}`}));
+  cogs.forEach(r=>ix.push({id:r.id,label:r.date,section:'COGS',route:'cogs',text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.delivery} ${r.other}`}));
+  users.forEach(u=>ix.push({id:u.email,label:u.name,section:'Users',route:'settings',text:`${u.name} ${u.email} ${u.role}`}));
+  pages.forEach(p=>ix.push(p));
+  return ix;
+};
+window.searchAll = function(index,q){
+  const norm = s => (s||'').toLowerCase();
+  const terms = norm(q).split(/\s+/).filter(Boolean);
+  return index
+    .map(item=>{
+      const hay = norm(item.label)+' '+norm(item.text||'');
+      const hit = terms.every(t => hay.includes(t));
+      const score = hit ? (terms.length*2 + (norm(item.label).includes(norm(q))?3:0)) : 0;
+      return { item, score };
+    })
+    .filter(x=>x.score>0)
+    .sort((a,b)=>b.score-a.score)
+    .map(x=>x.item);
+};
+window.scrollToRow = function(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
 
 function viewSearch(){
   const q = (window.searchQuery || '').trim();
@@ -1005,8 +588,7 @@ function viewSearch(){
     </div></div>`;
 }
 
-/* ===================== Part C.3 — Dashboard + Posts ===================== */
-
+/* ===================== Dashboard + Posts ===================== */
 function viewDashboard(){
   const posts = load('posts', []);
   const inv   = load('inventory', []);
@@ -1083,54 +665,71 @@ function viewDashboard(){
     </div>`;
 }
 
-function wireDashboard(){ const btn = $('#addPost'); if (btn) btn.onclick = ()=> openModal('m-post'); }
+function wireDashboard(){
+  $('#addPost')?.addEventListener('click', ()=> {
+    if (!canAdd()) return notify('No permission','warn');
+    openModal('m-post');
+    $('#post-id').value=''; $('#post-title').value=''; $('#post-body').value=''; $('#post-img').value='';
+  });
+}
 function wirePosts(){
   const sec = document.querySelector('[data-section="posts"]'); if (!sec) return;
 
   const saveBtn = $('#save-post');
-  if (saveBtn) saveBtn.onclick = ()=>{
+  if (saveBtn) saveBtn.onclick = ()=>{   // overwrite any previous handler (prevents dup)
+    if (saveBtn.dataset.busy === '1') return;
     if (!canAdd()) return notify('No permission','warn');
-    saveBtn.disabled = true;
+    saveBtn.dataset.busy = '1';
 
     const posts = load('posts', []);
-    const id = ($('#post-id')?.value || '').trim() || ('post_'+Date.now());
+    const idFromInput = $('#post-id').value.trim();
+    const isEdit = !!idFromInput;
+    const id = isEdit ? idFromInput : ('post_'+Date.now());
+
     const obj = {
       id,
       title: ($('#post-title')?.value||'').trim(),
-      body:  ($('#post-body')?.value||'').trim(),
-      img:   ($('#post-img')?.value||'').trim(),
-      createdAt: Date.now()
+      body: ($('#post-body')?.value||'').trim(),
+      img: ($('#post-img')?.value||'').trim(),
+      createdAt: isEdit ? (posts.find(x=>x.id===id)?.createdAt || Date.now()) : Date.now()
     };
-    if (!obj.title){ saveBtn.disabled = false; return notify('Title required','warn'); }
+    if (!obj.title) { notify('Title required','warn'); saveBtn.dataset.busy=''; return; }
 
     const i = posts.findIndex(x=>x.id===id);
-    if (i>=0) { if (!canEdit()) { saveBtn.disabled=false; return notify('No permission','warn'); } posts[i]=obj; }
+    if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } posts[i]=obj; }
     else posts.unshift(obj);
 
     save('posts', posts);
-    closeModal('m-post'); notify('Saved');
+    closeModal('m-post'); saveBtn.dataset.busy='';
+    notify('Saved');
     renderApp();
   };
 
   sec.onclick = (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
+
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const p = load('posts', []).find(x=>x.id===id); if (!p) return;
-      openModal('m-post');
-      $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||'';
+      openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||'';
     } else {
       if (!canDelete()) return notify('No permission','warn');
-      save('posts', load('posts', []).filter(x=>x.id!==id));
-      notify('Deleted'); renderApp();
+      save('posts', load('posts', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
   };
 }
 
-/* ===================== Part D — Inventory / Products / COGS / Tasks ===================== */
-
-// CSV export
+/* ===================== Inventory ===================== */
+function attachImageUpload(fileInputSel, textInputSel){
+  const f = $(fileInputSel), t = $(textInputSel); if (!f || !t) return;
+  f.onchange = ()=>{
+    const file = f.files && f.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{ t.value = reader.result; };
+    reader.readAsDataURL(file);
+  };
+}
 function downloadCSV(filename, rows, headers) {
   try {
     const csvRows = [];
@@ -1154,29 +753,6 @@ function downloadCSV(filename, rows, headers) {
   } catch (e) { notify('Export failed', 'danger'); }
 }
 
-// Image upload helper (downscale)
-function attachImageUpload(fileInputSel, textInputSel){
-  const f = $(fileInputSel), t = $(textInputSel); if (!f || !t) return;
-  f.onchange = ()=>{
-    const file = f.files && f.files[0]; if (!file) return;
-    const img = new Image();
-    const reader = new FileReader();
-    reader.onload = ()=>{
-      img.onload = ()=>{
-        const max = 512;
-        const ratio = Math.min(1, max / Math.max(img.width, img.height));
-        const w = Math.round(img.width * ratio), h = Math.round(img.height * ratio);
-        const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
-        try { t.value = canvas.toDataURL('image/jpeg', 0.85); } catch { t.value = reader.result; }
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  };
-}
-
-// Inventory
 function viewInventory(){
   const items = load('inventory', []);
   return `
@@ -1221,34 +797,28 @@ function viewInventory(){
 function wireInventory(){
   const sec = document.querySelector('[data-section="inventory"]'); if (!sec) return;
 
-  const exportBtn = $('#export-inventory');
-  if (exportBtn) exportBtn.onclick = ()=>{
+  $('#export-inventory')?.addEventListener('click', ()=>{
     const items = load('inventory', []);
-    downloadCSV('inventory.csv', items, ['id','name','code','type','price','stock','threshold']); // no img col
-  };
+    downloadCSV('inventory.csv', items, ['id','name','code','type','price','stock','threshold']);
+  });
 
-  const addBtn = $('#addInv');
-  if (addBtn) addBtn.onclick = ()=>{
+  $('#addInv')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-inv');
-    $('#inv-id').value='';
-    $('#inv-name').value='';
-    $('#inv-code').value='';
+    $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value='';
     $('#inv-type').value='Other';
-    $('#inv-price').value='';
-    $('#inv-stock').value='';
-    $('#inv-threshold').value='';
+    $('#inv-price').value=''; $('#inv-stock').value=''; $('#inv-threshold').value='';
     $('#inv-img').value='';
     attachImageUpload('#inv-imgfile', '#inv-img');
-  };
+  });
 
   const saveBtn = $('#save-inv');
   if (saveBtn) saveBtn.onclick = ()=>{
+    if (saveBtn.dataset.busy==='1') return;
     if (!canAdd()) return notify('No permission','warn');
-    saveBtn.disabled = true;
-
+    saveBtn.dataset.busy='1';
     const items = load('inventory', []);
-    const id = ($('#inv-id')?.value || '').trim() || ('inv_'+Date.now());
+    const id = $('#inv-id').value || ('inv_'+Date.now());
     const obj = {
       id,
       name: ($('#inv-name')?.value||'').trim(),
@@ -1259,18 +829,16 @@ function wireInventory(){
       threshold: parseInt($('#inv-threshold')?.value || '0') || 0,
       img: ($('#inv-img')?.value||'').trim(),
     };
-    if (!obj.name){ saveBtn.disabled=false; return notify('Name required','warn'); }
-
+    if (!obj.name) { notify('Name required','warn'); saveBtn.dataset.busy=''; return; }
     const i = items.findIndex(x=>x.id===id);
-    if (i>=0) { if (!canEdit()) { saveBtn.disabled=false; return notify('No permission','warn'); } items[i]=obj; }
+    if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } items[i]=obj; }
     else items.push(obj);
-
     save('inventory', items);
-    closeModal('m-inv'); notify('Saved');
-    renderApp();
+    closeModal('m-inv'); saveBtn.dataset.busy='';
+    notify('Saved'); renderApp();
   };
 
-  sec.onclick = (e)=>{
+  sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const items = load('inventory', []);
     const get = (id)=> items.find(x=>x.id===id);
@@ -1281,7 +849,7 @@ function wireInventory(){
       const it = get(id); if (!it) return;
       openModal('m-inv');
       $('#inv-id').value=id; $('#inv-name').value=it.name; $('#inv-code').value=it.code; $('#inv-type').value=it.type || 'Other';
-      $('#inv-price').value=String(it.price||''); $('#inv-stock').value=String(it.stock||''); $('#inv-threshold').value=String(it.threshold||''); $('#inv-img').value=it.img||'';
+      $('#inv-price').value=it.price; $('#inv-stock').value=it.stock; $('#inv-threshold').value=it.threshold; $('#inv-img').value=it.img || '';
       attachImageUpload('#inv-imgfile', '#inv-img');
       return;
     }
@@ -1302,10 +870,10 @@ function wireInventory(){
     if (btn.hasAttribute('data-dec-th')) it.threshold = Math.max(0, it.threshold-1);
 
     save('inventory', items); renderApp();
-  };
+  });
 }
 
-// Products
+/* ===================== Products ===================== */
 function viewProducts(){
   const items = load('products', []);
   return `
@@ -1342,28 +910,27 @@ function viewProducts(){
 function wireProducts(){
   const sec = document.querySelector('[data-section="products"]'); if (!sec) return;
 
-  const exportBtn = $('#export-products');
-  if (exportBtn) exportBtn.onclick = ()=>{
+  $('#export-products')?.addEventListener('click', ()=>{
     const items = load('products', []);
-    downloadCSV('products.csv', items, ['id','name','barcode','price','type','ingredients','instructions']); // no img column
-  };
+    downloadCSV('products.csv', items, ['id','name','barcode','price','type','ingredients','instructions']);
+  });
 
-  const addBtn = $('#addProd');
-  if (addBtn) addBtn.onclick = ()=>{
+  $('#addProd')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-prod');
     $('#prod-id').value=''; $('#prod-name').value=''; $('#prod-barcode').value='';
-    $('#prod-price').value=''; $('#prod-type').value=''; $('#prod-ingredients').value=''; $('#prod-instructions').value=''; $('#prod-img').value='';
+    $('#prod-price').value=''; $('#prod-type').value='';
+    $('#prod-ingredients').value=''; $('#prod-instructions').value=''; $('#prod-img').value='';
     attachImageUpload('#prod-imgfile', '#prod-img');
-  };
+  });
 
   const saveBtn = $('#save-prod');
   if (saveBtn) saveBtn.onclick = ()=>{
+    if (saveBtn.dataset.busy==='1') return;
     if (!canAdd()) return notify('No permission','warn');
-    saveBtn.disabled = true;
-
+    saveBtn.dataset.busy='1';
     const items = load('products', []);
-    const id = ($('#prod-id')?.value || '').trim() || ('p_'+Date.now());
+    const id = $('#prod-id').value || ('p_'+Date.now());
     const obj = {
       id,
       name: ($('#prod-name')?.value||'').trim(),
@@ -1374,18 +941,16 @@ function wireProducts(){
       instructions: ($('#prod-instructions')?.value||'').trim(),
       img: ($('#prod-img')?.value||'').trim()
     };
-    if (!obj.name){ saveBtn.disabled=false; return notify('Name required','warn'); }
-
+    if (!obj.name) { notify('Name required','warn'); saveBtn.dataset.busy=''; return; }
     const i = items.findIndex(x=>x.id===id);
-    if (i>=0) { if (!canEdit()) { saveBtn.disabled=false; return notify('No permission','warn'); } items[i]=obj; }
+    if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } items[i]=obj; }
     else items.push(obj);
-
     save('products', items);
-    closeModal('m-prod'); notify('Saved');
-    renderApp();
+    closeModal('m-prod'); saveBtn.dataset.busy='';
+    notify('Saved'); renderApp();
   };
 
-  sec.onclick = (e)=>{
+  sec.addEventListener('click', (e)=>{
     const prodCard = e.target.closest('.prod-thumb');
     if (prodCard){
       const id = prodCard.getAttribute('data-card');
@@ -1411,17 +976,17 @@ function wireProducts(){
       const it = items.find(x=>x.id===id); if (!it) return;
       openModal('m-prod');
       $('#prod-id').value=id; $('#prod-name').value=it.name; $('#prod-barcode').value=it.barcode||'';
-      $('#prod-price').value=String(it.price||''); $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||'';
+      $('#prod-price').value=it.price; $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||'';
       $('#prod-instructions').value=it.instructions||''; $('#prod-img').value=it.img||'';
       attachImageUpload('#prod-imgfile', '#prod-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
       save('products', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
-  };
+  });
 }
 
-// COGS
+/* ===================== COGS ===================== */
 function viewCOGS(){
   const rows = load('cogs', []);
   const totals = rows.reduce((a,r)=>({grossIncome:a.grossIncome+(+r.grossIncome||0),produceCost:a.produceCost+(+r.produceCost||0),itemCost:a.itemCost+(+r.itemCost||0),freight:a.freight+(+r.freight||0),delivery:a.delivery+(+r.delivery||0),other:a.other+(+r.other||0)}),{grossIncome:0,produceCost:0,itemCost:0,freight:0,delivery:0,other:0});
@@ -1465,53 +1030,42 @@ function viewCOGS(){
 function wireCOGS(){
   const sec = document.querySelector('[data-section="cogs"]'); if (!sec) return;
 
-  const exportBtn = $('#export-cogs');
-  if (exportBtn) exportBtn.onclick = ()=>{
+  $('#export-cogs')?.addEventListener('click', ()=>{
     const rows = load('cogs', []);
     downloadCSV('cogs.csv', rows, ['id','date','grossIncome','produceCost','itemCost','freight','delivery','other']);
-  };
+  });
 
-  const addBtn = $('#addCOGS');
-  if (addBtn) addBtn.onclick = ()=>{
+  $('#addCOGS')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-cogs');
-    $('#cogs-id').value='';
-    $('#cogs-date').value=new Date().toISOString().slice(0,10);
-    $('#cogs-grossIncome').value='';
-    $('#cogs-produceCost').value='';
-    $('#cogs-itemCost').value='';
-    $('#cogs-freight').value='';
-    $('#cogs-delivery').value='';
-    $('#cogs-other').value='';
-  };
+    $('#cogs-id').value=''; $('#cogs-date').value=new Date().toISOString().slice(0,10);
+    $('#cogs-grossIncome').value=''; $('#cogs-produceCost').value=''; $('#cogs-itemCost').value='';
+    $('#cogs-freight').value=''; $('#cogs-delivery').value=''; $('#cogs-other').value='';
+  });
 
   const saveBtn = $('#save-cogs');
   if (saveBtn) saveBtn.onclick = ()=>{
+    if (saveBtn.dataset.busy==='1') return;
     if (!canAdd()) return notify('No permission','warn');
-    saveBtn.disabled = true;
+    saveBtn.dataset.busy='1';
 
     const rows = load('cogs', []);
-    const id = ($('#cogs-id')?.value || '').trim() || ('c_'+Date.now());
-    const row = {
-      id,
-      date: ($('#cogs-date')?.value || new Date().toISOString().slice(0,10)),
-      grossIncome:+($('#cogs-grossIncome')?.value||0),
-      produceCost:+($('#cogs-produceCost')?.value||0),
-      itemCost:+($('#cogs-itemCost')?.value||0),
-      freight:+($('#cogs-freight')?.value||0),
-      delivery:+($('#cogs-delivery')?.value||0),
-      other:+($('#cogs-other')?.value||0)
-    };
+    const isEdit = !!($('#cogs-id').value);
+    const id = $('#cogs-id').value || ('c_'+Date.now());
+    const row = { id, date: $('#cogs-date').value || new Date().toISOString().slice(0,10),
+      grossIncome:+($('#cogs-grossIncome').value||0), produceCost:+($('#cogs-produceCost').value||0),
+      itemCost:+($('#cogs-itemCost').value||0), freight:+($('#cogs-freight').value||0),
+      delivery:+($('#cogs-delivery').value||0), other:+($('#cogs-other').value||0) };
+
     const i = rows.findIndex(x=>x.id===id);
-    if (i>=0) { if (!canEdit()) { saveBtn.disabled=false; return notify('No permission','warn'); } rows[i]=row; }
+    if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } rows[i]=row; }
     else rows.push(row);
 
-    save('cogs', rows);
-    closeModal('m-cogs'); notify('Saved');
-    renderApp();
+    save('cogs', rows); closeModal('m-cogs'); saveBtn.dataset.busy='';
+    notify(isEdit?'Updated':'Saved'); renderApp();
   };
 
-  sec.onclick = (e)=>{
+  sec.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
 
@@ -1519,17 +1073,17 @@ function wireCOGS(){
       if (!canEdit()) return notify('No permission','warn');
       const r = load('cogs', []).find(x=>x.id===id); if (!r) return;
       openModal('m-cogs');
-      $('#cogs-id').value=id; $('#cogs-date').value=r.date;
-      $('#cogs-grossIncome').value=String(r.grossIncome||''); $('#cogs-produceCost').value=String(r.produceCost||''); $('#cogs-itemCost').value=String(r.itemCost||'');
-      $('#cogs-freight').value=String(r.freight||''); $('#cogs-delivery').value=String(r.delivery||''); $('#cogs-other').value=String(r.other||'');
+      $('#cogs-id').value=id; $('#cogs-date').value=r.date; $('#cogs-grossIncome').value=r.grossIncome;
+      $('#cogs-produceCost').value=r.produceCost; $('#cogs-itemCost').value=r.itemCost; $('#cogs-freight').value=r.freight;
+      $('#cogs-delivery').value=r.delivery; $('#cogs-other').value=r.other;
     } else {
       if (!canDelete()) return notify('No permission','warn');
       save('cogs', load('cogs', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
-  };
+  });
 }
 
-// Tasks (DnD + mobile tap-to-move)
+/* ===================== Tasks (DnD) ===================== */
 function viewTasks(){
   const items = load('tasks', []);
   const lane = (key, label, color)=>`
@@ -1563,40 +1117,53 @@ function viewTasks(){
 function wireTasks(){
   const root = document.querySelector('[data-section="tasks"]'); if (!root) return;
 
-  const addBtn = $('#addTask');
-  if (addBtn) addBtn.onclick = ()=>{
+  $('#addTask')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-task'); $('#task-id').value=''; $('#task-title').value=''; $('#task-status').value='todo';
-  };
+  });
 
   const saveBtn = $('#save-task');
   if (saveBtn) saveBtn.onclick = ()=>{
+    if (saveBtn.dataset.busy==='1') return;
     if (!canAdd()) return notify('No permission','warn');
-    saveBtn.disabled = true;
-
+    saveBtn.dataset.busy='1';
     const items = load('tasks', []);
-    const id = ($('#task-id')?.value || '').trim() || ('t_'+Date.now());
+    const id = $('#task-id').value || ('t_'+Date.now());
     const obj = { id, title: ($('#task-title')?.value||'').trim(), status: $('#task-status')?.value || 'todo' };
-    if (!obj.title){ saveBtn.disabled=false; return notify('Title required','warn'); }
+    if (!obj.title) { notify('Title required','warn'); saveBtn.dataset.busy=''; return; }
     const i = items.findIndex(x=>x.id===id);
-    if (i>=0) { if (!canEdit()) { saveBtn.disabled=false; return notify('No permission','warn'); } items[i]=obj; }
+    if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } items[i]=obj; }
     else items.push(obj);
-    save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
+    save('tasks',items); closeModal('m-task'); saveBtn.dataset.busy='';
+    notify('Saved'); renderApp();
   };
+
+  root.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button'); if (!btn) return;
+    const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
+    const items = load('tasks', []);
+    if (btn.hasAttribute('data-edit')) {
+      if (!canEdit()) return notify('No permission','warn');
+      const t = items.find(x=>x.id===id); if (!t) return;
+      openModal('m-task'); $('#task-id').value=t.id; $('#task-title').value=t.title; $('#task-status').value=t.status;
+    } else {
+      if (!canDelete()) return notify('No permission','warn');
+      save('tasks', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
+    }
+  });
 
   setupDnD();
 
-  // Mobile/touch fallback: tap a card cycles lane
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   if (isTouch) {
     $$('.task-card').forEach(card=>{
-      card.onclick = (e)=>{
+      card.addEventListener('click', (e)=>{
         if (e.target.closest('button')) return;
         if (!canAdd()) return notify('No permission','warn');
         const id = card.getAttribute('data-task'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
         const next = t.status==='todo' ? 'inprogress' : (t.status==='inprogress' ? 'done' : 'todo');
         t.status = next; save('tasks', items); renderApp();
-      };
+      });
     });
   }
 }
@@ -1604,10 +1171,8 @@ function wireTasks(){
 function setupDnD(){
   const lanes = ['todo','inprogress','done'];
   document.querySelectorAll('[data-task]').forEach(card=>{
-    card.ondragstart = (e)=> {
-      e.dataTransfer.setData('text/plain', card.getAttribute('data-task'));
-      e.dataTransfer.dropEffect = 'move';
-    };
+    card.ondragstart = (e)=> { e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); e.dataTransfer.dropEffect = 'move'; };
+    card.style.cursor = 'grab';
   });
   lanes.forEach(k=>{
     const laneGrid  = document.getElementById('lane-'+k);
@@ -1623,85 +1188,206 @@ function setupDnD(){
   });
 }
 
-/* ===================== Part E — Settings / Contact / Modals ===================== */
+/* ===================== Settings / Users + Contact & Pages ===================== */
+function renderSidebar(active='home'){
+  const links = [
+    { route:'home',      icon:'ri-home-5-line',              label:'Home' },
+    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
+    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
+    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
+    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
+    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
+    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
+  ];
+  const pages = [
+    { route:'about',   icon:'ri-information-line',         label:'About' },
+    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
+    { route:'license', icon:'ri-copyright-line',          label:'License' },
+    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
+    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
+    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
+  ];
+  return `
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="logo">📦</div>
+        <div class="title">Inventory</div>
+      </div>
 
-function enableMobileImagePreview(){
-  const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
-  $$('.inv-preview, .prod-thumb').forEach(el=>{
-    el.style.cursor = 'pointer';
-    el.addEventListener('click', ()=>{
-      const src = el.getAttribute('data-src') || el.getAttribute('src') || 'icons/icon-512.png';
-      const img = $('#preview-img'); if (img) img.src = src; openModal('m-img');
-    });
+      <div class="search-wrap">
+        <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+
+      <h6>Menu</h6>
+      <nav class="nav">
+        ${links.map(l => `
+          <div class="item ${active===l.route?'active':''}" data-route="${l.route}">
+            <i class="${l.icon}"></i> <span>${l.label}</span>
+          </div>`).join('')}
+      </nav>
+
+      <h6>Links</h6>
+      <div class="links">
+        ${pages.map(p => `
+          <div class="item ${active===p.route?'active':''}" data-route="${p.route}">
+            <i class="${p.icon}"></i> <span>${p.label}</span>
+          </div>`).join('')}
+      </div>
+
+      <h6>Social</h6>
+      <div class="socials-row">
+        <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+        <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+        <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+        <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
+        <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
+      </div>
+    </aside>
+  `;
+}
+
+function renderTopbar(){
+  const socialsCompact = `
+    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
+      <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+      <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+      <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+    </div>`;
+  return `
+    <div class="topbar">
+      <div class="left">
+        <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
+        <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
+      </div>
+      <div class="right">
+        ${socialsCompact}
+        <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
+        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
+      </div>
+    </div>
+    <div class="backdrop" id="backdrop"></div>
+  `;
+}
+
+document.addEventListener('click', (e)=>{
+  const item = e.target.closest('.sidebar .item[data-route]');
+  if (!item) return;
+  const r = item.getAttribute('data-route');
+  if (r) { go(r); closeSidebar(); }
+});
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-close]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-close');
+  if (id) closeModal(id);
+});
+
+function hookSidebarInteractions(){
+  const input   = $('#globalSearch');
+  const results = $('#searchResults');
+  if (!input || !results) return;
+
+  let searchTimer;
+  const openResultsPage = (q)=>{
+    window.searchQuery = q; save('_searchQ', q);
+    if (window.currentRoute !== 'search') go('search'); else renderApp();
+  };
+
+  input.addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter') {
+      const q = input.value.trim();
+      if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
+    }
+  });
+
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = input.value.trim().toLowerCase();
+    if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
+    searchTimer = setTimeout(() => {
+      const indexData = buildSearchIndex();
+      const out = searchAll(indexData, q).slice(0, 12);
+      if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
+      results.innerHTML = out.map(r => `
+        <div class="result" data-route="${r.route}" data-id="${r.id||''}">
+          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
+        </div>`).join('');
+      results.classList.add('active');
+
+      results.querySelectorAll('.result').forEach(row => {
+        row.onclick = () => {
+          const r = row.getAttribute('data-route');
+          const id = row.getAttribute('data-id') || '';
+          const label = row.textContent.trim();
+          openResultsPage(label);
+          results.classList.remove('active'); input.value = ''; closeSidebar();
+          if (id) setTimeout(()=> scrollToRow(id), 80);
+        };
+      });
+    }, 120);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!results.contains(e.target) && e.target !== input) {
+      results.classList.remove('active');
+    }
   });
 }
 
-// Static pages + Contact
+function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('has-overlay'); }
+function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('has-overlay'); }
+
+/* ---------- Contact page (EmailJS only for admin) ---------- */
+const EMAILJS_PUBLIC_KEY  = '';      // <-- put your EmailJS public key here (admin only)
+const EMAILJS_SERVICE_ID  = '';      // <-- put your EmailJS service ID here
+const EMAILJS_TEMPLATE_ID = '';      // <-- put your EmailJS template ID here
+
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
-  about:  `<h3>About</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="about.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent"></iframe></div>`,
-  policy: `<h3>Policy</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent"></iframe></div>`,
-  license:`<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent"></iframe></div>`,
-  setup:  `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;"><iframe src="setup-guide.html" style="width:100%; height: calc(100vh - 220px); border:none;background:transparent"></iframe></div>`,
-  guide:  `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent"></iframe></div>`,
-  contact:`<h3>Contact</h3>
-    <p style="color:var(--muted)">Send us a message. It will go to <strong>${CONTACT_EMAIL_TO}</strong>.</p>
-    <div class="grid">
-      <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
-      <input id="ct-subj"  class="input" placeholder="Subject"/>
-      <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-        <button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button>
-        <a id="ct-mailto" class="btn secondary" href="#" target="_blank" rel="noopener"><i class="ri-mail-line"></i> Contact via Email app</a>
-      </div>
-      <div id="ct-note" style="color:var(--muted);font-size:12px"></div>
-    </div>`
+  policy:  `<iframe src="policy.html" style="width:100%;height:calc(100vh - 140px);border:none;border-radius:12px;background:transparent"></iframe>`,
+  license: `<iframe src="license.html" style="width:100%;height:calc(100vh - 140px);border:none;border-radius:12px;background:transparent"></iframe>`,
+  setup:   `<iframe src="setup-guide.html" style="width:100%;height:calc(100vh - 140px);border:none;border-radius:12px;background:transparent"></iframe>`,
+  guide:   `<iframe src="guide.html" style="width:100%;height:calc(100vh - 140px);border:none;border-radius:12px;background:transparent"></iframe>`,
+  about:   `<iframe src="about.html" style="width:100%;height:calc(100vh - 140px);border:none;border-radius:12px;background:transparent"></iframe>`,
+  contact: `<div class="grid">
+    <h3 style="margin-top:0">Contact</h3>
+    <p style="color:var(--muted)">We’d love to hear from you.</p>
+    ${
+      (role()==='admin' && EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID)
+      ? `<div class="grid">
+          <input id="ct-email" class="input" type="email" placeholder="Your email (reply-to)" value="${session?.email||''}"/>
+          <input id="ct-subj"  class="input" placeholder="Subject"/>
+          <textarea id="ct-msg" class="input" rows="6" placeholder="Message"></textarea>
+          <div style="display:flex;justify-content:flex-end"><button id="ct-send" class="btn"><i class="ri-send-plane-line"></i> Send</button></div>
+          <div id="ct-note" style="color:var(--muted);font-size:12px"></div>
+        </div>`
+      : `<a class="btn" href="mailto:minmaung0307@gmail.com?subject=Inventory%20Contact"><i class="ri-mail-send-line"></i> Contact via Email</a>
+         <div style="color:var(--muted);font-size:12px">Admin can enable in-app email sending via EmailJS in <code>app.js</code>.</div>`
+    }
+  </div>`
 });
+
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
 
 function wireContact(){
   const btn = $('#ct-send'); if (!btn) return;
-  const mailto = $('#ct-mailto');
-  const updateMailto = ()=>{
-    const fromEmail = ($('#ct-email')?.value || '').trim();
-    const subject   = ($('#ct-subj')?.value  || '').trim();
-    const message   = ($('#ct-msg')?.value   || '').trim();
-    const mail = `mailto:${encodeURIComponent(CONTACT_EMAIL_TO)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${fromEmail}\n\n${message}`)}`;
-    if (mailto) mailto.href = mail;
-  };
-  ['input','change'].forEach(ev=>{
-    $('#ct-email')?.addEventListener(ev, updateMailto);
-    $('#ct-subj')?.addEventListener(ev, updateMailto);
-    $('#ct-msg')?.addEventListener(ev, updateMailto);
-  });
-  updateMailto();
-
   btn.onclick = async ()=>{
     const fromEmail = ($('#ct-email')?.value || '').trim();
     const subject   = ($('#ct-subj')?.value  || '').trim();
     const message   = ($('#ct-msg')?.value   || '').trim();
     const note      = $('#ct-note');
+    const TO = 'minmaung0307@gmail.com';
     if (!fromEmail || !subject || !message) { notify('Please fill your email, subject and message','warn'); return; }
-
-    const hasEmailJS = !!(window.emailjs && window.emailjs.send && EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID);
-
     try{
-      if (hasEmailJS) {
-        if (!window.__emailjs_inited){ window.emailjs.init(EMAILJS_PUBLIC_KEY); window.__emailjs_inited = true; }
-        await window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-          from_name: fromEmail,
-          reply_to: fromEmail,
-          subject,
-          message,
-          to_email: CONTACT_EMAIL_TO
-        });
-        notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
-        $('#ct-msg').value=''; $('#ct-subj').value='';
-      } else {
-        // fallback already ready through #ct-mailto
-        const a = document.getElementById('ct-mailto'); if (a) a.click();
-        if (note) note.textContent = 'Opening your email app…';
-      }
+      if (!window.emailjs) throw new Error('EmailJS SDK not loaded');
+      if (!window.__emailjs_inited){ window.emailjs.init(EMAILJS_PUBLIC_KEY); window.__emailjs_inited = true; }
+      await window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+        from_name: fromEmail, reply_to: fromEmail, subject, message, to_email: TO
+      });
+      notify('Message sent!', 'ok'); if (note) note.textContent = 'Sent via EmailJS.';
+      $('#ct-msg').value=''; $('#ct-subj').value='';
     }catch(e){
       notify('Failed to send message','danger');
       if (note) note.textContent = e?.message || 'Unknown error';
@@ -1709,7 +1395,7 @@ function wireContact(){
   };
 }
 
-// Settings (Cloud/Theme + Users)
+/* ---------- Settings / Users ---------- */
 function viewSettings(){
   const users = load('users', []);
   const theme = getTheme();
@@ -1727,7 +1413,7 @@ function viewSettings(){
             <button class="btn" id="cloud-sync-now"><i class="ri-cloud-line"></i> Sync Now</button>
           </div>
         </div>
-        <p class="muted" style="font-size:12px;margin-top:8px">Note: Cloud Sync requires Firebase login. Data is isolated by user (uid).</p>
+        <p style="color:var(--muted);font-size:12px;margin-top:8px">Note: Cloud Sync requires Firebase login.</p>
       </div></div>
 
       <div class="card"><div class="card-body">
@@ -1756,10 +1442,7 @@ function viewSettings(){
           <tbody>
             ${users.map(u=>`
               <tr id="${u.email}">
-                <td class="user-cell">
-                  <img class="avatar" src="${u.img || 'icons/icon-192.png'}" alt="">
-                  <span>${u.name}</span>
-                </td>
+                <td>${u.img ? `<img class="avatar" src="${u.img}" alt=""/>` : `<span class="avatar" style="display:inline-grid;place-items:center;background:var(--panel-2)">👤</span>`} ${u.name}</td>
                 <td>${u.email}</td><td>${u.role}</td>
                 <td>
                   ${canEdit()? `<button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>`:''}
@@ -1781,14 +1464,12 @@ function allowedRoleOptions(){
 }
 
 function wireSettings(){
-  // Theme instant apply
   const mode = $('#theme-mode'), size = $('#theme-size');
   const applyThemeNow = ()=>{ save('_theme2', { mode: mode.value, size: size.value }); applyTheme(); renderApp(); };
   mode?.addEventListener('change', applyThemeNow); size?.addEventListener('change', applyThemeNow);
 
-  // Cloud controls
   const toggle = $('#cloud-toggle'), syncNow = $('#cloud-sync-now');
-  if (toggle) toggle.onchange = async (e)=>{
+  toggle?.addEventListener('change', async (e)=>{
     const val = e.target.value;
     try {
       if (val === 'on'){
@@ -1796,46 +1477,38 @@ function wireSettings(){
         await firebase.database().goOnline(); await cloud.enable(); notify('Cloud Sync ON');
       } else { cloud.disable(); await firebase.database().goOffline(); notify('Cloud Sync OFF'); }
     } catch(err){ notify(err?.message || 'Could not change sync','danger'); toggle.value = cloud.isOn() ? 'on' : 'off'; }
-  };
-  if (syncNow) syncNow.onclick = async ()=>{
+  });
+  syncNow?.addEventListener('click', async ()=>{
     try{
       if (!auth.currentUser){ notify('Sign in with Firebase to use Cloud Sync.','warn'); return; }
       if (!cloud.isOn()){ notify('Turn Cloud Sync ON first in Settings.','warn'); return; }
       if (!navigator.onLine){ notify('You appear to be offline.','warn'); return; }
       await firebase.database().goOnline(); await cloud.pushAll(); notify('Synced');
     }catch(e){ notify((e && e.message) || 'Sync failed','danger'); }
-  };
+  });
 
-  // Users wiring
   wireUsers();
 }
 
 function wireUsers(){
-  const addBtn = $('#addUser');
-  if (addBtn) addBtn.onclick = ()=>{
+  const addBtn = $('#addUser'); const table = document.querySelector('[data-section="users"]');
+
+  addBtn?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-user');
     $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-img').value='';
-    const sel = $('#user-role');
-    const opts = allowedRoleOptions();
-    sel.innerHTML = opts.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join('');
-    sel.value = opts[0];
+    const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions()[0];
     attachImageUpload('#user-imgfile', '#user-img');
-  };
+  });
 
   const saveBtn = $('#save-user');
   if (saveBtn) saveBtn.onclick = ()=>{
     if (!canAdd()) return notify('No permission','warn');
-    saveBtn.disabled = true;
-
-    const email = ($('#user-email')?.value || '').trim().toLowerCase();
-    if (!email){ saveBtn.disabled=false; return notify('Email required','warn'); }
-
-    const allowed = allowedRoleOptions();
-    const chosenRole = ($('#user-role')?.value || 'user');
-    if (!allowed.includes(chosenRole)) { saveBtn.disabled=false; return notify('Role not allowed','warn'); }
-
     const users = load('users', []);
+    const email = ($('#user-email')?.value || '').trim().toLowerCase();
+    if (!email) return notify('Email required','warn');
+    const allowed = allowedRoleOptions(); const chosenRole = ($('#user-role')?.value || 'user'); if (!allowed.includes(chosenRole)) return notify('Role not allowed','warn');
+
     const obj = {
       name: ($('#user-name')?.value || email.split('@')[0]).trim(),
       email,
@@ -1844,36 +1517,28 @@ function wireUsers(){
       img: ($('#user-img')?.value || '').trim(),
       contact:'', password:''
     };
-    const i = users.findIndex(x=> (x.email||'').toLowerCase() === email);
-    if (i>=0) { if (!canEdit()) { saveBtn.disabled=false; return notify('No permission','warn'); } users[i]=obj; }
-    else users.push(obj);
-
-    save('users', users);
-    closeModal('m-user'); notify('Saved'); renderApp();
+    const i = users.findIndex(x=>x.email.toLowerCase()===email);
+    if (i>=0) { if (!canEdit()) return notify('No permission','warn'); users[i]=obj; } else { users.push(obj); }
+    save('users', users); closeModal('m-user'); notify('Saved'); renderApp();
   };
 
-  const table = document.querySelector('[data-section="users"]');
-  if (table) table.onclick = (e)=>{
+  table?.addEventListener('click', (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const email = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!email) return;
-
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
-      const u = load('users', []).find(x=> (x.email||'').toLowerCase() === email.toLowerCase()); if (!u) return;
-      openModal('m-user');
-      $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
-      const sel = $('#user-role'); const opts = allowedRoleOptions();
-      sel.innerHTML = opts.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = opts.includes(u.role) ? u.role : 'user';
+      const u = load('users', []).find(x=>x.email===email); if (!u) return;
+      openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
+      const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions().includes(u.role) ? u.role : 'user';
       attachImageUpload('#user-imgfile', '#user-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
-      save('users', load('users', []).filter(x=> (x.email||'').toLowerCase()!==email.toLowerCase()));
-      notify('Deleted'); renderApp();
+      save('users', load('users', []).filter(x=>x.email!==email)); notify('Deleted'); renderApp();
     }
-  };
+  });
 }
 
-// ---------- Modals (global, always present) ----------
+/* ---------- Modals (global) ---------- */
 function postModal(){ return `
   <div class="modal-backdrop" id="mb-post"></div>
   <div class="modal" id="m-post">
@@ -2016,45 +1681,97 @@ function ensureGlobalModals(){
   attachImageUpload('#post-imgfile', '#post-img');
 }
 
-/* ===================== Part F — Search utils + SW + Boot ===================== */
-window.buildSearchIndex = function(){
-  const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
-  const pages = [
-    { id:'about',   label:'About',       section:'Pages', route:'about'   },
-    { id:'policy',  label:'Policy',      section:'Pages', route:'policy'  },
-    { id:'license', label:'License',     section:'Pages', route:'license' },
-    { id:'setup',   label:'Setup Guide', section:'Pages', route:'setup'   },
-    { id:'contact', label:'Contact',     section:'Pages', route:'contact' },
-    { id:'guide',   label:'User Guide',  section:'Pages', route:'guide'   },
-  ];
-  const ix=[]; posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
-  inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`}));
-  prods.forEach(p=>ix.push({id:p.id,label:p.name,section:'Products',route:'products',text:`${p.name} ${p.barcode} ${p.type} ${p.ingredients}`}));
-  cogs.forEach(r=>ix.push({id:r.id,label:r.date,section:'COGS',route:'cogs',text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.delivery} ${r.other}`}));
-  users.forEach(u=>ix.push({id:u.email,label:u.name,section:'Users',route:'settings',text:`${u.name} ${u.email} ${u.role}`}));
-  pages.forEach(p=>ix.push(p));
-  return ix;
-};
-window.searchAll = function(index,q){
-  const term = (q || '').toLowerCase();
-  return index
-    .map(item=>{
-      const score =
-        ((item.label||'').toLowerCase().includes(term) ? 2 : 0) +
-        ((item.text ||'').toLowerCase().includes(term)  ? 1 : 0);
-      return { item, score };
-    })
-    .filter(x=>x.score>0)
-    .sort((a,b)=>b.score-a.score)
-    .map(x=>x.item);
-};
-window.scrollToRow = function(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
+function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); document.body.classList.add('has-overlay'); }
+function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); if (!$('.modal.active') && !$('#sidebar.open')) document.body.classList.remove('has-overlay'); }
 
-// Online / offline hints
-window.addEventListener('online',  ()=> notify('Back online','ok'));
-window.addEventListener('offline', ()=> notify('You are offline','warn'));
+/* ===================== App render ===================== */
+function safeView(route) {
+  switch ((route || 'home')) {
+    case 'home':       return viewHome();
+    case 'search':     return viewSearch();
+    case 'dashboard':  return viewDashboard();
+    case 'inventory':  return viewInventory();
+    case 'products':   return viewProducts();
+    case 'cogs':       return viewCOGS();
+    case 'tasks':      return viewTasks();
+    case 'settings':   return viewSettings();
+    case 'policy':
+    case 'license':
+    case 'setup':
+    case 'contact':
+    case 'guide':
+    case 'about':      return viewPage(route);
+    default:           return viewHome();
+  }
+}
 
-// Service Worker (safe GET prefetch before register to avoid HEAD bug)
+function wireRoute(route) {
+  $('#btnLogout')?.addEventListener('click', doLogout);
+  $('#btnHome')?.addEventListener('click', () => go('home'));
+  $('#burger')?.addEventListener('click', openSidebar);
+  $('#backdrop')?.addEventListener('click', closeSidebar);
+
+  document.querySelectorAll('[data-go]').forEach(el => {
+    el.addEventListener('click', () => {
+      const r  = el.getAttribute('data-go');
+      const id = el.getAttribute('data-id');
+      if (r) { go(r); if (id) setTimeout(() => { try { scrollToRow(id); } catch(_) {} }, 80); }
+    });
+  });
+
+  hookSidebarInteractions();
+  ensureGlobalModals();
+  enableMobileImagePreview();
+
+  switch ((route || 'home')) {
+    case 'home':      wireHome(); break;
+    case 'dashboard': wireDashboard(); wirePosts(); break;
+    case 'inventory': wireInventory(); break;
+    case 'products':  wireProducts(); break;
+    case 'cogs':      wireCOGS(); break;
+    case 'tasks':     wireTasks(); break;
+    case 'settings':  wireSettings(); break;
+    case 'contact':   wireContact(); break;
+  }
+}
+
+function enableMobileImagePreview(){
+  const isPhone = window.matchMedia('(max-width: 740px)').matches; if (!isPhone) return;
+  $$('.inv-preview, .prod-thumb').forEach(el=>{
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', ()=>{
+      const src = el.getAttribute('data-src') || el.getAttribute('src') || 'icons/icon-512.png';
+      const img = $('#preview-img'); if (img) img.src = src; openModal('m-img');
+    });
+  });
+}
+
+function renderApp() {
+  try {
+    if (!session) { renderLogin(); return; }
+    const root = document.getElementById('root');
+    const route = currentRoute || 'home';
+    root.innerHTML = `
+      <div class="app">
+        ${renderSidebar(route)}
+        <div>
+          ${renderTopbar()}
+          <div class="main" id="main">
+            ${safeView(route)}
+          </div>
+        </div>
+      </div>
+      <div class="notification" id="notification"></div>
+    `;
+    wireRoute(route);
+  } catch (e) {
+    console.error('[renderApp] crash:', e);
+    notify(e?.message || 'Render failed', 'danger');
+    showRescue(e);
+  }
+}
+
+/* ===================== SW / Boot ===================== */
 (function(){
   if (!('serviceWorker' in navigator)) return;
   const swUrl = 'service-worker.js';
@@ -2064,7 +1781,6 @@ window.addEventListener('offline', ()=> notify('You are offline','warn'));
     .catch(() => {});
 })();
 
-// First paint
 (function boot(){
   try {
     if (typeof renderApp === 'function' && window.session) renderApp();
