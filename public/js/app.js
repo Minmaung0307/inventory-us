@@ -180,7 +180,6 @@ const DEMO_ADMIN_PASS  = 'admin123';
 function go(route){ currentRoute = route; save('_route', route); renderApp(); }
 let idleTimer = null; // 10 minutes
 const IDLE_LIMIT = 10 * 60 * 1000;
-let idleTimer = null;
 
 function resetIdleTimer(){
   if (!session) return;
