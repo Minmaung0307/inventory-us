@@ -1340,9 +1340,9 @@ function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.cl
 function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('has-overlay'); }
 
 /* ---------- Contact page (EmailJS only for admin) ---------- */
-const EMAILJS_PUBLIC_KEY  = '';      // <-- put your EmailJS public key here (admin only)
-const EMAILJS_SERVICE_ID  = '';      // <-- put your EmailJS service ID here
-const EMAILJS_TEMPLATE_ID = '';      // <-- put your EmailJS template ID here
+const EMAILJS_PUBLIC_KEY  = 'WT0GOYrL9HnDKvLUf';      // <-- put your EmailJS public key here (admin only)
+const EMAILJS_SERVICE_ID  = 'service_z9tkmvr';      // <-- put your EmailJS service ID here
+const EMAILJS_TEMPLATE_ID = 'template_q5q471f';      // <-- put your EmailJS template ID here
 
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
