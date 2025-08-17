@@ -2,15 +2,15 @@
    Inventory — single-file SPA
    ========================= */
 
-/* ---------- Hoisted helpers ---------- */
+/* ---------- Helpers ---------- */
 function USD(x){ return `$${Number(x || 0).toFixed(2)}`; }
 function parseYMD(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; }
 function getISOWeek(d){ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); }
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
-function on(id, fn){ const el=$(id); if(!el) return; el.onclick=null; el.addEventListener('click', fn, {once:false}); } // no duplicate handlers
+function on(id, fn){ const el=$(id); if(!el) return; el.onclick=null; el.addEventListener('click', fn, {once:false}); }
 
-/* ---------- Firebase (v8) ---------- */
+/* ---------- Firebase v8 ---------- */
 const firebaseConfig = {
   apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
   authDomain: "inventory-us.firebaseapp.com",
@@ -26,7 +26,7 @@ const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db   = firebase.database();
 
-/* ---------- Storage + notify ---------- */
+/* ---------- Storage + notify (now per user) ---------- */
 const notify = (msg, type='ok')=>{
   const n = $('#notification'); if (!n) return;
   n.textContent = msg; n.className = `notification show ${type}`;
@@ -34,14 +34,30 @@ const notify = (msg, type='ok')=>{
 };
 const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } };
 const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
-function load(k, f){ return _lsGet(k, f); }
-function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 
-let session      = load('session', null);
-let currentRoute = load('_route', 'home');
-let searchQuery  = load('_searchQ', '');
-
-function setSession(s){ session = s; save('session', s); }
+let session      = _lsGet('session', null);
+let currentRoute = _lsGet('_route', 'home');
+let searchQuery  = _lsGet('_searchQ', '');
+function setSession(s){ session = s; _lsSet('session', s); }
+function nsId(){ // namespace id for local storage
+  if (!session) return 'guest';
+  if (session.authMode === 'firebase' && session.uid) return `fb:${session.uid}`;
+  const e = (session.email||'guest').toLowerCase();
+  return `local:${e}`;
+}
+function nsKey(key){
+  // keep "users" global so admins can manage; everything else scoped per user
+  if (key === 'users') return 'users';
+  return `u:${nsId()}:${key}`;
+}
+let CLOUD_APPLYING = false;
+function load(key, fallback){ return _lsGet(nsKey(key), fallback); }
+function save(key, val){
+  _lsSet(nsKey(key), val);
+  try{
+    if (!CLOUD_APPLYING && cloud.isOn() && auth.currentUser) cloud.saveKV(key, val);
+  }catch{}
+}
 
 /* ---------- Rescue screen ---------- */
 function showRescue(err){
@@ -66,7 +82,7 @@ function showRescue(err){
 /* ---------- Theme ---------- */
 const THEME_MODES = [{key:'light',name:'Light'},{key:'dark',name:'Dark'},{key:'aqua',name:'Aqua'}];
 const THEME_SIZES = [{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
-function getTheme(){ return _lsGet('_theme2', { mode:'aqua', size:'medium' }); }
+function getTheme(){ return load('_theme2', { mode:'aqua', size:'medium' }); }
 function applyTheme(){
   const t = getTheme();
   const size = THEME_SIZES.find(s=>s.key===t.size)?.pct ?? 100;
@@ -84,10 +100,32 @@ const cloud = (function(){
   const uid     = ()=> auth.currentUser?.uid;
   const pathFor = key => db.ref(`tenants/${uid()}/kv/${key}`);
   async function saveKV(key, val){ if (!on() || !uid()) return; await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP }); }
-  async function pullAllOnce(){ if (!uid()) return; const snap = await db.ref(`tenants/${uid()}/kv`).get(); if (!snap.exists()) return; const all = snap.val() || {}; Object.values(all).forEach(row=>{ if (row && row.key && 'val' in row) _lsSet(row.key, row.val); }); }
-  function subscribeAll(){ if (!uid()) return; unsubscribeAll(); CLOUD_KEYS.forEach(key=>{ const ref = pathFor(key); const handler = ref.on('value',(snap)=>{ const data=snap.val(); if(!data)return; const curr=_lsGet(key,null); if (JSON.stringify(curr)!==JSON.stringify(data.val)){ _lsSet(key,data.val); if (key==='_theme2') applyTheme(); renderApp(); } }); liveRefs.push({ref,handler}); }); }
+  async function pullAllOnce(){
+    if (!uid()) return;
+    const snap = await db.ref(`tenants/${uid()}/kv`).get();
+    if (!snap.exists()) return;
+    const all = snap.val() || {};
+    CLOUD_APPLYING = true;
+    try{
+      Object.values(all).forEach(row=>{ if (row && row.key && 'val' in row) _lsSet(nsKey(row.key), row.val); });
+    } finally { CLOUD_APPLYING = false; }
+  }
+  function subscribeAll(){
+    if (!uid()) return;
+    unsubscribeAll();
+    CLOUD_KEYS.forEach(key=>{
+      const ref = pathFor(key);
+      const handler = ref.on('value',(snap)=>{
+        const data=snap.val(); if(!data) return;
+        CLOUD_APPLYING = true;
+        try{ _lsSet(nsKey(key), data.val); if (key==='_theme2') applyTheme(); renderApp(); }
+        finally { CLOUD_APPLYING = false; }
+      });
+      liveRefs.push({ref,handler});
+    });
+  }
   function unsubscribeAll(){ liveRefs.forEach(({ref})=>{ try{ref.off();}catch{} }); liveRefs=[]; }
-  async function pushAll(){ if (!uid()) return; for (const k of CLOUD_KEYS){ const v=_lsGet(k,null); if (v!==null && v!==undefined) await saveKV(k,v); } }
+  async function pushAll(){ if (!uid()) return; for (const k of CLOUD_KEYS){ const v=load(k,null); if (v!==null && v!==undefined) await saveKV(k,v); } }
   async function enable(){ if (!uid()) throw new Error('Sign in first.'); setOn(true); await firebase.database().goOnline(); await pullAllOnce(); await pushAll(); subscribeAll(); }
   function disable(){ setOn(false); unsubscribeAll(); }
   return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
@@ -101,43 +139,44 @@ function canAdd(){ return ['admin','manager','associate'].includes(role()); }
 function canEdit(){ return ['admin','manager'].includes(role()); }
 function canDelete(){ return ['admin'].includes(role()); }
 
-/* ---------- Seed data (first run) ---------- */
+/* ---------- Demo seed (guest only) ---------- */
 const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
 const DEMO_ADMIN_PASS  = 'admin123';
 (function seedOnFirstRun(){
-  if (load('_seeded_v4', false)) return;
-  const now = Date.now();
-  save('users', [
+  if (_lsGet('_seeded_v5', false)) return;
+  // Seed "users" globally so admin can always see a few examples
+  _lsSet('users', [
     { name:'Admin',     username:'admin',     email:'admin@sushi.com',     contact:'', role:'admin',     password:'', img:'' },
     { name:'Admin',     username:'admin',     email:DEMO_ADMIN_EMAIL,      contact:'', role:'admin',     password:DEMO_ADMIN_PASS, img:'' },
     { name:'Manager',   username:'manager',   email:'manager@sushi.com',   contact:'', role:'manager',   password:'', img:'' },
     { name:'Associate', username:'associate', email:'associate@sushi.com', contact:'', role:'associate', password:'', img:'' },
     { name:'Viewer',    username:'viewer',    email:'cashier@sushi.com',   contact:'', role:'user',      password:'', img:'' },
   ]);
-  save('inventory', [
+  // Guest-only sample data (won’t leak across users because of namespacing)
+  _lsSet(nsKey('inventory'), [
     { id:'inv1', img:'', name:'Nori Sheets', code:'NOR-100', type:'Dry', price:3.00, stock:80, threshold:30 },
     { id:'inv2', img:'', name:'Sushi Rice',  code:'RIC-200', type:'Dry', price:1.50, stock:24, threshold:20 },
     { id:'inv3', img:'', name:'Fresh Salmon',code:'SAL-300', type:'Raw', price:7.80, stock:10, threshold:12 },
   ]);
-  save('products', [
+  _lsSet(nsKey('products'), [
     { id:'p1', img:'', name:'Salmon Nigiri', barcode:'11100001', price:5.99, type:'Nigiri', ingredients:'Rice, Salmon', instructions:'Brush with nikiri.' },
     { id:'p2', img:'', name:'California Roll', barcode:'11100002', price:7.49, type:'Roll', ingredients:'Rice, Nori, Crab, Avocado', instructions:'8 pcs.' },
   ]);
-  save('posts', [{ id:'post1', title:'Welcome to Inventory', body:'Track stock, manage products, and work faster.', img:'', createdAt: now }]);
-  save('tasks', [
+  _lsSet(nsKey('posts'), [{ id:'post1', title:'Welcome to Inventory', body:'Track stock, manage products, and work faster.', img:'', createdAt: Date.now() }]);
+  _lsSet(nsKey('tasks'), [
     { id:'t1', title:'Prep Salmon', status:'todo' },
     { id:'t2', title:'Cook Rice', status:'inprogress' },
     { id:'t3', title:'Sanitize Station', status:'done' },
   ]);
-  save('cogs', [
+  _lsSet(nsKey('cogs'), [
     { id:'c1', date:'2024-08-01', grossIncome:1200, produceCost:280, itemCost:180, freight:45, delivery:30, other:20 },
     { id:'c2', date:'2024-08-02', grossIncome: 900, produceCost:220, itemCost:140, freight:30, delivery:25, other:10 }
   ]);
-  save('_seeded_v4', true);
+  _lsSet('_seeded_v5', true);
 })();
 
 /* ---------- Router + idle logout ---------- */
-function go(route){ currentRoute = route; save('_route', route); renderApp(); }
+function go(route){ currentRoute = route; _lsSet('_route', route); renderApp(); }
 let idleTimer = null; const IDLE_LIMIT = 10*60*1000;
 function resetIdleTimer(){
   if (!session) return;
@@ -155,7 +194,7 @@ auth.onAuthStateChanged(async (user) => {
 async function ensureSessionAndRender(user) {
   applyTheme();
   if (!user){
-    const stored = load('session', null);
+    const stored = _lsGet('session', null);
     if (stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
       setSession(stored); resetIdleTimer(); currentRoute = 'home'; renderApp(); return;
     }
@@ -163,28 +202,28 @@ async function ensureSessionAndRender(user) {
   }
   // Firebase user present
   const email = (user.email || '').toLowerCase();
-  let users = load('users', []);
+  let users = _lsGet('users', []);
   let prof = users.find(u => (u.email || '').toLowerCase() === email);
   if (!prof) {
     const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
-    prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
-    users.push(prof); save('users', users);
+    prof = { name: user.displayName || email.split('@')[0], username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
+    users.push(prof); _lsSet('users', users);
   } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
-    prof.role = 'admin'; save('users', users);
+    prof.role = 'admin'; _lsSet('users', users);
   }
-  setSession({ ...prof, authMode: 'firebase' });
+  setSession({ ...prof, authMode: 'firebase', uid: user.uid });
   try{ if (cloud?.isOn?.()){ await firebase.database().goOnline(); await cloud.pullAllOnce(); cloud.subscribeAll(); } }catch{}
   resetIdleTimer();
-  currentRoute='home'; // always show Home after login
+  currentRoute='home'; // always
   renderApp();
 }
 
 /* ---------- Local Auth helpers ---------- */
 function localLogin(email, pass){
-  const users = load('users', []); const e = (email||'').toLowerCase();
-  if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
+  const users = _lsGet('users', []); const e = (email||'').toLowerCase();
+  if (e === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
     let u = users.find(x => (x.email||'').toLowerCase() === e);
-    if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
+    if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); _lsSet('users', users); }
     setSession({ ...u, authMode: 'local' }); notify('Signed in (Local mode)'); renderApp(); return true;
   }
   const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
@@ -192,16 +231,16 @@ function localLogin(email, pass){
   return false;
 }
 function localSignup({name,email,pass}){
-  const e = (email||'').toLowerCase(); const users = load('users', []);
+  const e = (email||'').toLowerCase(); const users = _lsGet('users', []);
   if (users.find(x => (x.email||'').toLowerCase() === e)) { if (localLogin(email, pass)) return true; notify('User already exists locally. Use Sign In.','warn'); return false; }
   const role = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
   const u = { name: name || e.split('@')[0], username: e.split('@')[0], email: e, role, password: pass, img:'', contact:'' };
-  users.push(u); save('users', users); setSession({ ...u, authMode: 'local' }); notify('Account created (Local mode)'); renderApp(); return true;
+  users.push(u); _lsSet('users', users); setSession({ ...u, authMode: 'local' }); notify('Account created (Local mode)'); renderApp(); return true;
 }
 function localResetPassword(email){
-  const e=(email||'').toLowerCase(), users=load('users',[]); const i=users.findIndex(x=>(x.email||'').toLowerCase()===e);
+  const e=(email||'').toLowerCase(), users=_lsGet('users',[]); const i=users.findIndex(x=>(x.email||'').toLowerCase()===e);
   if (i<0) return { ok:false, msg:'No local user found.' };
-  const temp='reset'+Math.floor(1000+Math.random()*9000); users[i].password=temp; save('users',users); return { ok:true, temp };
+  const temp='reset'+Math.floor(1000+Math.random()*9000); users[i].password=temp; _lsSet('users',users); return { ok:true, temp };
 }
 
 /* ---------- Sidebar + Topbar ---------- */
@@ -459,7 +498,6 @@ async function doLogout(){ try{ cloud?.disable?.(); }catch{} try{ await auth.sig
   };
   window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
 
-  // blacklist helpers
   function _load(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
   function _save(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
   window.ytBlacklistAdd   = id => { const m=_load(); m[id]=Date.now(); _save(m); };
@@ -534,7 +572,7 @@ function viewSearch(){
 }
 function hookSidebarSearch(){
   const input=$('#globalSearch'), results=$('#searchResults'); if(!input||!results) return;
-  let t; const openResults=(q)=>{ window.searchQuery=q; save('_searchQ',q); if(window.currentRoute!=='search') go('search'); else renderApp(); };
+  let t; const openResults=(q)=>{ window.searchQuery=q; _lsSet('_searchQ',q); if(window.currentRoute!=='search') go('search'); else renderApp(); };
   input.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ const q=input.value.trim(); if(q){ openResults(q); results.classList.remove('active'); input.blur(); closeSidebar(); } }});
   input.addEventListener('input', ()=>{ clearTimeout(t); const q=input.value.trim().toLowerCase(); if(!q){ results.classList.remove('active'); results.innerHTML=''; return; }
     t=setTimeout(()=>{ const idx=buildSearchIndex(); const out=searchAll(idx,q).slice(0,12); if(!out.length){ results.classList.remove('active'); results.innerHTML=''; return; }
@@ -547,7 +585,7 @@ function hookSidebarSearch(){
 
 /* ===================== Dashboard + Posts ===================== */
 function viewDashboard(){
-  const posts=load('posts',[]), inv=load('inventory',[]), prods=load('products',[]), users=load('users',[]), tasks=load('tasks',[]), cogs=load('cogs',[]);
+  const posts=load('posts',[]), inv=load('inventory',[]), prods=load('products',[]), users=_lsGet('users',[]), tasks=load('tasks',[]), cogs=load('cogs',[]);
   const lowCt=inv.filter(i=>i.stock<=i.threshold && i.stock>Math.max(1,Math.floor(i.threshold*0.6))).length;
   const critCt=inv.filter(i=>i.stock<=Math.max(1,Math.floor(i.threshold*0.6))).length;
   const sumForMonth=(y,m)=>cogs.filter(r=>{const p=parseYMD(r.date);return p && p.y===y && p.m===m;}).reduce((s,r)=>s+Number(r.grossIncome||0),0);
@@ -604,7 +642,7 @@ function viewDashboard(){
       </div>
     </div>`;
 }
-function wireDashboard(){ on('#addPost', ()=>{ if(!canAdd()) return notify('No permission','warn'); openModal('m-post'); $('#post-id').value=''; $('#post-title').value=''; $('#post-body').value=''; $('#post-img').value=''; attachImageUpload('#post-imgfile','#post-img'); }); }
+function wireDashboard(){ on('#addPost', ()=>{ if(!canAdd()) return notify('No permission','warn'); openModal('m-post'); $('#post-id').value=''; $('#post-title').value=''; $('#post-body').value=''; $('#post-img').value=''; attachImageUpload('#post-imgfile','#post-img', '#post-img-preview'); }); }
 function wirePosts(){
   const sec=$('[data-section="posts"]'); if(!sec) return;
   const saveBtn = $('#save-post'); if (saveBtn){ saveBtn.onclick=null; saveBtn.addEventListener('click', ()=>{
@@ -615,7 +653,7 @@ function wirePosts(){
     const i=posts.findIndex(x=>x.id===id);
     if(i>=0){ if(!canEdit()) return notify('No permission','warn'); posts[i]=obj; } else { posts.unshift(obj); }
     save('posts', posts); closeModal('m-post'); notify('Saved'); renderApp();
-  }, {once:true}); } // once=true to be extra safe
+  }, {once:true}); }
 
   sec.addEventListener('click', (e)=>{
     const btn=e.target.closest('button'); if(!btn) return;
@@ -623,8 +661,7 @@ function wirePosts(){
     if(btn.hasAttribute('data-edit')){
       if(!canEdit()) return notify('No permission','warn');
       const p=load('posts',[]).find(x=>x.id===id); if(!p) return;
-      openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||''; attachImageUpload('#post-imgfile','#post-img');
-      // rebind save for edit (single-shot)
+      openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||''; attachImageUpload('#post-imgfile','#post-img', '#post-img-preview');
       const s=$('#save-post'); s.onclick=null; s.addEventListener('click', ()=>{
         const posts=load('posts',[]); const idx=posts.findIndex(x=>x.id===id); if(idx<0) return;
         posts[idx]={ ...posts[idx], title:($('#post-title')?.value||'').trim(), body:($('#post-body')?.value||'').trim(), img:($('#post-img')?.value||'').trim(), createdAt:posts[idx].createdAt };
@@ -646,9 +683,9 @@ function downloadCSV(filename, rows, headers){
     notify('Exported CSV','ok');
   }catch{ notify('Export failed','danger'); }
 }
-function attachImageUpload(fileInputSel, textInputSel){
+function attachImageUpload(fileInputSel, textInputSel, previewSel){
   const f=$(fileInputSel), t=$(textInputSel); if(!f||!t) return;
-  f.onchange=()=>{ const file=f.files&&f.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{ t.value=reader.result; }; reader.readAsDataURL(file); };
+  f.onchange=()=>{ const file=f.files&&f.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{ t.value=reader.result; const p=previewSel?$(previewSel):null; if(p){ p.src=reader.result; p.style.display='block'; } }; reader.readAsDataURL(file); };
 }
 
 /* Inventory */
@@ -935,19 +972,22 @@ function setupDnD(){
   });
 }
 
-/* ===================== Settings / Users / Static pages ===================== */
+/* ===================== Settings / Profile / Users / Static pages ===================== */
 function viewSettings(){
-  const users=load('users',[]), theme=getTheme(), cloudOn=cloud.isOn();
+  const users=_lsGet('users',[]), meEmail=(session?.email||'').toLowerCase(); const me=users.find(u=>(u.email||'').toLowerCase()===meEmail) || session;
+  const theme=getTheme(), cloudOn=cloud.isOn();
+  const isAdmin = role()==='admin';
+
   return `<div class="grid">
     <div class="card"><div class="card-body">
       <h3 style="margin-top:0">Cloud Sync</h3>
-      <p style="color:var(--muted)">Keep your data in Firebase Realtime Database (per user).</p>
+      <p style="color:var(--muted)">Keep your data per-user in Firebase Realtime Database.</p>
       <div class="theme-inline">
         <div><label style="font-size:12px;color:var(--muted)">Status</label>
           <select id="cloud-toggle" class="input"><option value="off" ${!cloudOn?'selected':''}>Off</option><option value="on" ${cloudOn?'selected':''}>On</option></select></div>
         <div><label style="font-size:12px;color:var(--muted)">Actions</label><br/><button class="btn" id="cloud-sync-now"><i class="ri-cloud-line"></i> Sync Now</button></div>
       </div>
-      <p class="muted" style="margin-top:8px">Cloud Sync mirrors keys: inventory, products, posts, tasks, cogs, users, _theme2.</p>
+      <p class="muted" style="margin-top:8px">Mirrors: inventory, products, posts, tasks, cogs, users, _theme2.</p>
     </div></div>
 
     <div class="card"><div class="card-body">
@@ -965,9 +1005,31 @@ function viewSettings(){
     </div></div>
 
     <div class="card"><div class="card-body">
+      <h3 style="margin-top:0">Your Profile</h3>
+      <div class="grid cols-2">
+        <div class="grid">
+          <input id="me-name" class="input" placeholder="Name" value="${me?.name||''}"/>
+          <input id="me-username" class="input" placeholder="Username" value="${me?.username||''}"/>
+          <input id="me-email" class="input" placeholder="Email" value="${me?.email||''}" disabled/>
+          <input id="me-role" class="input" value="${me?.role||'user'}" disabled/>
+          <input id="me-img" class="input" placeholder="Avatar URL or upload below" value="${me?.img||''}"/>
+          <input id="me-imgfile" type="file" accept="image/*" class="input"/>
+        </div>
+        <div>
+          <img id="me-preview" src="${me?.img||'icons/icon-192.png'}" alt="avatar" style="width:160px;height:160px;object-fit:cover;border-radius:16px;border:1px solid var(--card-border)"/>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn" id="save-profile"><i class="ri-save-3-line"></i> Save Profile</button>
+      </div>
+      <div class="muted" style="margin-top:6px">Only Admins can see and manage all users below.</div>
+    </div></div>
+
+    ${isAdmin ? `
+    <div class="card"><div class="card-body">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <h3 style="margin:0">Users</h3>
-        ${canAdd()?`<button class="btn" id="addUser"><i class="ri-add-line"></i> Add User</button>`:''}
+        <button class="btn" id="addUser"><i class="ri-user-add-line"></i> Add User</button>
       </div>
       <table class="table" data-section="users">
         <thead><tr><th>Avatar</th><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
@@ -976,18 +1038,20 @@ function viewSettings(){
             <tr id="${u.email}">
               <td><div class="thumb-wrap">${u.img?`<img class="thumb" src="${u.img}" alt=""/>`:`<div class="thumb" style="display:grid;place-items:center">👤</div>`}</div></td>
               <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
-              <td>${canEdit()?`<button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>`:''} ${canDelete()?`<button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button>`:''}</td>
+              <td><button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button> <button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button></td>
             </tr>`).join('')}
         </tbody>
       </table>
-    </div></div>
+    </div></div>` : '' }
   </div>`;
 }
 function allowedRoleOptions(){ const r=role(); if(r==='admin') return ROLES; if(r==='manager') return ['user','associate','manager']; if(r==='associate') return ['user','associate']; return ['user']; }
 function wireSettings(){
+  // Theme
   const mode=$('#theme-mode'), size=$('#theme-size'); const applyNow=()=>{ save('_theme2',{mode:mode.value,size:size.value}); applyTheme(); renderApp(); };
   mode?.addEventListener('change', applyNow); size?.addEventListener('change', applyNow);
 
+  // Cloud
   const toggle=$('#cloud-toggle'), syncNow=$('#cloud-sync-now');
   toggle?.addEventListener('change', async e=>{
     const val=e.target.value;
@@ -1003,35 +1067,42 @@ function wireSettings(){
     if(!navigator.onLine) return notify('You appear to be offline.','warn');
     await firebase.database().goOnline(); await cloud.pushAll(); notify('Synced'); }catch(e){ notify((e&&e.message)||'Sync failed','danger'); } });
 
-  wireUsers();
-}
-function wireUsers(){
-  const addBtn=$('#addUser'); const table=$('[data-section="users"]');
-  on('#addUser', ()=>{ if(!canAdd()) return notify('No permission','warn'); openModal('m-user');
-    $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-img').value='';
-    const sel=$('#user-role'); sel.innerHTML=allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value=allowedRoleOptions()[0];
-    attachImageUpload('#user-imgfile','#user-img'); });
-
-  on('#save-user', ()=>{ if(!canAdd()) return notify('No permission','warn');
-    const users=load('users',[]); const email=($('#user-email')?.value||'').trim().toLowerCase(); if(!email) return notify('Email required','warn');
-    const allowed=allowedRoleOptions(); const chosen=($('#user-role')?.value||'user'); if(!allowed.includes(chosen)) return notify('Role not allowed','warn');
-    const obj={ name:($('#user-name')?.value||email.split('@')[0]).trim(), email, username:($('#user-username')?.value||email.split('@')[0]).trim(), role:chosen, img:($('#user-img')?.value||'').trim(), contact:'', password:'' };
-    const i=users.findIndex(x=>x.email.toLowerCase()===email); if(i>=0){ if(!canEdit()) return notify('No permission','warn'); users[i]=obj; } else users.push(obj);
-    save('users',users); closeModal('m-user'); notify('Saved'); renderApp();
+  // Profile
+  attachImageUpload('#me-imgfile', '#me-img', '#me-preview');
+  on('#save-profile', ()=>{
+    const users=_lsGet('users',[]);
+    const e=(session?.email||'').toLowerCase(); const i=users.findIndex(u=>(u.email||'').toLowerCase()===e);
+    const name=$('#me-name').value.trim(); const username=$('#me-username').value.trim(); const img=$('#me-img').value.trim();
+    if(i>=0){ users[i]={ ...users[i], name: name || users[i].name, username: username || users[i].username, img }; _lsSet('users', users); setSession({ ...session, name: users[i].name, username: users[i].username, img: users[i].img }); notify('Profile saved'); renderApp(); }
+    else notify('User not found','warn');
   });
 
-  table?.addEventListener('click', (e)=>{
-    const btn=e.target.closest('button'); if(!btn) return; const email=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!email) return;
-    if(btn.hasAttribute('data-edit')){
-      if(!canEdit()) return notify('No permission','warn');
-      const u=load('users',[]).find(x=>x.email===email); if(!u) return;
-      openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
-      const sel=$('#user-role'); sel.innerHTML=allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value=allowedRoleOptions().includes(u.role)?u.role:'user';
-      attachImageUpload('#user-imgfile','#user-img');
-    }else{
-      if(!canDelete()) return notify('No permission','warn'); save('users', load('users',[]).filter(x=>x.email!==email)); notify('Deleted'); renderApp();
-    }
-  });
+  // Users (admin only)
+  if (role()==='admin'){
+    const addBtn=$('#addUser'); const table=$('[data-section="users"]');
+    on('#addUser', ()=>{ openModal('m-user');
+      $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-img').value='';
+      const sel=$('#user-role'); sel.innerHTML=allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value='user';
+      attachImageUpload('#user-imgfile','#user-img'); });
+
+    on('#save-user', ()=>{ const users=_lsGet('users',[]); const email=($('#user-email')?.value||'').trim().toLowerCase(); if(!email) return notify('Email required','warn');
+      const chosen=($('#user-role')?.value||'user'); const obj={ name:($('#user-name')?.value||email.split('@')[0]).trim(), email, username:($('#user-username')?.value||email.split('@')[0]).trim(), role:chosen, img:($('#user-img')?.value||'').trim(), contact:'', password:'' };
+      const i=users.findIndex(x=>x.email.toLowerCase()===email); if(i>=0){ users[i]=obj; } else users.push(obj);
+      _lsSet('users',users); closeModal('m-user'); notify('Saved'); renderApp();
+    });
+
+    table?.addEventListener('click', (e)=>{
+      const btn=e.target.closest('button'); if(!btn) return; const email=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!email) return;
+      if(btn.hasAttribute('data-edit')){
+        const u=_lsGet('users',[]).find(x=>x.email===email); if(!u) return;
+        openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
+        const sel=$('#user-role'); sel.innerHTML=allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value=allowedRoleOptions().includes(u.role)?u.role:'user';
+        attachImageUpload('#user-imgfile','#user-img');
+      }else{
+        _lsSet('users', _lsGet('users',[]).filter(x=>x.email!==email)); notify('Deleted'); renderApp();
+      }
+    });
+  }
 }
 
 /* ---------- Static pages via iframe ---------- */
@@ -1041,7 +1112,7 @@ window.pageContent = {
   license:`<h3>License</h3><iframe src="license.html" style="width:100%;height:80vh;border:0;border-radius:12px;background:var(--panel)"></iframe>`,
   setup:  `<h3>Developer Setup Guide</h3><a class="btn ghost" href="setup-guide.html" target="_blank" rel="noopener" style="margin-bottom:8px"><i class="ri-external-link-line"></i> Open full page</a><iframe src="setup-guide.html" style="width:100%;height:80vh;border:0;border-radius:12px;background:var(--panel)"></iframe>`,
   guide:  `<h3>User Guide</h3><iframe src="guide.html" style="width:100%;height:80vh;border:0;border-radius:12px;background:var(--panel)"></iframe>`,
-  contact:`<h3>Contact</h3><iframe src="contact.html" style="width:100%;height:72vh;border:0;border-radius:12px;background:var(--panel)"></iframe>`
+  contact:`<h3>Contact</h3><iframe src="contact.html" style="width:100%;height:80vh;border:0;border-radius:12px;background:var(--panel)"></iframe>`
 };
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
 
@@ -1060,6 +1131,7 @@ function postModal(){ return `
       <input id="post-id" type="hidden"/>
       <input id="post-title" class="input" placeholder="Title"/>
       <textarea id="post-body" class="input" placeholder="Body"></textarea>
+      <img id="post-img-preview" style="display:none;width:100%;border-radius:12px;border:1px solid var(--card-border)"/>
       <input id="post-img" class="input" placeholder="Image URL or upload below"/>
       <input id="post-imgfile" type="file" accept="image/*" class="input"/>
     </div>
@@ -1166,12 +1238,12 @@ function ensureGlobalModals(){
   const wrap=document.createElement('div'); wrap.id='__modals';
   wrap.innerHTML=postModal()+invModal()+prodModal()+prodCardModal()+cogsModal()+taskModal()+userModal()+imgPreviewModal();
   document.body.appendChild(wrap);
-  attachImageUpload('#post-imgfile','#post-img');
+  attachImageUpload('#post-imgfile','#post-img', '#post-img-preview');
 }
 
 /* ===================== Search utils + PWA + Boot ===================== */
 window.buildSearchIndex=function(){
-  const posts=load('posts',[]), inv=load('inventory',[]), prods=load('products',[]), cogs=load('cogs',[]), users=load('users',[]);
+  const posts=load('posts',[]), inv=load('inventory',[]), prods=load('products',[]), cogs=load('cogs',[]), users=_lsGet('users',[]);
   const pages=[{id:'about',label:'About',section:'Pages',route:'about'},{id:'policy',label:'Policy',section:'Pages',route:'policy'},{id:'license',label:'License',section:'Pages',route:'license'},{id:'setup',label:'Setup Guide',section:'Pages',route:'setup'},{id:'contact',label:'Contact',section:'Pages',route:'contact'},{id:'guide',label:'User Guide',section:'Pages',route:'guide'}];
   const ix=[]; posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`})); inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`})); prods.forEach(p=>ix.push({id:p.id,label:p.name,section:'Products',route:'products',text:`${p.name} ${p.barcode} ${p.type} ${p.ingredients}`})); cogs.forEach(r=>ix.push({id:r.id,label:r.date,section:'COGS',route:'cogs',text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.delivery} ${r.other}`})); users.forEach(u=>ix.push({id:u.email,label:u.name,section:'Users',route:'settings',text:`${u.name} ${u.email} ${u.role}`})); pages.forEach(p=>ix.push(p)); return ix;
 };
@@ -1192,7 +1264,7 @@ window.addEventListener('offline', ()=> notify('You are offline','warn'));
     .catch(() => {});
 })();
 
-// PWA install UI (omnibox + custom button hook-ready)
+// PWA install UI
 let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; notify('Install available — use your browser menu to add to Home','ok'); });
 window.addEventListener('appinstalled', () => { deferredPrompt = null; notify('App installed 🎉','ok'); });

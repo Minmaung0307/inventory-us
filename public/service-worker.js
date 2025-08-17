@@ -1,4 +1,3 @@
-// super-safe, GET-only cache with SW update on next load
 const CACHE = 'inv-app-v1';
 const ASSETS = [
   './', 'index.html', 'css/styles.css', 'js/app.js',
@@ -16,7 +15,7 @@ self.addEventListener('activate', (e)=> {
   self.clients.claim();
 });
 self.addEventListener('fetch', (e)=> {
-  if (e.request.method !== 'GET') return; // no HEAD/POST/etc
+  if (e.request.method !== 'GET') return;
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request).then(resp=>{
       const copy = resp.clone();

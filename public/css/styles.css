@@ -148,7 +148,7 @@ body {
 .tile:hover { background: var(--panel-2); }
 .tile i { font-size: 20px; }
 
-/* Tables (allow previews to overflow) */
+/* Tables */
 .table-wrap { position: relative; overflow: visible; }
 .table { width: 100%; border-collapse: collapse; border-radius: 12px; overflow: visible; }
 .table th, .table td { padding: 10px 12px; border-bottom: 1px solid var(--card-border); text-align: left; vertical-align: middle; }
@@ -158,7 +158,7 @@ body {
 .tr-danger { background: rgba(239, 68, 68, .16); }
 .tr-total th, .tr-total td { background: var(--tfoot); font-weight: 700; }
 
-/* Thumbs & preview (always above tables, hidden when modal/sidebar is open) */
+/* Thumbs & preview */
 .thumb-wrap { position: relative; width: 44px; height: 44px; }
 .thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 10px; border: 1px solid var(--card-border); }
 .thumb-wrap:hover .thumb-large { opacity: 1; transform: scale(1); pointer-events: none; }
@@ -205,7 +205,7 @@ a.btn { display:inline-flex; align-items:center; gap:6px; text-decoration:none !
 /* Remove default blue/underline where we use icon links */
 .login a, .topbar a, .sidebar .socials-row a, .socials-compact a { text-decoration: none; color: inherit; }
 
-/* Compact social icons in topbar (the row left of Home/Logout) */
+/* Compact social icons */
 .socials-compact { display: flex; gap: 8px; align-items: center; }
 .socials-compact a {
   display: inline-flex;

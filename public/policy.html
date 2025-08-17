@@ -1,29 +1,40 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Policy</title>
+<title>Policy – Privacy</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet"/>
 <style>
 :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --border:#1f2a37; }
 @media (prefers-color-scheme: light){ :root{ --bg:#f7fafc; --panel:#fff; --text:#0b1220; --muted:#51606f; --border:#e6edf3; } }
 *{box-sizing:border-box} body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,ui-sans-serif }
-.wrap{ max-width:900px; margin:24px auto; padding:0 16px 40px }
-.card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px; margin:14px 0 }
+.wrap{ max-width:900px; margin:24px auto; padding:0 16px 48px }
+.card{ background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:18px; margin:14px 0 }
 h1{ margin:6px 0 12px; font-size:26px } h2{ font-size:18px; margin:18px 0 8px }
-.muted{ color:var(--muted) } a{ color:var(--brand) }
+.muted{ color:var(--muted) } a{ color: var(--brand) }
 </style></head>
 <body>
   <div class="wrap">
-    <h1>Policy</h1>
+    <h1>Privacy Policy</h1>
     <div class="card">
-      <h2>Privacy</h2>
-      <p>Data lives locally in your browser. If you enable Cloud Sync, your data is stored per-user
-         in your Firebase Realtime Database project under <code>tenants/&lt;uid&gt;/kv</code>.</p>
-      <h2>Accounts</h2>
-      <p>We support roles: admin, manager, associate, user. Admins control users and have full access.</p>
+      <h2>How Inventory stores data</h2>
+      <ul>
+        <li><strong>Local first:</strong> your data is stored in your browser’s LocalStorage for speed and offline use.</li>
+        <li><strong>Optional Cloud Sync:</strong> when enabled in Settings, your data is mirrored to your own Firebase Realtime Database under <code>tenants/&lt;uid&gt;/kv</code>.</li>
+        <li><strong>Per-user isolation:</strong> each signed-in user has their own local namespace and cloud path.</li>
+      </ul>
+
+      <h2>What we don’t collect</h2>
+      <p>We don’t run trackers or analytics. Any YouTube embeds load from the official Iframe API (nocookie domain).</p>
+
       <h2>Security</h2>
-      <p>Use strong passwords. Cloud access and rules are your responsibility within Firebase.</p>
+      <ul>
+        <li>Use strong passwords. Limit admin roles.</li>
+        <li>Keep Firebase rules locked to authenticated users only.</li>
+      </ul>
+
+      <h2>Contact</h2>
+      <p>Questions? See the <a href="contact.html" target="_blank" rel="noopener">Contact</a> page.</p>
     </div>
   </div>
 </body></html>
