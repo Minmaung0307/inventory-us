@@ -178,13 +178,33 @@ const DEMO_ADMIN_PASS  = 'admin123';
 
 // --- Router + idle logout ----------------------------------------------------
 function go(route){ currentRoute = route; save('_route', route); renderApp(); }
-let idleTimer = null; const IDLE_LIMIT = 10*60*1000;
+let idleTimer = null; // 10 minutes
+const IDLE_LIMIT = 10 * 60 * 1000;
+let idleTimer = null;
+
 function resetIdleTimer(){
   if (!session) return;
   if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(async ()=>{ try{ await auth.signOut(); } finally { notify('Signed out due to inactivity','warn'); } }, IDLE_LIMIT);
+  idleTimer = setTimeout(async () => {
+    try { 
+      // Use full logout so Local mode doesn’t auto-relogin on refresh
+      await doLogout();
+      notify('Signed out due to inactivity', 'warn');
+    } catch (e) {
+      console.error('[idle logout]', e);
+    }
+  }, IDLE_LIMIT);
 }
-['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
+
+// Listen for common interactions
+['click','mousemove','keydown','touchstart','scroll'].forEach(evt =>
+  window.addEventListener(evt, resetIdleTimer, { passive: true })
+);
+
+// Optional: reset when tab becomes visible again
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') resetIdleTimer();
+});
 
 // --- Auth state --------------------------------------------------------------
 // Local auto-login: keep local users signed-in on refresh
@@ -638,60 +658,81 @@ function renderLogin() {
   const closeAuthModal = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); };
 
   // ---------- Sign in ----------
-  const doSignIn = async () => {
-    const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
-    const pass  = document.getElementById('li-pass')?.value || '';
-    const btn   = document.getElementById('btnLogin');
+  // ---------- Sign in (Firebase first, then local fallback) ----------
+const doSignIn = async () => {
+  const email = (document.getElementById('li-email')?.value || '').trim().toLowerCase();
+  const pass  = document.getElementById('li-pass')?.value || '';
+  const btn   = document.getElementById('btnLogin');
 
-    if (!email || !pass) { notify('Enter email & password','warn'); return; }
+  if (!email || !pass) { notify('Enter email & password','warn'); return; }
 
-    // Local demo admin (render immediately)
-    if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
-      let users = load('users', []);
-      let prof = users.find(u => (u.email||'').toLowerCase() === email);
-      if (!prof) {
-        prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
-        users.push(prof); save('users', users);
-      }
-      session = { ...prof, authMode: 'local' };
-      save('session', session);
-      notify('Welcome, Admin (local mode)');
-      try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
-      return;
+  // Always allow demo admin (pure local)
+  if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
+    let users = load('users', []);
+    let prof = users.find(u => (u.email||'').toLowerCase() === email);
+    if (!prof) {
+      prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:DEMO_ADMIN_PASS, img:'' };
+      users.push(prof); save('users', users);
     }
+    session = { ...prof, authMode: 'local' }; save('session', session);
+    currentRoute = 'home'; save('_route','home');
+    notify('Welcome, Admin (local mode)');
+    renderApp(); 
+    return;
+  }
 
-    try {
-      if (!navigator.onLine) throw new Error('You appear to be offline.');
-      console.log('[auth] signInWithEmailAndPassword starting', email);
-      btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
-
-      const cred = await auth.signInWithEmailAndPassword(email, pass);
-      console.log('[auth] signInWithEmailAndPassword OK:', cred.user?.uid);
-      notify('Welcome!');
-
-      setTimeout(() => {
-        const rendered = !!document.querySelector('.app');
-        if (!rendered) {
-          console.log('[auth] Fallback render -> ensureSessionAndRender');
-          try { ensureSessionAndRender(auth.currentUser); } catch(e){ console.error(e); notify('Render failed','danger'); }
-        }
-      }, 700);
-
-      btn.disabled = false; btn.innerHTML = keep;
-    } catch (e) {
-      const map = {
-        'auth/invalid-email': 'Invalid email format.',
-        'auth/user-disabled': 'This user is disabled.',
-        'auth/user-not-found': 'No account found. Use Create account.',
-        'auth/wrong-password': 'Incorrect password.',
-        'auth/too-many-requests': 'Too many attempts. Try again later.',
-        'auth/operation-not-allowed': 'Email/password sign-in is disabled.',
-        'auth/network-request-failed': 'Network error. Check your connection.'
-      };
-      notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
-      console.error('[auth] signIn error:', e?.code, e?.message);
+  // Helper: attempt local login
+  const tryLocal = () => {
+    if (localLogin(email, pass)) {
+      currentRoute = 'home'; save('_route','home');
+      renderApp();
+      return true;
     }
+    return false;
   };
+
+  // Try Firebase first
+  try {
+    btn.disabled = true; const keep = btn.innerHTML; btn.innerHTML = 'Signing in…';
+
+    // If you’re offline, skip straight to local attempt
+    if (!navigator.onLine) throw { code:'auth/network-request-failed', message:'You appear to be offline.' };
+
+    const cred = await auth.signInWithEmailAndPassword(email, pass);
+    // success → ensure session and go Home
+    notify('Welcome!');
+    currentRoute = 'home'; save('_route','home');
+    await ensureSessionAndRender(cred.user);
+
+    btn.disabled = false; btn.innerHTML = keep;
+  } catch (e) {
+    // Firebase failed → try local
+    const fallbackCodes = new Set([
+      'auth/user-not-found',
+      'auth/wrong-password',
+      'auth/network-request-failed',
+      'auth/too-many-requests',
+      'auth/invalid-email',
+      'auth/operation-not-allowed',
+      'auth/invalid-api-key'
+    ]);
+    if (fallbackCodes.has(e?.code)) {
+      if (tryLocal()) return;
+    }
+    // If local didn’t work, show the Firebase error
+    const map = {
+      'auth/invalid-email': 'Invalid email format.',
+      'auth/user-disabled': 'This user is disabled.',
+      'auth/user-not-found': 'No Firebase account found. If you created a local account earlier, try again — it should log you in locally.',
+      'auth/wrong-password': 'Incorrect password.',
+      'auth/too-many-requests': 'Too many attempts. Try again later.',
+      'auth/operation-not-allowed': 'Email/password sign-in is disabled in Firebase.',
+      'auth/network-request-failed': 'Network error. Check your connection.'
+    };
+    notify(map[e?.code] || (e?.message || 'Login failed'), 'danger');
+    console.warn('[auth] signIn error:', e?.code, e?.message);
+  }
+};
 
   // ---------- Sign up ----------
   const doSignup = async () => {
@@ -760,11 +801,24 @@ function renderLogin() {
 
 async function doLogout(){
   try { cloud?.disable?.(); } catch {}
+  try { await firebase?.database?.().goOffline?.(); } catch {}
   try { await auth.signOut(); } catch {}
   if (idleTimer) { try { clearTimeout(idleTimer); } catch {} idleTimer = null; }
+
+  // Clear session + land on Home next time
   session = null;
   save('session', null);
   currentRoute = 'home';
+  save('_route','home');
+
+  // Close any UI overlays (prevents stray backdrops)
+  try {
+    document.querySelectorAll('.modal.active')?.forEach(m => m.classList.remove('active'));
+    document.querySelectorAll('.modal-backdrop.active')?.forEach(b => b.classList.remove('active'));
+    document.getElementById('sidebar')?.classList.remove('open');
+    document.getElementById('backdrop')?.classList.remove('active');
+  } catch {}
+
   notify('Signed out');
   try { renderLogin(); } catch (e) { console.error(e); }
 }
