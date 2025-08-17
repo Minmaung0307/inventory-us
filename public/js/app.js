@@ -26,7 +26,7 @@ const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db   = firebase.database();
 
-/* ---------- Storage + notify (now per user) ---------- */
+/* ---------- Storage + notify (per user) ---------- */
 const notify = (msg, type='ok')=>{
   const n = $('#notification'); if (!n) return;
   n.textContent = msg; n.className = `notification show ${type}`;
@@ -39,25 +39,11 @@ let session      = _lsGet('session', null);
 let currentRoute = _lsGet('_route', 'home');
 let searchQuery  = _lsGet('_searchQ', '');
 function setSession(s){ session = s; _lsSet('session', s); }
-function nsId(){ // namespace id for local storage
-  if (!session) return 'guest';
-  if (session.authMode === 'firebase' && session.uid) return `fb:${session.uid}`;
-  const e = (session.email||'guest').toLowerCase();
-  return `local:${e}`;
-}
-function nsKey(key){
-  // keep "users" global so admins can manage; everything else scoped per user
-  if (key === 'users') return 'users';
-  return `u:${nsId()}:${key}`;
-}
+function nsId(){ if (!session) return 'guest'; if (session.authMode === 'firebase' && session.uid) return `fb:${session.uid}`; const e=(session.email||'guest').toLowerCase(); return `local:${e}`; }
+function nsKey(key){ if (key === 'users') return 'users'; return `u:${nsId()}:${key}`; }
 let CLOUD_APPLYING = false;
 function load(key, fallback){ return _lsGet(nsKey(key), fallback); }
-function save(key, val){
-  _lsSet(nsKey(key), val);
-  try{
-    if (!CLOUD_APPLYING && cloud.isOn() && auth.currentUser) cloud.saveKV(key, val);
-  }catch{}
-}
+function save(key, val){ _lsSet(nsKey(key), val); try{ if (!CLOUD_APPLYING && cloud.isOn() && auth.currentUser) cloud.saveKV(key, val); }catch{} }
 
 /* ---------- Rescue screen ---------- */
 function showRescue(err){
@@ -84,14 +70,13 @@ const THEME_MODES = [{key:'light',name:'Light'},{key:'dark',name:'Dark'},{key:'a
 const THEME_SIZES = [{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
 function getTheme(){ return load('_theme2', { mode:'aqua', size:'medium' }); }
 function applyTheme(){
-  const t = getTheme();
-  const size = THEME_SIZES.find(s=>s.key===t.size)?.pct ?? 100;
+  const t = getTheme(); const size = THEME_SIZES.find(s=>s.key===t.size)?.pct ?? 100;
   document.documentElement.setAttribute('data-theme', t.mode==='light' ? 'light' : (t.mode==='dark' ? 'dark' : ''));
   document.documentElement.style.setProperty('--font-scale', size + '%');
 }
 applyTheme();
 
-/* ---------- Cloud Sync (per-user keys) ---------- */
+/* ---------- Cloud Sync ---------- */
 const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2'];
 const cloud = (function(){
   let liveRefs = [];
@@ -106,20 +91,16 @@ const cloud = (function(){
     if (!snap.exists()) return;
     const all = snap.val() || {};
     CLOUD_APPLYING = true;
-    try{
-      Object.values(all).forEach(row=>{ if (row && row.key && 'val' in row) _lsSet(nsKey(row.key), row.val); });
-    } finally { CLOUD_APPLYING = false; }
+    try{ Object.values(all).forEach(row=>{ if (row && row.key && 'val' in row) _lsSet(nsKey(row.key), row.val); }); }
+    finally { CLOUD_APPLYING = false; }
   }
   function subscribeAll(){
-    if (!uid()) return;
-    unsubscribeAll();
+    if (!uid()) return; unsubscribeAll();
     CLOUD_KEYS.forEach(key=>{
       const ref = pathFor(key);
       const handler = ref.on('value',(snap)=>{
         const data=snap.val(); if(!data) return;
-        CLOUD_APPLYING = true;
-        try{ _lsSet(nsKey(key), data.val); if (key==='_theme2') applyTheme(); renderApp(); }
-        finally { CLOUD_APPLYING = false; }
+        CLOUD_APPLYING = true; try{ _lsSet(nsKey(key), data.val); if (key==='_theme2') applyTheme(); renderApp(); } finally { CLOUD_APPLYING = false; }
       });
       liveRefs.push({ref,handler});
     });
@@ -139,12 +120,11 @@ function canAdd(){ return ['admin','manager','associate'].includes(role()); }
 function canEdit(){ return ['admin','manager'].includes(role()); }
 function canDelete(){ return ['admin'].includes(role()); }
 
-/* ---------- Demo seed (guest only) ---------- */
+/* ---------- Demo seed ---------- */
 const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
 const DEMO_ADMIN_PASS  = 'admin123';
 (function seedOnFirstRun(){
   if (_lsGet('_seeded_v5', false)) return;
-  // Seed "users" globally so admin can always see a few examples
   _lsSet('users', [
     { name:'Admin',     username:'admin',     email:'admin@sushi.com',     contact:'', role:'admin',     password:'', img:'' },
     { name:'Admin',     username:'admin',     email:DEMO_ADMIN_EMAIL,      contact:'', role:'admin',     password:DEMO_ADMIN_PASS, img:'' },
@@ -152,7 +132,6 @@ const DEMO_ADMIN_PASS  = 'admin123';
     { name:'Associate', username:'associate', email:'associate@sushi.com', contact:'', role:'associate', password:'', img:'' },
     { name:'Viewer',    username:'viewer',    email:'cashier@sushi.com',   contact:'', role:'user',      password:'', img:'' },
   ]);
-  // Guest-only sample data (won’t leak across users because of namespacing)
   _lsSet(nsKey('inventory'), [
     { id:'inv1', img:'', name:'Nori Sheets', code:'NOR-100', type:'Dry', price:3.00, stock:80, threshold:30 },
     { id:'inv2', img:'', name:'Sushi Rice',  code:'RIC-200', type:'Dry', price:1.50, stock:24, threshold:20 },
@@ -178,15 +157,12 @@ const DEMO_ADMIN_PASS  = 'admin123';
 /* ---------- Router + idle logout ---------- */
 function go(route){ currentRoute = route; _lsSet('_route', route); renderApp(); }
 let idleTimer = null; const IDLE_LIMIT = 10*60*1000;
-function resetIdleTimer(){
-  if (!session) return;
-  if (idleTimer) clearTimeout(idleTimer);
+function resetIdleTimer(){ if (!session) return; if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(async ()=>{ try{ await auth.signOut(); } finally { notify('Signed out due to inactivity','warn'); } }, IDLE_LIMIT);
 }
 ['click','mousemove','keydown','touchstart','scroll'].forEach(evt=> window.addEventListener(evt, resetIdleTimer, {passive:true}));
 
 /* ---------- Auth state ---------- */
-const ALLOW_LOCAL_AUTOLOGIN = true;
 auth.onAuthStateChanged(async (user) => {
   try { await ensureSessionAndRender(user); }
   catch (err) { console.error('[auth] ensureSessionAndRender crashed:', err); notify(err?.message || 'Render failed', 'danger'); showRescue(err); }
@@ -195,12 +171,9 @@ async function ensureSessionAndRender(user) {
   applyTheme();
   if (!user){
     const stored = _lsGet('session', null);
-    if (stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
-      setSession(stored); resetIdleTimer(); currentRoute = 'home'; renderApp(); return;
-    }
+    if (stored && stored.authMode === 'local') { setSession(stored); resetIdleTimer(); currentRoute = 'home'; renderApp(); return; }
     setSession(null); if (idleTimer) clearTimeout(idleTimer); renderLogin(); return;
   }
-  // Firebase user present
   const email = (user.email || '').toLowerCase();
   let users = _lsGet('users', []);
   let prof = users.find(u => (u.email || '').toLowerCase() === email);
@@ -208,14 +181,10 @@ async function ensureSessionAndRender(user) {
     const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
     prof = { name: user.displayName || email.split('@')[0], username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
     users.push(prof); _lsSet('users', users);
-  } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
-    prof.role = 'admin'; _lsSet('users', users);
-  }
+  } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') { prof.role='admin'; _lsSet('users', users); }
   setSession({ ...prof, authMode: 'firebase', uid: user.uid });
   try{ if (cloud?.isOn?.()){ await firebase.database().goOnline(); await cloud.pullAllOnce(); cloud.subscribeAll(); } }catch{}
-  resetIdleTimer();
-  currentRoute='home'; // always
-  renderApp();
+  resetIdleTimer(); currentRoute='home'; renderApp();
 }
 
 /* ---------- Local Auth helpers ---------- */
@@ -264,32 +233,15 @@ function renderSidebar(active='home'){
   ];
   return `
     <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <div class="logo">📦</div>
-        <div class="title">Inventory</div>
-      </div>
-
+      <div class="brand"><div class="logo">📦</div><div class="title">Inventory</div></div>
       <div class="search-wrap">
         <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
         <div id="searchResults" class="search-results"></div>
       </div>
-
       <h6>Menu</h6>
-      <nav class="nav">
-        ${links.map(l => `
-          <div class="item ${active===l.route?'active':''}" data-route="${l.route}">
-            <i class="${l.icon}"></i> <span>${l.label}</span>
-          </div>`).join('')}
-      </nav>
-
+      <nav class="nav">${links.map(l=>`<div class="item ${active===l.route?'active':''}" data-route="${l.route}"><i class="${l.icon}"></i><span>${l.label}</span></div>`).join('')}</nav>
       <h6>Links</h6>
-      <div class="links">
-        ${pages.map(p => `
-          <div class="item" data-route="${p.route}">
-            <i class="${p.icon}"></i> <span>${p.label}</span>
-          </div>`).join('')}
-      </div>
-
+      <div class="links">${pages.map(p=>`<div class="item" data-route="${p.route}"><i class="${p.icon}"></i><span>${p.label}</span></div>`).join('')}</div>
       <h6>Social</h6>
       <div class="socials-row">
         <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
@@ -298,16 +250,9 @@ function renderSidebar(active='home'){
         <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
         <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
       </div>
-    </aside>
-  `;
+    </aside>`;
 }
 function renderTopbar(){
-  const socialsCompact = `
-    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
-      <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-      <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-      <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-    </div>`;
   return `
     <div class="topbar">
       <div class="left">
@@ -315,13 +260,16 @@ function renderTopbar(){
         <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
       </div>
       <div class="right">
-        ${socialsCompact}
+        <div class="socials-compact">
+          <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+          <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+          <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+        </div>
         <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
         <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
       </div>
     </div>
-    <div class="backdrop" id="backdrop"></div>
-  `;
+    <div class="backdrop" id="backdrop"></div>`;
 }
 
 /* delegated nav + modal-close + sidebar open/close */
@@ -382,9 +330,7 @@ function renderApp() {
         ${renderSidebar(route)}
         <div>
           ${renderTopbar()}
-          <div class="main" id="main">
-            ${safeView(route)}
-          </div>
+          <div class="main" id="main">${safeView(route)}</div>
         </div>
       </div>`;
     wireRoute(route);
@@ -396,48 +342,40 @@ function renderLogin() {
   const root = $('#root');
   root.innerHTML = `
     <div class="login">
-      <div class="card login-card">
-        <div class="card-body">
-          <div class="login-logo"><div class="logo">📦</div><div style="font-weight:800;font-size:20px">Inventory</div></div>
-          <p class="login-note">Sign in to continue</p>
-          <div class="grid">
-            <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username"/>
-            <input id="li-pass" class="input" type="password" placeholder="Password" autocomplete="current-password"/>
-            <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
-            <div style="display:flex;justify-content:space-between;gap:8px">
-              <a id="link-forgot"   href="#" class="btn ghost"   style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</a>
-              <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
-            </div>
-            <div class="login-note" style="margin-top:6px">
-              Tip: local demo admin — <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong>
-            </div>
+      <div class="card login-card"><div class="card-body">
+        <div class="login-logo"><div class="logo">📦</div><div style="font-weight:800;font-size:20px">Inventory</div></div>
+        <p class="login-note">Sign in to continue</p>
+        <div class="grid">
+          <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username"/>
+          <input id="li-pass" class="input" type="password" placeholder="Password" autocomplete="current-password"/>
+          <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
+          <div style="display:flex;justify-content:space-between;gap:8px">
+            <a id="link-forgot"   href="#" class="btn ghost"   style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</a>
+            <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
           </div>
+          <div class="login-note" style="margin-top:6px">Tip: demo admin — <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong></div>
         </div>
-      </div>
+      </div></div>
     </div>
 
     <div class="modal-backdrop" id="mb-auth"></div>
 
-    <div class="modal" id="m-signup">
-      <div class="dialog">
-        <div class="head"><strong>Create account</strong><button class="btn ghost" data-close="m-signup">Close</button></div>
-        <div class="body grid">
-          <input id="su-name"  class="input" placeholder="Full name"/>
-          <input id="su-email" class="input" type="email" placeholder="Email"/>
-          <input id="su-pass"  class="input" type="password" placeholder="Password"/>
-          <input id="su-pass2" class="input" type="password" placeholder="Confirm password"/>
-        </div>
-        <div class="foot"><button class="btn" id="btnSignupDo"><i class="ri-user-add-line"></i> Sign up</button></div>
+    <div class="modal" id="m-signup"><div class="dialog">
+      <div class="head"><strong>Create account</strong><button class="btn ghost" data-close="m-signup">Close</button></div>
+      <div class="body grid">
+        <input id="su-name"  class="input" placeholder="Full name"/>
+        <input id="su-email" class="input" type="email" placeholder="Email"/>
+        <input id="su-pass"  class="input" type="password" placeholder="Password"/>
+        <input id="su-pass2" class="input" type="password" placeholder="Confirm password"/>
       </div>
-    </div>
+      <div class="foot"><button class="btn" id="btnSignupDo"><i class="ri-user-add-line"></i> Sign up</button></div>
+    </div></div>
 
-    <div class="modal" id="m-reset">
-      <div class="dialog">
-        <div class="head"><strong>Reset password</strong><button class="btn ghost" data-close="m-reset">Close</button></div>
-        <div class="body grid"><input id="fp-email" class="input" type="email" placeholder="Your email"/></div>
-        <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset / Local reset</button></div>
-      </div>
-    </div>`;
+    <div class="modal" id="m-reset"><div class="dialog">
+      <div class="head"><strong>Reset password</strong><button class="btn ghost" data-close="m-reset">Close</button></div>
+      <div class="body grid"><input id="fp-email" class="input" type="email" placeholder="Your email"/></div>
+      <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset / Local reset</button></div>
+    </div></div>`;
 
   const openAuth = sel => { $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('suppress-previews'); };
   const closeAuth = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('suppress-previews'); };
@@ -446,19 +384,14 @@ function renderLogin() {
     const email=($('#li-email')?.value||'').trim().toLowerCase(); const pass=$('#li-pass')?.value||''; const btn=$('#btnLogin');
     if (!email || !pass) return notify('Enter email & password','warn');
     if (email===DEMO_ADMIN_EMAIL.toLowerCase() && pass===DEMO_ADMIN_PASS) { localLogin(email, pass); return; }
-    try{
-      btn.disabled=true; const keep=btn.innerHTML; btn.innerHTML='Signing in…';
-      await auth.signInWithEmailAndPassword(email, pass); notify('Welcome!');
-      btn.disabled=false; btn.innerHTML=keep;
-    }catch(e){ btn.disabled=false; notify(e?.message||'Login failed','danger'); }
+    try{ btn.disabled=true; const keep=btn.innerHTML; btn.innerHTML='Signing in…'; await auth.signInWithEmailAndPassword(email, pass); notify('Welcome!'); btn.disabled=false; btn.innerHTML=keep; }
+    catch(e){ btn.disabled=false; notify(e?.message||'Login failed','danger'); }
   }
   function doSignup(){
     const name=($('#su-name')?.value||'').trim(), email=($('#su-email')?.value||'').trim().toLowerCase(), pass=$('#su-pass')?.value||'', pass2=$('#su-pass2')?.value||'';
     if (!email || !pass) return notify('Email and password are required','warn'); if (pass!==pass2) return notify('Passwords do not match','warn');
-    auth.createUserWithEmailAndPassword(email, pass).then(async ()=>{
-      try { await auth.currentUser.updateProfile({ displayName: name||email.split('@')[0] }); } catch {}
-      notify('Account created'); closeAuth();
-    }).catch(()=>{ localSignup({name,email,pass}); closeAuth(); });
+    auth.createUserWithEmailAndPassword(email, pass).then(async ()=>{ try { await auth.currentUser.updateProfile({ displayName: name||email.split('@')[0] }); } catch {} notify('Account created'); closeAuth(); })
+      .catch(()=>{ localSignup({name,email,pass}); closeAuth(); });
   }
   function doReset(){
     const email=($('#fp-email')?.value||'').trim().toLowerCase(); if(!email) return notify('Enter your email','warn');
@@ -642,31 +575,44 @@ function viewDashboard(){
       </div>
     </div>`;
 }
-function wireDashboard(){ on('#addPost', ()=>{ if(!canAdd()) return notify('No permission','warn'); openModal('m-post'); $('#post-id').value=''; $('#post-title').value=''; $('#post-body').value=''; $('#post-img').value=''; attachImageUpload('#post-imgfile','#post-img', '#post-img-preview'); }); }
+function wireDashboard(){
+  // 🔧 Bind "Add Post" so it always wires Save for create mode
+  on('#addPost', ()=>{ if(!canAdd()) return notify('No permission','warn');
+    openModal('m-post');
+    $('#post-id').value=''; $('#post-title').value=''; $('#post-body').value=''; $('#post-img').value='';
+    const pv=$('#post-img-preview'); if(pv){ pv.src=''; pv.style.display='none'; }
+    attachImageUpload('#post-imgfile','#post-img', '#post-img-preview');
+
+    const saveBtn = $('#save-post'); if (saveBtn){
+      saveBtn.onclick = null; // reset
+      saveBtn.addEventListener('click', ()=>{
+        const posts=load('posts',[]); const id='post_'+Date.now();
+        const obj={ id, title:($('#post-title')?.value||'').trim(), body:($('#post-body')?.value||'').trim(), img:($('#post-img')?.value||'').trim(), createdAt: Date.now() };
+        if(!obj.title) return notify('Title required','warn');
+        posts.unshift(obj); save('posts', posts); closeModal('m-post'); notify('Saved'); renderApp();
+      }, { once:true });
+    }
+  });
+}
 function wirePosts(){
   const sec=$('[data-section="posts"]'); if(!sec) return;
-  const saveBtn = $('#save-post'); if (saveBtn){ saveBtn.onclick=null; saveBtn.addEventListener('click', ()=>{
-    if(!canAdd()) return notify('No permission','warn');
-    const posts=load('posts',[]); const id=$('#post-id').value || ('post_'+Date.now());
-    const obj={ id, title:($('#post-title')?.value||'').trim(), body:($('#post-body')?.value||'').trim(), img:($('#post-img')?.value||'').trim(), createdAt: Date.now() };
-    if(!obj.title) return notify('Title required','warn');
-    const i=posts.findIndex(x=>x.id===id);
-    if(i>=0){ if(!canEdit()) return notify('No permission','warn'); posts[i]=obj; } else { posts.unshift(obj); }
-    save('posts', posts); closeModal('m-post'); notify('Saved'); renderApp();
-  }, {once:true}); }
 
+  // Edit/Delete within the list
   sec.addEventListener('click', (e)=>{
     const btn=e.target.closest('button'); if(!btn) return;
     const id=btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if(!id) return;
     if(btn.hasAttribute('data-edit')){
       if(!canEdit()) return notify('No permission','warn');
       const p=load('posts',[]).find(x=>x.id===id); if(!p) return;
-      openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||''; attachImageUpload('#post-imgfile','#post-img', '#post-img-preview');
-      const s=$('#save-post'); s.onclick=null; s.addEventListener('click', ()=>{
+      openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||'';
+      const pv=$('#post-img-preview'); if(pv){ pv.src=p.img||''; pv.style.display=p.img?'block':'none'; pv.classList.add('img-preview'); }
+      attachImageUpload('#post-imgfile','#post-img', '#post-img-preview');
+
+      const s=$('#save-post'); if (s){ s.onclick=null; s.addEventListener('click', ()=>{
         const posts=load('posts',[]); const idx=posts.findIndex(x=>x.id===id); if(idx<0) return;
         posts[idx]={ ...posts[idx], title:($('#post-title')?.value||'').trim(), body:($('#post-body')?.value||'').trim(), img:($('#post-img')?.value||'').trim(), createdAt:posts[idx].createdAt };
         save('posts', posts); closeModal('m-post'); notify('Updated'); renderApp();
-      }, {once:true});
+      }, {once:true}); }
     }else{
       if(!canDelete()) return notify('No permission','warn');
       save('posts', load('posts',[]).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
@@ -674,7 +620,7 @@ function wirePosts(){
   });
 }
 
-/* ===================== Inventory / Products / COGS / Tasks ===================== */
+/* ===================== CSV, image upload helper ===================== */
 function downloadCSV(filename, rows, headers){
   try{
     const csvRows=[]; if(headers&&headers.length) csvRows.push(headers.join(','));
@@ -685,10 +631,10 @@ function downloadCSV(filename, rows, headers){
 }
 function attachImageUpload(fileInputSel, textInputSel, previewSel){
   const f=$(fileInputSel), t=$(textInputSel); if(!f||!t) return;
-  f.onchange=()=>{ const file=f.files&&f.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{ t.value=reader.result; const p=previewSel?$(previewSel):null; if(p){ p.src=reader.result; p.style.display='block'; } }; reader.readAsDataURL(file); };
+  f.onchange=()=>{ const file=f.files&&f.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{ t.value=reader.result; const p=previewSel?$(previewSel):null; if(p){ p.src=reader.result; p.style.display='block'; p.classList.add('img-preview'); } }; reader.readAsDataURL(file); };
 }
 
-/* Inventory */
+/* ===================== Inventory ===================== */
 function viewInventory(){
   const items=load('inventory',[]);
   return `<div class="card"><div class="card-body">
@@ -771,7 +717,7 @@ function wireInventory(){
   });
 }
 
-/* Products */
+/* ===================== Products ===================== */
 function viewProducts(){
   const items=load('products',[]);
   return `<div class="card"><div class="card-body">
@@ -841,7 +787,7 @@ function wireProducts(){
   });
 }
 
-/* COGS */
+/* ===================== COGS ===================== */
 function viewCOGS(){
   const rows=load('cogs',[]); const totals=rows.reduce((a,r)=>({grossIncome:a.grossIncome+(+r.grossIncome||0),produceCost:a.produceCost+(+r.produceCost||0),itemCost:a.itemCost+(+r.itemCost||0),freight:a.freight+(+r.freight||0),delivery:a.delivery+(+r.delivery||0),other:a.other+(+r.other||0)}),{grossIncome:0,produceCost:0,itemCost:0,freight:0,delivery:0,other:0});
   const grossProfit=r=>(+r.grossIncome||0)-((+r.produceCost||0)+(+r.itemCost||0)+(+r.freight||0)+(+r.delivery||0)+(+r.other||0));
@@ -903,7 +849,7 @@ function wireCOGS(){
   });
 }
 
-/* Tasks (DnD + mobile tap-to-move) */
+/* ===================== Tasks (DnD) ===================== */
 function viewTasks(){
   const items=load('tasks',[]); const lane=(key,label,color)=>`
     <div class="card lane-row" data-lane="${key}">
@@ -926,11 +872,7 @@ function viewTasks(){
         </div>
       </div>
     </div>`;
-  return `<div data-section="tasks">
-    ${lane('todo','To do','#f59e0b')}
-    ${lane('inprogress','In progress','#3b82f6')}
-    ${lane('done','Done','#10b981')}
-  </div>`;
+  return `<div data-section="tasks">${lane('todo','To do','#f59e0b')}${lane('inprogress','In progress','#3b82f6')}${lane('done','Done','#10b981')}</div>`;
 }
 function wireTasks(){
   const root=$('[data-section="tasks"]'); if(!root) return;
@@ -940,7 +882,6 @@ function wireTasks(){
     if(!obj.title) return notify('Title required','warn'); const i=items.findIndex(x=>x.id===id); if(i>=0){ if(!canEdit()) return notify('No permission','warn'); items[i]=obj; } else items.push(obj);
     save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
   });
-
   root.addEventListener('click', (e)=>{
     const btn=e.target.closest('button'); if(!btn) return; const id=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
     const items=load('tasks',[]);
@@ -950,7 +891,6 @@ function wireTasks(){
       if(!canDelete()) return notify('No permission','warn'); save('tasks', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
     }
   });
-
   setupDnD();
   const isTouch='ontouchstart' in window || navigator.maxTouchPoints>0;
   if(isTouch){ $$('.task-card').forEach(card=>{ card.addEventListener('click',(e)=>{ if(e.target.closest('button')) return; if(!canAdd()) return notify('No permission','warn');
@@ -959,9 +899,7 @@ function wireTasks(){
 }
 function setupDnD(){
   const lanes=['todo','inprogress','done'];
-  document.querySelectorAll('[data-task]').forEach(card=>{
-    card.ondragstart=e=>{ e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); e.dataTransfer.effectAllowed='move'; };
-  });
+  document.querySelectorAll('[data-task]').forEach(card=>{ card.ondragstart=e=>{ e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); e.dataTransfer.effectAllowed='move'; }; });
   lanes.forEach(k=>{
     const laneGrid=$('#lane-'+k); const parentCard=laneGrid?.closest('.lane-row'); if(!laneGrid) return;
     laneGrid.ondragover=e=>{ e.preventDefault(); parentCard?.classList.add('drop'); e.dataTransfer.dropEffect='move'; };
@@ -1067,7 +1005,7 @@ function wireSettings(){
     if(!navigator.onLine) return notify('You appear to be offline.','warn');
     await firebase.database().goOnline(); await cloud.pushAll(); notify('Synced'); }catch(e){ notify((e&&e.message)||'Sync failed','danger'); } });
 
-  // Profile
+  // Profile (live preview + persist)
   attachImageUpload('#me-imgfile', '#me-img', '#me-preview');
   on('#save-profile', ()=>{
     const users=_lsGet('users',[]);
@@ -1079,7 +1017,7 @@ function wireSettings(){
 
   // Users (admin only)
   if (role()==='admin'){
-    const addBtn=$('#addUser'); const table=$('[data-section="users"]');
+    const table=$('[data-section="users"]');
     on('#addUser', ()=>{ openModal('m-user');
       $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-img').value='';
       const sel=$('#user-role'); sel.innerHTML=allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value='user';
@@ -1131,7 +1069,7 @@ function postModal(){ return `
       <input id="post-id" type="hidden"/>
       <input id="post-title" class="input" placeholder="Title"/>
       <textarea id="post-body" class="input" placeholder="Body"></textarea>
-      <img id="post-img-preview" style="display:none;width:100%;border-radius:12px;border:1px solid var(--card-border)"/>
+      <img id="post-img-preview" class="img-preview" style="display:none;border-radius:12px;border:1px solid var(--card-border)"/>
       <input id="post-img" class="input" placeholder="Image URL or upload below"/>
       <input id="post-imgfile" type="file" accept="image/*" class="input"/>
     </div>
@@ -1270,7 +1208,4 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
 window.addEventListener('appinstalled', () => { deferredPrompt = null; notify('App installed 🎉','ok'); });
 
 // Boot
-(function boot(){
-  try { if (typeof renderApp==='function' && window.session) renderApp(); else if (typeof renderLogin==='function') renderLogin(); }
-  catch(e){ notify(e.message||'Startup error','danger'); if (typeof renderLogin==='function') renderLogin(); }
-})();
+(function boot(){ try { if (typeof renderApp==='function' && window.session) renderApp(); else if (typeof renderLogin==='function') renderLogin(); } catch(e){ notify(e.message||'Startup error','danger'); if (typeof renderLogin==='function') renderLogin(); }})();

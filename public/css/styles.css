@@ -172,16 +172,26 @@ body {
 /* Image modal (phones) */
 .img-modal .dialog { width: min(520px, 94vw); }
 .img-modal .imgbox { width: 100%; max-height: 70vh; display: grid; place-items: center; }
-.img-modal .imgbox img { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--card-border); }
+.img-modal .imgbox img { width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--card-border) }
 
-/* Modals */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; z-index: 900; }
-.modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 910; }
+/* 🔧 Modals — scrollable & safe on small screens */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; z-index: 1500; }
+.modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 1510; }
 .modal.active, .modal-backdrop.active { display: flex; }
-.modal .dialog { background: var(--panel); border: 1px solid var(--card-border); border-radius: 16px; width: min(720px, 92vw); box-shadow: var(--shadow); }
+
+.modal .dialog {
+  background: var(--panel); border: 1px solid var(--card-border); border-radius: 16px;
+  width: min(720px, 92vw);
+  max-height: 92vh;                 /* NEW */
+  display: flex; flex-direction: column;  /* NEW */
+  box-shadow: var(--shadow);
+}
 .dialog .head { padding: 14px 16px; border-bottom: 1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;}
-.dialog .body { padding: 16px; }
+.dialog .body { padding: 16px; overflow: auto; } /* NEW */
 .dialog .foot { padding: 12px 16px; border-top: 1px solid var(--card-border); display:flex; gap:8px; justify-content:flex-end; }
+
+/* Limit inline image previews inside modals */
+.img-preview { width: 100%; height: auto; max-height: 50vh; object-fit: contain; } /* NEW */
 
 /* Theme section layout */
 .theme-inline { display:flex; gap:16px; flex-wrap:wrap; }
