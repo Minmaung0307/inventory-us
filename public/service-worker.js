@@ -1,33 +1,36 @@
-/* Minimal, safe SW: cache on install; respond with cache-first for GET requests.
-   Avoids using HEAD (fixes the earlier Cache.put HEAD error). */
+// Minimal, safe GET-only cache
 const CACHE = 'inv-cache-v3';
 const ASSETS = [
-  '/', 'index.html',
-  'css/styles.css', 'js/app.js',
-  'manifest.webmanifest',
-  'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png'
+  '/', '/index.html',
+  '/css/styles.css',
+  '/js/app.js',
+  '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png',
+  '/about.html', '/policy.html', '/license.html', '/guide.html', '/setup-guide.html',
+  '/manifest.webmanifest'
 ];
 
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS)).then(()=>self.skipWaiting())
-  );
+self.addEventListener('install', (e)=>{
+  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)));
+  self.skipWaiting();
 });
-
-self.addEventListener('activate', (e) => {
+self.addEventListener('activate', (e)=>{
   e.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.map(k => k !== CACHE && caches.delete(k)))).then(()=>self.clients.claim())
+    caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))
   );
+  self.clients.claim();
 });
-
-self.addEventListener('fetch', (e) => {
-  const { request } = e;
-  if (request.method !== 'GET') return; // never cache non-GET
+self.addEventListener('fetch', (e)=>{
+  if (e.request.method !== 'GET') return; // don't handle POST/PUT
   e.respondWith(
-    caches.match(request).then(res => res || fetch(request).then(r => {
-      const copy = r.clone();
-      caches.open(CACHE).then(c => c.put(request, copy)).catch(()=>{});
-      return r;
-    }).catch(()=> caches.match('/')))
+    caches.match(e.request).then((hit)=>{
+      const fetcher = fetch(e.request).then(res=>{
+        try{
+          const copy = res.clone();
+          caches.open(CACHE).then(c=>c.put(e.request, copy)).catch(()=>{});
+        }catch{}
+        return res;
+      }).catch(()=> hit || caches.match('/index.html'));
+      return hit || fetcher;
+    })
   );
 });

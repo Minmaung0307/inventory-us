@@ -35,6 +35,21 @@ const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db   = firebase.database();
 
+// --- EmailJS (optional, admin-only by default) -------------------------------
+const EMAILJS_PUBLIC_KEY  = 'WT0GOYrL9HnDKvLUf'; // <-- fill or leave '' for mailto fallback
+const EMAILJS_SERVICE_ID  = 'service_z9tkmvr'; // <-- fill
+const EMAILJS_TEMPLATE_ID = 'template_q5q471f'; // <-- fill
+async function ensureEmailJS(){
+  if (window.emailjs?.send) return;
+  await new Promise((resolve, reject)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js';
+    s.onload=resolve; s.onerror=()=>reject(new Error('EmailJS SDK failed to load'));
+    document.head.appendChild(s);
+  });
+  if (EMAILJS_PUBLIC_KEY) window.emailjs.init(EMAILJS_PUBLIC_KEY);
+}
+
 // --- Theme -------------------------------------------------------------------
 const THEME_MODES = [{key:'light',name:'Light'},{key:'dark',name:'Dark'},{key:'aqua',name:'Aqua'}];
 const THEME_SIZES = [{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
@@ -79,7 +94,6 @@ let session      = load('session', null);
 let currentRoute = load('_route', 'home');
 let searchQuery  = load('_searchQ', '');
 
-// built-in demo admin (local auth fallback)
 const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
 const DEMO_ADMIN_PASS  = 'admin123';
 
@@ -134,7 +148,6 @@ async function ensureSessionAndRender(user) {
   try {
     applyTheme();
 
-    // allow local session if enabled
     const stored = load('session', null);
     if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
       session = stored;
@@ -188,11 +201,10 @@ async function ensureSessionAndRender(user) {
    Part B — Login & Shell
    ========================= */
 
-// ---------- Local Auth helpers ----------
+// Local Auth helpers
 function localLogin(email, pass){
   const users = load('users', []);
   const e = (email||'').toLowerCase();
-  // Always allow demo admin
   if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
     let u = users.find(x => (x.email||'').toLowerCase() === e);
     if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
@@ -202,7 +214,6 @@ function localLogin(email, pass){
   if (u2) { session = { ...u2, authMode: 'local' }; save('session', session); notify('Signed in (Local mode)'); renderApp(); setupSessionPrompt(); return true; }
   return false;
 }
-
 function localSignup({name,email,pass}){
   const e = (email||'').toLowerCase();
   const users = load('users', []);
@@ -217,7 +228,6 @@ function localSignup({name,email,pass}){
   session = { ...u, authMode: 'local' }; save('session', session);
   notify('Account created (Local mode)'); renderApp(); setupSessionPrompt(); return true;
 }
-
 function localResetPassword(email){
   const e = (email||'').toLowerCase();
   const users = load('users', []);
@@ -228,7 +238,7 @@ function localResetPassword(email){
   return { ok:true, temp };
 }
 
-// ---------- Sidebar + Topbar ----------
+// Sidebar + Topbar
 function renderSidebar(active='home'){
   const links = [
     { route:'home',      icon:'ri-home-5-line',              label:'Home' },
@@ -286,7 +296,6 @@ function renderSidebar(active='home'){
     </aside>
   `;
 }
-
 function renderTopbar(){
   const socialsCompact = `
     <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
@@ -309,16 +318,12 @@ function renderTopbar(){
     <div class="backdrop" id="backdrop"></div>
   `;
 }
-
-// delegated sidebar nav
 document.addEventListener('click', (e)=>{
   const item = e.target.closest('.sidebar .item[data-route]');
   if (!item) return;
   const r = item.getAttribute('data-route');
   if (r) { go(r); closeSidebar(); }
 });
-
-// close buttons in modals (generic)
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-close]');
   if (!btn) return;
@@ -407,15 +412,12 @@ function safeView(route) {
     default:           return viewHome();
   }
 }
-
 function wireRoute(route) {
-  // Topbar actions
   $('#btnLogout')?.addEventListener('click', doLogout);
   $('#btnHome')?.addEventListener('click', () => go('home'));
   $('#burger')?.addEventListener('click', openSidebar);
   $('#backdrop')?.addEventListener('click', closeSidebar);
 
-  // In-content navigation buttons like: <button data-go="inventory">
   document.querySelectorAll('[data-go]').forEach(el => {
     el.addEventListener('click', () => {
       const r  = el.getAttribute('data-go');
@@ -428,8 +430,8 @@ function wireRoute(route) {
   });
 
   hookSidebarInteractions();
-  ensureGlobalModals();   // creates modals if not present
-  wireSessionModal();     // bind stay/logout
+  ensureGlobalModals();
+  wireSessionModal();
   enableMobileImagePreview();
 
   switch ((route || 'home')) {
@@ -443,7 +445,6 @@ function wireRoute(route) {
     case 'contact':   wireContact(); break;
   }
 }
-
 function renderApp() {
   try {
     if (!session) { renderLogin(); return; }
@@ -499,9 +500,9 @@ function renderLogin() {
               <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
             </div>
 
-            <div class="login-note" style="margin-top:6px">
+            <!-- <div class="login-note" style="margin-top:6px">
               Tip: you can log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
-            </div>
+            </div> -->
           </div>
         </div>
       </div>
@@ -545,7 +546,6 @@ function renderLogin() {
 
     if (!email || !pass) { notify('Enter email & password','warn'); return; }
 
-    // Local demo admin
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
       let users = load('users', []);
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
@@ -606,7 +606,6 @@ function renderLogin() {
       notify('Account created — you are signed in');
       closeAuthModal();
     } catch (e) {
-      // Local fallback
       localSignup({name,email,pass});
       closeAuthModal();
     }
@@ -646,7 +645,6 @@ async function doLogout(){
   currentRoute = 'home';
   save('_route','home');
 
-  // stop session prompt timers if any
   if (__sessionPromptInterval) { clearInterval(__sessionPromptInterval); __sessionPromptInterval = null; }
   __cancelSessionPromptTimers?.();
 
@@ -656,7 +654,6 @@ async function doLogout(){
 
 /* ===================== Part C.1 — Home (Hot music videos) ===================== */
 
-// Library (weekly 10 via ISO week)
 (function(){
   const DEFAULT_LIB = [
     { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
@@ -688,7 +685,6 @@ async function doLogout(){
     return getISOWeek(new Date()) % n;
   };
 
-  // blacklist
   function _ytBlacklistLoad(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
   function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
   window.ytBlacklistAdd   = (id)=>{ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
@@ -734,7 +730,6 @@ function viewHome(){
       </div>
     </div>`;
 }
-
 function wireHome(){
   const wrap   = $('#musicVideoWrap');
   const title  = $('#mvTitle');
@@ -752,7 +747,6 @@ function wireHome(){
       window.onYouTubeIframeAPIReady = ()=> resolve();
     });
   }
-
   function nextValidIndex(start){
     const list = window.HOT_MUSIC_VIDEOS || [];
     if (!list.length) return 0;
@@ -763,9 +757,7 @@ function wireHome(){
     ytBlacklistClear();
     return start % list.length;
   }
-
   let player = null;
-
   function setVideoByIndex(idx){
     const list = window.HOT_MUSIC_VIDEOS || [];
     if (!list.length) return;
@@ -806,7 +798,6 @@ function wireHome(){
 }
 
 /* ===================== Search ===================== */
-
 function viewSearch(){
   const q = (window.searchQuery || '').trim();
   const index = buildSearchIndex();
@@ -904,7 +895,6 @@ function viewDashboard(){
       </div>
     </div>`;
 }
-
 function wireDashboard(){ $('#addPost')?.addEventListener('click', ()=> openModal('m-post')); }
 function wirePosts(){
   const sec = document.querySelector('[data-section="posts"]'); if (!sec) return;
@@ -1023,7 +1013,6 @@ function viewInventory(){
       </div>
     </div></div>`;
 }
-
 function wireInventory(){
   const sec = document.querySelector('[data-section="inventory"]'); if (!sec) return;
 
@@ -1141,7 +1130,6 @@ function viewProducts(){
       </div>
     </div></div>`;
 }
-
 function wireProducts(){
   const sec = document.querySelector('[data-section="products"]'); if (!sec) return;
 
@@ -1191,7 +1179,6 @@ function wireProducts(){
   if (!sec.__wired){
     sec.__wired = true;
 
-    // open product card modal
     sec.addEventListener('click', (e)=>{
       const prodCard = e.target.closest('.prod-thumb');
       if (prodCard){
@@ -1269,7 +1256,6 @@ function viewCOGS(){
       </div>
     </div></div>`;
 }
-
 function wireCOGS(){
   const sec = document.querySelector('[data-section="cogs"]'); if (!sec) return;
 
@@ -1358,7 +1344,6 @@ function viewTasks(){
     ${lane('done','Done','#10b981')}
   </div>`;
 }
-
 function wireTasks(){
   const root = document.querySelector('[data-section="tasks"]'); if (!root) return;
 
@@ -1387,7 +1372,6 @@ function wireTasks(){
     });
   }
 
-  // row actions
   if (!root.__wired){
     root.__wired = true;
     root.addEventListener('click', (e)=>{
@@ -1420,21 +1404,53 @@ function wireTasks(){
   }
 }
 function setupDnD(){
-  const lanes = ['todo','inprogress','done'];
-  document.querySelectorAll('[data-task]').forEach(card=>{
-    card.ondragstart = (e)=> { e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); e.dataTransfer.dropEffect = 'move'; };
+  const root = document.querySelector('[data-section="tasks"]');
+  if (!root) return;
+
+  root.querySelectorAll('.task-card').forEach(card=>{
+    card.setAttribute('draggable','true');
+    card.addEventListener('dragstart', (e)=>{
+      const id = card.getAttribute('data-task');
+      if (!id) return;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', ()=>{ card.classList.remove('dragging'); });
   });
-  lanes.forEach(k=>{
-    const laneGrid  = document.getElementById('lane-'+k);
-    const parentCard = laneGrid?.closest('.lane-row'); if (!laneGrid) return;
-    laneGrid.ondragover  = (e)=>{ e.preventDefault(); parentCard?.classList.add('drop'); };
-    laneGrid.ondragleave = ()=> parentCard?.classList.remove('drop');
-    laneGrid.ondrop      = (e)=>{
-      e.preventDefault(); parentCard?.classList.remove('drop');
-      if (!canAdd()) return notify('No permission','warn');
-      const id = e.dataTransfer.getData('text/plain'); const items = load('tasks', []); const t = items.find(x=>x.id===id); if (!t) return;
-      t.status = k; save('tasks', items); renderApp();
+
+  root.querySelectorAll('.lane-grid').forEach(grid=>{
+    const row = grid.closest('.lane-row');
+    const lane = row?.getAttribute('data-lane');
+
+    const showDrop = (e)=>{
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch {}
+      row?.classList.add('drop');
     };
+    const hideDrop = ()=>{ row?.classList.remove('drop'); };
+
+    grid.addEventListener('dragenter', showDrop);
+    grid.addEventListener('dragover',  showDrop);
+    grid.addEventListener('dragleave', hideDrop);
+
+    grid.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      hideDrop();
+      if (!lane) return;
+      if (!canAdd()) { notify('No permission','warn'); return; }
+
+      const id = e.dataTransfer.getData('text/plain');
+      if (!id) return;
+
+      const items = load('tasks', []);
+      const t = items.find(x=>x.id===id);
+      if (!t) return;
+
+      t.status = lane;
+      save('tasks', items);
+      renderApp();
+    });
   });
 }
 
@@ -1503,7 +1519,6 @@ function viewSettings(){
       </div></div>
     </div>`;
 }
-
 function allowedRoleOptions(){
   const r = role();
   if (r === 'admin') return ROLES;
@@ -1511,14 +1526,11 @@ function allowedRoleOptions(){
   if (r === 'associate') return ['user','associate'];
   return ['user'];
 }
-
 function wireSettings(){
-  // Theme instant apply
   const mode = $('#theme-mode'), size = $('#theme-size');
   const applyThemeNow = ()=>{ save('_theme2', { mode: mode.value, size: size.value }); applyTheme(); renderApp(); };
   mode?.addEventListener('change', applyThemeNow); size?.addEventListener('change', applyThemeNow);
 
-  // Cloud controls
   const toggle = $('#cloud-toggle'), syncNow = $('#cloud-sync-now');
   toggle?.addEventListener('change', async (e)=>{
     const val = e.target.value;
@@ -1538,10 +1550,8 @@ function wireSettings(){
     }catch(e){ notify((e && e.message) || 'Sync failed','danger'); }
   });
 
-  // Users wiring
   wireUsers();
 }
-
 function wireUsers(){
   const addBtn = $('#addUser'); const table = document.querySelector('[data-section="users"]');
 
@@ -1600,17 +1610,80 @@ function wireUsers(){
 // Static pages + Contact
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
-  about:  `<h3>About Inventory</h3><p style="color:var(--muted)">A fast, offline-friendly app for small and medium businesses to manage stock, products, costs, and tasks — anywhere.</p>`,
+  about:  `<h3>About Inventory</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden;background:var(--panel-2)"><iframe src="about.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent;color:var(--text)"></iframe></div>`,
   policy: `<h3>Policy (MIT)</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden;background:var(--panel-2)"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent;color:var(--text)"></iframe></div>`,
   license:`<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden;background:var(--panel-2)"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent;color:var(--text)"></iframe></div>`,
   setup:  `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;background:var(--panel-2);"><iframe src="setup-guide.html" style="width:100%; height: calc(100vh - 220px); border:none;background:transparent;color:var(--text)"></iframe></div>`,
   guide:  `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden;background:var(--panel-2)"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent;color:var(--text)"></iframe></div>`,
   contact:`<h3>Contact</h3>
-    <p style="color:var(--muted)">Click to email us: <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Hello%20from%20Inventory&body=Hi%2C%0A"><i class="ri-mail-send-line"></i> Contact via Email</a></p>`
+    <p style="color:var(--muted);margin-top:0">Admins can send via EmailJS. Others use email button below.</p>
+    <div class="card" style="margin-top:10px">
+      <div class="card-body">
+        <form id="contact-form" class="grid" style="grid-template-columns:1fr 1fr; gap:10px">
+          <input id="ct-name"    class="input" placeholder="Your name" />
+          <input id="ct-email"   class="input" type="email" placeholder="Your email" />
+          <input id="ct-subject" class="input" placeholder="Subject" style="grid-column:1/-1" />
+          <textarea id="ct-message" class="input" placeholder="Message" rows="5" style="grid-column:1/-1"></textarea>
+          <div style="display:flex; gap:8px; grid-column:1/-1">
+            <button type="submit" class="btn" id="btnEmailSend"><i class="ri-mail-send-line"></i> Send</button>
+            <a class="btn secondary" id="btnMailto"
+               href="mailto:minmaung0307@gmail.com?subject=Hello%20from%20Inventory&body=Hi%2C%0A">
+               <i class="ri-external-link-line"></i> Contact via Email (fallback)
+            </a>
+          </div>
+          <div id="contact-note" style="color:var(--muted); font-size:12px; grid-column:1/-1">
+            If EmailJS keys are not configured or you are not an admin, the “Send” button will open your mail app instead.
+          </div>
+        </form>
+      </div>
+    </div>`
 });
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
 
-function wireContact(){ /* mailto button only — nothing to wire */ }
+function wireContact(){
+  const form = document.getElementById('contact-form');
+  if (!form) return;
+
+  const canUseEmailJS =
+    role() === 'admin' &&
+    EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID;
+
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+
+    const fromName = (document.getElementById('ct-name')?.value || '').trim();
+    const fromEmail= (document.getElementById('ct-email')?.value || '').trim();
+    const subject  = (document.getElementById('ct-subject')?.value || '').trim();
+    const message  = (document.getElementById('ct-message')?.value || '').trim();
+
+    if (!subject || !message){
+      notify('Subject and message are required','warn');
+      return;
+    }
+
+    if (!canUseEmailJS){
+      const mail = `mailto:minmaung0307@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${fromName} <${fromEmail}>\n\n${message}`)}`;
+      window.location.href = mail;
+      return;
+    }
+
+    try{
+      await ensureEmailJS();
+      await window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+        from_name: fromName || (session?.name || 'Inventory User'),
+        reply_to:  fromEmail || (session?.email || ''),
+        subject,
+        message
+      });
+      notify('Message sent!','ok');
+      form.reset();
+    }catch(err){
+      console.error('[EmailJS] send failed:', err);
+      const mail = `mailto:minmaung0307@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`From: ${fromName} <${fromEmail}>\n\n${message}`)}`;
+      window.location.href = mail;
+    }
+  });
+}
 
 /* ===================== Modals ===================== */
 
@@ -1643,7 +1716,6 @@ function postModal(){ return `
       <div class="foot"><button class="btn" id="save-post">Save</button></div>
     </div>
   </div>`; }
-
 function invModal(){ return `
   <div class="modal-backdrop" id="mb-inv"></div>
   <div class="modal" id="m-inv">
@@ -1663,7 +1735,6 @@ function invModal(){ return `
       <div class="foot"><button class="btn" id="save-inv">Save</button></div>
     </div>
   </div>`; }
-
 function prodModal(){ return `
   <div class="modal-backdrop" id="mb-prod"></div>
   <div class="modal" id="m-prod">
@@ -1683,7 +1754,6 @@ function prodModal(){ return `
       <div class="foot"><button class="btn" id="save-prod">Save</button></div>
     </div>
   </div>`; }
-
 function prodCardModal(){ return `
   <div class="modal-backdrop" id="mb-card"></div>
   <div class="modal" id="m-card">
@@ -1701,7 +1771,6 @@ function prodCardModal(){ return `
       </div>
     </div>
   </div>`; }
-
 function cogsModal(){ return `
   <div class="modal-backdrop" id="mb-cogs"></div>
   <div class="modal" id="m-cogs">
@@ -1720,7 +1789,6 @@ function cogsModal(){ return `
       <div class="foot"><button class="btn" id="save-cogs">Save</button></div>
     </div>
   </div>`; }
-
 function taskModal(){ return `
   <div class="modal-backdrop" id="mb-task"></div>
   <div class="modal" id="m-task">
@@ -1734,7 +1802,6 @@ function taskModal(){ return `
       <div class="foot"><button class="btn" id="save-task">Save</button></div>
     </div>
   </div>`; }
-
 function userModal(){ return `
   <div class="modal-backdrop" id="mb-user"></div>
   <div class="modal" id="m-user">
@@ -1751,7 +1818,6 @@ function userModal(){ return `
       <div class="foot"><button class="btn" id="save-user">Save</button></div>
     </div>
   </div>`; }
-
 function imgPreviewModal(){ return `
   <div class="modal-backdrop" id="mb-img"></div>
   <div class="modal img-modal" id="m-img">
@@ -1780,7 +1846,6 @@ function sessionPromptModal(){ return `
       </div>
     </div>
   </div>`; }
-
 function ensureGlobalModals(){
   if ($('#__modals')) return;
   const wrap = document.createElement('div');
@@ -1810,7 +1875,6 @@ window.buildSearchIndex = function(){
   pages.forEach(p=>ix.push(p));
   return ix;
 };
-
 window.searchAll = function(index, q){
   const norm = s => (s||'').toLowerCase();
   const tokens = norm(q).split(/\s+/).filter(Boolean);
@@ -1818,7 +1882,6 @@ window.searchAll = function(index, q){
     .map(item=>{
       const label = norm(item.label);
       const text  = norm(item.text||'');
-      // every token must match label OR text (partial ok)
       let hitCount = 0;
       let ok = tokens.every(t=>{
         const hit = label.includes(t) || text.includes(t);
@@ -1832,7 +1895,6 @@ window.searchAll = function(index, q){
     .sort((a,b)=>b.score-a.score)
     .map(x=>x.item);
 };
-
 window.scrollToRow = function(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
 
 // Online / offline hints
@@ -1851,20 +1913,19 @@ window.addEventListener('offline', ()=> notify('You are offline','warn'));
 
 /* ---------- Session prompt after inactivity (ask, then auto-logout after 60s) ---------- */
 const SESSION_PROMPT_ENABLED = true;
-const PROMPT_AFTER_MIN = 20;                         // show modal after 20 mins idle
-const PROMPT_GRACE_SEC = 60;                         // auto-logout if no response in 60s
+const PROMPT_AFTER_MIN = 20;
+const PROMPT_GRACE_SEC = 60;
 const PROMPT_AFTER_MS  = PROMPT_AFTER_MIN * 60 * 1000;
 const PROMPT_GRACE_MS  = PROMPT_GRACE_SEC * 1000;
 
 let __lastActivity = Date.now();
-let __sessionPromptInterval = null;   // periodic idle checker
+let __sessionPromptInterval = null;
 let __sessionPromptOpen = false;
 let __sessionPromptWired = false;
 
-// countdown handles
-let __sessionPromptDeadline = 0;      // timestamp to auto-logout
-let __sessionPromptTicker = null;     // interval for UI countdown
-let __sessionPromptHardTimeout = null;// timeout to doLogout
+let __sessionPromptDeadline = 0;
+let __sessionPromptTicker = null;
+let __sessionPromptHardTimeout = null;
 
 function __updateCountdown(){
   const el = document.getElementById('session-countdown');

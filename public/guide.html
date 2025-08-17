@@ -1,37 +1,67 @@
 <!doctype html>
-<html><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>User Guide</title>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>User Guide – Inventory</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --border:#1f2a37; --brand:#0ea5a5; }
-*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 Inter,system-ui}
-.wrap{max-width:960px;margin:24px auto;padding:0 16px 40px}
-h1{margin:8px 0 12px} h2{margin:18px 0 10px} .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px;margin:12px 0}
-.badge{display:inline-block;padding:6px 10px;border:1px solid var(--border);border-radius:9999px;background:var(--panel2);margin-right:6px}
+:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --border:#1f2a37; --brand:#0ea5a5 }
+body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,system-ui }
+.wrap{ max-width:900px; margin:20px auto; padding:0 16px 40px }
+.card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0 }
+h1{ margin:6px 0 10px } h2{ margin:16px 0 8px }
+ul{ margin:0 0 8px 18px }
+.badge{ color:var(--muted) }
 </style>
 </head>
-<body><div class="wrap">
+<body>
+<div class="wrap">
   <h1>User Guide</h1>
   <div class="card">
-    <h2>Getting around</h2>
-    <p>Use the sidebar to switch between <span class="badge">Inventory</span><span class="badge">Products</span><span class="badge">COGS</span><span class="badge">Tasks</span> and more.</p>
-    <p><strong>Search</strong> (top of sidebar) finds items across all sections.</p>
+    <h2>Getting started</h2>
+    <ul>
+      <li>Sign in (or use demo: <code>admin@inventory.com</code>/<code>admin123</code> for local).</li>
+      <li>Use the sidebar to navigate: Inventory, Products, COGS, Tasks, Settings.</li>
+      <li>Search anything from the global search bar.</li>
+    </ul>
   </div>
   <div class="card">
-    <h2>Adding items</h2>
+    <h2>Inventory</h2>
     <ul>
-      <li>Inventory → Add Item → fill name and optional image (supports paste/upload).</li>
-      <li>Products → Add Product → barcode, price, ingredients and instructions optional.</li>
-      <li>COGS → Add Row → the totals update automatically.</li>
+      <li>Add items (name, code, type, price, stock, threshold, optional image).</li>
+      <li>Low/critical stock outlined automatically.</li>
+      <li>Export to CSV (no image column).</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>Products</h2>
+    <ul>
+      <li>Create products with barcode, price, ingredients and instructions.</li>
+      <li>Click thumbnail to view a product card modal.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>COGS</h2>
+    <ul>
+      <li>Add daily rows; totals and gross profit calculate automatically.</li>
+      <li>Export to CSV for accounting.</li>
     </ul>
   </div>
   <div class="card">
     <h2>Tasks</h2>
-    <p>Drag cards between lanes, or tap cards on mobile to cycle status.</p>
+    <ul>
+      <li>Drag tasks between lanes (To-do / In progress / Done).</li>
+      <li>On mobile, tap a task to cycle its lane.</li>
+    </ul>
   </div>
   <div class="card">
-    <h2>Sync & Offline</h2>
-    <p>Works offline by default. Turn on Cloud Sync in <strong>Settings</strong> to mirror your data to your Firebase account.</p>
+    <h2>Settings & Users</h2>
+    <ul>
+      <li>Enable/disable Cloud Sync (per-user Firebase path).</li>
+      <li>Manage users with role-based permissions.</li>
+      <li>Change theme and font size.</li>
+    </ul>
   </div>
-</div></body></html>
+</div>
+</body>
+</html>
