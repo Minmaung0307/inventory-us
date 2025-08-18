@@ -19,6 +19,11 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <meta name="theme-color" content="#0ea5a5"/>
 
+
+  <!-- Firebase v8 (namespaced) – must come BEFORE app.js -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
   <!-- Provide your Firebase config here (v8 namespaced). Make sure databaseURL is set. -->
   <script>
     window.__FIREBASE_CONFIG = {
@@ -32,12 +37,20 @@
   appId: "1:685621968644:web:a88ec978f1ab9b4f49da51",
   measurementId: "G-L6NRD0B1B6"
     };
-  </script>
 
-  <!-- Firebase v8 (namespaced) – must come BEFORE app.js -->
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    // Initialize once here, **before** app.js runs
+  (function initFirebase(){
+    if (!window.firebase) {
+      console.error("Firebase SDK not loaded");
+      return;
+    }
+    if (firebase.apps && firebase.apps.length === 0) {
+      firebase.initializeApp(window.__FIREBASE_CONFIG);
+    }
+    // optional: keep RTDB online immediately
+    try { firebase.database().goOnline(); } catch {}
+  })();
+  </script>
 
   <!-- Your app -->
   <script defer src="js/app.js"></script>

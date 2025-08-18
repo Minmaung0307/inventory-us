@@ -49,15 +49,19 @@ applyTheme();
 /* =========================
    Firebase bootstrap (guarded)
    ========================= */
-const firebaseConfig = (window.__FIREBASE_CONFIG || null);
-if (window.firebase && (!firebase.apps || !firebase.apps.length) && firebaseConfig) {
+// --- Firebase safe references (do NOT re-initialize if index.html did) ---
+const firebaseConfig = window.__FIREBASE_CONFIG || null;
+if (!firebase || !firebase.initializeApp) {
+  console.error("Firebase SDK missing. Check script tags in index.html");
+}
+// Guard double init
+if (firebase && firebase.apps && firebase.apps.length === 0 && firebaseConfig) {
   firebase.initializeApp(firebaseConfig);
 }
-const auth = (window.firebase && firebase.auth ? firebase.auth() : null);
-const db   = (window.firebase && firebase.database ? firebase.database() : null);
-if (auth && auth.setPersistence) {
-  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
-}
+
+// Use compat v8-style APIs
+const auth = firebase.auth();
+const db   = firebase.database();
 
 /* =========================
    Roles / session / cloud
