@@ -1,32 +1,109 @@
-/* =====================================================
-   Inventory — Single-file SPA (HTML+CSS+JS)
-   - Firebase v8 (Auth + Realtime DB, optional Cloud Sync)
-   - Per-user data namespaces in LocalStorage
-   - Optional per-user Cloud Sync mirroring
-   - CRUD: Inventory, Products, COGS, Tasks, Posts, Users
-   - CSV export (no image column)
-   - Search (partial & exact matches)
-   - PWA-friendly (SW registration elsewhere)
-   - Idle session prompt (20m ask + 60s auto-logout)
-   - Image uploads auto-compress to reduce quota issues
-   ===================================================== */
+/* =========================
+   Inventory — single-file SPA (latest)
+   ========================= */
 
-/* ---------- Tiny helpers ---------- */
+/* ---------- Hoisted helpers ---------- */
 function USD(x){ return `$${Number(x || 0).toFixed(2)}`; }
 function parseYMD(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(s||''); return m?{y:+m[1],m:+m[2],d:+m[3]}:null; }
 function getISOWeek(d){ const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())); const n=t.getUTCDay()||7; t.setUTCDate(t.getUTCDate()+4-n); const y0=new Date(Date.UTC(t.getUTCFullYear(),0,1)); return Math.ceil((((t - y0) / 86400000) + 1)/7); }
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } };
+const _lsSet = (k, v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
 function notify(msg,type='ok'){ const n=$('#notification'); if(!n)return; n.textContent=msg; n.className=`notification show ${type}`; setTimeout(()=>{ n.className='notification'; },2400); }
 
-/* LocalStorage (with quota guard) */
-const _lsGet = (k, f)=>{ try{ const v=localStorage.getItem(k); return v==null?f:JSON.parse(v);}catch{ return f; } };
-const _lsSet = (k, v)=>{
-  try{ localStorage.setItem(k, JSON.stringify(v)); return true; }
-  catch(e){ console.warn('[Storage]', e); notify('Storage is full. Turn ON Cloud Sync or remove some large images/items.', 'danger'); return false; }
-};
+/* ---------- Namespaced storage (per user) ---------- */
+let session = _lsGet('session', null);
+function nsId(){ return (session && (session.uid || (session.email||'').toLowerCase())) || 'local'; }
+const GLOBAL_KEYS = new Set(['session','_route','_searchQ','_cloudOn']); // keep these global
+function storageKey(k){ return GLOBAL_KEYS.has(k) ? k : `ns:${nsId()}:${k}`; }
+function load(k, f){ return _lsGet(storageKey(k), f); }
+async function save(k, v){
+  _lsSet(storageKey(k), v);                          // local-first UI
+  if (!GLOBAL_KEYS.has(k)) {
+    try {
+      if (cloud.isOn() && auth.currentUser) {
+        await cloud.saveKV(k, v);                    // mirror to cloud
+      }
+    } catch (e) {
+      console.warn('[cloud.saveKV error]', e);
+      notify('Cloud sync failed (local kept): ' + (e?.message || e), 'warn');
+      if (String(e?.message||'').toLowerCase().includes('permission')) {
+        try { cloud.disable(); } catch {}
+        notify('Cloud Sync turned OFF (permission denied). Check Firebase rules.', 'warn');
+      }
+    }
+  }
+}
+function setSession(s){ session=s; _lsSet('session',s); }
 
-/* ---------- Firebase v8 ---------- */
+/* ---------- One-time per-user migration from legacy (non-namespaced) keys ---------- */
+const DATA_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2'];
+function migrateLegacyLocalForUser(){
+  const id = nsId(); if (!id) return;
+  const flag = `_migrated_v2:${id}`;
+  if (_lsGet(flag,false)) return;
+  DATA_KEYS.forEach(k=>{
+    const newKey = storageKey(k);
+    const hasNew = localStorage.getItem(newKey) != null;
+    const oldVal = _lsGet(k, undefined);             // legacy un-namespaced
+    if (!hasNew && oldVal !== undefined) { _lsSet(newKey, oldVal); }
+  });
+  _lsSet(flag, true);
+}
+
+/* ---------- Per-user seed (runs once per user) ---------- */
+function seedPerUserOnce(){
+  const id = nsId(); if (!id) return;
+  const flag = `_seeded_v1:${id}`;
+  if (_lsGet(flag,false)) return;
+
+  const email = (session?.email||'').toLowerCase();
+  const isDemo = email === 'admin@inventory.com';
+  const now = Date.now();
+
+  const demoInv = [
+    { id:'inv1', img:'', name:'Nori Sheets', code:'NOR-100', type:'Dry', price:3.00, stock:80, threshold:30 },
+    { id:'inv2', img:'', name:'Sushi Rice',  code:'RIC-200', type:'Dry', price:1.50, stock:24, threshold:20 },
+    { id:'inv3', img:'', name:'Fresh Salmon',code:'SAL-300', type:'Raw', price:7.80, stock:10, threshold:12 },
+  ];
+  const demoProd = [
+    { id:'p1', img:'', name:'Salmon Nigiri', barcode:'11100001', price:5.99, type:'Nigiri', ingredients:'Rice, Salmon', instructions:'Brush with nikiri.' },
+    { id:'p2', img:'', name:'California Roll', barcode:'11100002', price:7.49, type:'Roll', ingredients:'Rice, Nori, Crab, Avocado', instructions:'8 pcs.' },
+  ];
+  const demoPosts = [{ id:'post1', title:'Welcome to Inventory', body:'Track stock, manage products, and work faster.', img:'', createdAt: now }];
+  const demoTasks = [
+    { id:'t1', title:'Prep Salmon', status:'todo' },
+    { id:'t2', title:'Cook Rice', status:'inprogress' },
+    { id:'t3', title:'Sanitize Station', status:'done' },
+  ];
+  const demoCogs = [
+    { id:'c1', date:'2024-08-01', grossIncome:1200, produceCost:280, itemCost:180, freight:45, delivery:30, other:20 },
+    { id:'c2', date:'2024-08-02', grossIncome: 900, produceCost:220, itemCost:140, freight:30, delivery:25, other:10 }
+  ];
+
+  // Always ensure the current user exists in their own "users" table
+  const users = load('users', []);
+  if (!users.find(u => (u.email||'').toLowerCase() === email)) {
+    users.push({ name: session?.name || (email.split('@')[0]||'User'), username: email.split('@')[0], email, contact:'', role: session?.role || 'user', password:'', img:'' });
+  }
+
+  // Demo admin gets richer seed; others get a light starter
+  save('inventory', isDemo? demoInv : []);
+  save('products',  isDemo? demoProd: []);
+  save('posts',     isDemo? demoPosts:[{ id:'post_welcome', title:'Welcome!', body:'Create your first item from Inventory or Products.', img:'', createdAt: now }]);
+  save('tasks',     isDemo? demoTasks:[{ id:'t_welcome', title:'Your first task', status:'todo' }]);
+  save('cogs',      isDemo? demoCogs : []);
+  save('users',     users);
+
+  _lsSet(flag, true);
+}
+
+/* =========================
+   Part A — Core bootstrap
+   ========================= */
+
+// --- Firebase (v8) -----------------------------------------------------------
 const firebaseConfig = {
   apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
   authDomain: "inventory-us.firebaseapp.com",
@@ -42,218 +119,496 @@ const auth = firebase.auth();
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db   = firebase.database();
 
-/* ---------- Roles & session ---------- */
-const ROLES = ['user','associate','manager','admin'];
-const SUPER_ADMINS = ['admin@sushi.com','admin@inventory.com'];
-const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
-const DEMO_ADMIN_PASS  = 'admin123';
-
-let session      = _lsGet('session', null);
-let currentRoute = _lsGet('_route', 'home');     // will be per-user below after login
-let searchQuery  = _lsGet('_searchQ', '');
-
-/* ---------- Per-user storage namespace ---------- */
-const PER_USER_KEYS = new Set(['inventory','products','posts','tasks','cogs','_theme2','_route','_searchQ']);
-function userNS(){ return (session?.email || 'local').toLowerCase(); }
-function nsKey(key){ return `u:${userNS()}:${key}`; }
-function load(key, fallback){
-  const k = (session && PER_USER_KEYS.has(key)) ? nsKey(key) : key;
-  return _lsGet(k, fallback);
-}
-function save(key, val){
-  const k = (session && PER_USER_KEYS.has(key)) ? nsKey(key) : key;
-  const ok = _lsSet(k, val);
-  try { if (ok && session && PER_USER_KEYS.has(key) && cloud.isOn() && auth.currentUser) cloud.saveUserKV(key, val); } catch {}
-}
-
-/* ---------- Theme (per-user) ---------- */
+// --- Theme -------------------------------------------------------------------
+const THEME_MODES = [{key:'light',name:'Light'},{key:'dark',name:'Dark'},{key:'aqua',name:'Aqua'}];
+const THEME_SIZES = [{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
 function getTheme(){ return load('_theme2', { mode:'aqua', size:'medium' }); }
-function saveTheme(t){ save('_theme2', t); }
 function applyTheme(){
-  const t=getTheme(); const sizes={ small:90, medium:100, large:112 }; const size = sizes[t.size] || 100;
+  const t = getTheme();
+  const size = THEME_SIZES.find(s=>s.key===t.size)?.pct ?? 100;
   document.documentElement.setAttribute('data-theme', t.mode==='light' ? 'light' : (t.mode==='dark' ? 'dark' : ''));
   document.documentElement.style.setProperty('--font-scale', size + '%');
 }
 applyTheme();
 
-/* ---------- Cloud Sync (per-user keys only) ---------- */
-const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','_theme2']; // per-user only
+// --- Cloud Sync (Realtime DB) with echo/stale protection ---------------------
+const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2'];
+
 const cloud = (function(){
   let liveRefs = [];
-  const on    = ()=> !!_lsGet('_cloudOn', false);
-  const uid   = ()=> auth.currentUser?.uid;
+  const _lastClientTs = {}; // our last local write per key (ms since epoch)
+
+  const on      = ()=> !!_lsGet('_cloudOn', false);
+  const setOn   = v => _lsSet('_cloudOn', !!v);
+  const uid     = ()=> auth.currentUser?.uid;
   const pathFor = key => db.ref(`tenants/${uid()}/kv/${key}`);
-  async function saveUserKV(key, val){
+
+  async function saveKV(key, val){
     if (!on() || !uid()) return;
-    await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+    const clientTs = Date.now();
+    _lastClientTs[key] = clientTs;
+    await pathFor(key).set({
+      key, val,
+      clientTs,
+      uid: uid(),
+      updatedAt: firebase.database.ServerValue.TIMESTAMP
+    });
   }
+
   async function pullAllOnce(){
     if (!uid()) return;
     const snap = await db.ref(`tenants/${uid()}/kv`).get();
     if (!snap.exists()) return;
     const all = snap.val() || {};
     Object.values(all).forEach(row=>{
-      if (row && row.key && 'val' in row) _lsSet(nsKey(row.key), row.val);
+      if (!row || !row.key || !('val' in row)) return;
+      _lsSet(storageKey(row.key), row.val);         // write into namespaced local
     });
   }
+
   function subscribeAll(){
     if (!uid()) return;
     unsubscribeAll();
+
     CLOUD_KEYS.forEach(key=>{
       const ref = pathFor(key);
-      const handler = ref.on('value', (snap)=>{
-        const data = snap.val(); if(!data) return;
-        const curr = _lsGet(nsKey(key), null);
-        if (JSON.stringify(curr)!==JSON.stringify(data.val)){
-          _lsSet(nsKey(key), data.val);
-          if (key==='_theme2') applyTheme();
-          renderApp();
-        }
-      });
-      liveRefs.push({ref,handler});
+      const handler = (snap)=>{
+        const row = snap.val();
+        if (!row || !('val' in row)) return;
+
+        const incomingTs = Number(row.clientTs || 0);
+        const lastLocal  = Number(_lastClientTs[key] || 0);
+
+        // Ignore stale/echoed snapshots
+        if (incomingTs && lastLocal && incomingTs <= lastLocal) return;
+
+        _lsSet(storageKey(key), row.val);
+        _lastClientTs[key] = incomingTs || Date.now();
+        if (key === '_theme2') applyTheme();
+        renderApp();
+      };
+      ref.on('value', handler);
+      liveRefs.push({ ref, handler });
     });
   }
-  function unsubscribeAll(){ liveRefs.forEach(({ref})=>{ try{ref.off();}catch{} }); liveRefs=[]; }
-  async function pushAll(){ if (!uid()) return; for (const k of CLOUD_KEYS){ const v=_lsGet(nsKey(k), null); if (v!==null && v!==undefined) await saveUserKV(k, v); } }
-  async function enable(){ if (!uid()) throw new Error('Sign in first.'); _lsSet('_cloudOn', true); await firebase.database().goOnline(); await pullAllOnce(); await pushAll(); subscribeAll(); }
-  function disable(){ _lsSet('_cloudOn', false); unsubscribeAll(); }
-  return { isOn:on, enable, disable, saveUserKV, pullAllOnce, subscribeAll, pushAll };
-})();
 
-/* ---------- Global seed (users list only) ---------- */
-(function seedGlobalUsersOnce(){
-  if (_lsGet('_seeded_global_v1', false)) return;
-  const users = _lsGet('users', []);
-  if (!users.find(u => (u.email||'').toLowerCase() === DEMO_ADMIN_EMAIL)){
-    users.push({ name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:DEMO_ADMIN_PASS, img:'' });
-  }
-  _lsSet('users', users);
-  _lsSet('_seeded_global_v1', true);
-})();
-
-/* ---------- Per-user seed (one-time per user) ---------- */
-function ensurePerUserSeed(){
-  if (load('_seeded_user_v1', false)) return;
-  const role = (session?.role)||'user';
-  const email = (session?.email||'').toLowerCase();
-  const mkId = p => `${p}_${Date.now()}`;
-
-  let inventory=[], products=[], posts=[], tasks=[], cogs=[];
-  if (role === 'admin'){
-    inventory = [
-      { id:'invA1', img:'', name:'Sushi Rice',  code:'RIC-200', type:'Dry',  price:1.50, stock:30, threshold:10 },
-      { id:'invA2', img:'', name:'Fresh Salmon',code:'SAL-300', type:'Raw',  price:7.80, stock:12, threshold:10 },
-    ];
-    products = [{ id:'pA1', img:'', name:'Salmon Nigiri', barcode:'11100001', price:5.99, type:'Nigiri', ingredients:'Rice, Salmon', instructions:'Brush with nikiri.' }];
-    posts = [{ id:mkId('post'), title:`Welcome ${email}`, body:'Admin demo data seeded for your account.', img:'', createdAt: Date.now() }];
-    tasks = [{ id:mkId('t'), title:'Review inventory thresholds', status:'todo' }];
-    cogs  = [{ id:mkId('c'), date:new Date().toISOString().slice(0,10), grossIncome:1200, produceCost:280, itemCost:180, freight:45, delivery:30, other:20 }];
-  } else if (role === 'manager'){
-    inventory = [{ id:'invM1', img:'', name:'Nori Sheets', code:'NOR-100', type:'Dry', price:3.00, stock:80, threshold:30 }];
-    products  = [{ id:'pM1', img:'', name:'California Roll', barcode:'11100002', price:7.49, type:'Roll', ingredients:'Rice, Nori, Crab, Avocado', instructions:'8 pcs.' }];
-    posts     = [{ id:mkId('post'), title:'Manager welcome', body:'This is your private workspace.', img:'', createdAt: Date.now() }];
-    tasks     = [{ id:mkId('t'), title:'Create supplier list', status:'inprogress' }];
-    cogs      = [{ id:mkId('c'), date:new Date().toISOString().slice(0,10), grossIncome:900, produceCost:220, itemCost:140, freight:30, delivery:25, other:10 }];
-  } else if (role === 'associate'){
-    inventory = [{ id:'invS1', img:'', name:'Pickled Ginger', code:'GIN-150', type:'Dry', price:2.10, stock:25, threshold:8 }];
-    posts     = [{ id:mkId('post'), title:'Associate tips', body:'Add counts at shift end.', img:'', createdAt: Date.now() }];
-    tasks     = [{ id:mkId('t'), title:'Wipe stations', status:'todo' }];
-  } else {
-    posts = [{ id:mkId('post'), title:'Hello!', body:'Your private data starts here.', img:'', createdAt: Date.now() }];
+  function unsubscribeAll(){
+    liveRefs.forEach(({ref,handler})=>{ try{ ref.off('value', handler); }catch{} });
+    liveRefs = [];
   }
 
-  save('inventory', inventory);
-  save('products',  products);
-  save('posts',     posts);
-  save('tasks',     tasks);
-  save('cogs',      cogs);
+  async function pushAll(){
+    if (!uid()) return;
+    for (const k of CLOUD_KEYS){
+      const v = _lsGet(storageKey(k), null);
+      if (v !== null && v !== undefined) {
+        try { await saveKV(k, v); } catch(e){ console.warn('[cloud.pushAll]', k, e); }
+      }
+    }
+  }
 
-  const globalTheme = _lsGet('_theme2', null);
-  if (globalTheme) saveTheme(globalTheme);
-  save('_seeded_user_v1', true);
-}
+  async function enable(){
+    if (!uid()) throw new Error('Sign in first.');
+    setOn(true);
+    await firebase.database().goOnline();
+    try { await pullAllOnce(); } catch(e){ console.warn('[cloud.pullAllOnce]', e); }
+    try { await pushAll(); }     catch(e){ console.warn('[cloud.pushAll]', e); }
+    subscribeAll();
+  }
 
-/* ---------- Auth lifecycle ---------- */
-const ALLOW_LOCAL_AUTOLOGIN = true;
+  function disable(){
+    setOn(false);
+    unsubscribeAll();
+  }
 
+  return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
+})();
+
+// --- Roles & permissions ------------------------------------------------------
+const ROLES = ['user','associate','manager','admin'];
+const SUPER_ADMINS = ['admin@sushi.com','admin@inventory.com'];
+function role(){ return (session?.role)||'user'; }
+function canView(){ return true; }
+function canAdd(){ return ['admin','manager','associate'].includes(role()); }
+function canEdit(){ return ['admin','manager'].includes(role()); }
+function canDelete(){ return ['admin'].includes(role()); }
+
+/* =========================
+   Part B — Login & Shell
+   ========================= */
+
+// ---------- Auth state ----------
 auth.onAuthStateChanged(async (user) => {
   try { await ensureSessionAndRender(user); }
-  catch (err) { console.error('[auth] render failed:', err); notify(err?.message || 'Render failed', 'danger'); showRescue(err); }
+  catch (err) { console.error('[auth] ensureSessionAndRender crashed:', err); notify(err?.message || 'Render failed', 'danger'); showRescue(err); }
 });
 
 async function ensureSessionAndRender(user) {
-  applyTheme();
+  try {
+    applyTheme();
 
-  const stored = _lsGet('session', null);
-  if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN) {
-    session = stored;
-    ensurePerUserSeed();
-    currentRoute = load('_route','home');   // now per-user
-    renderApp(); setupSessionPrompt(); return;
+    // If no Firebase user but we have a local session, stay in local mode
+    const stored = _lsGet('session', null);
+    if (!user && stored && stored.authMode === 'local') {
+      session = stored;
+      renderApp();
+      setupSessionPrompt();
+      return;
+    }
+
+    if (!user) {
+      session = null;
+      _lsSet('session', null);
+      renderLogin();
+      return;
+    }
+
+    const email = (user.email || '').toLowerCase();
+    let users = load('users', []);
+    let prof = users.find(u => (u.email || '').toLowerCase() === email);
+
+    if (!prof) {
+      const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
+      prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
+      users.push(prof); await save('users', users);
+    } else if (SUPER_ADMINS.includes(email) && prof.role !== 'admin') {
+      prof.role = 'admin'; await save('users', users);
+    }
+
+    session = { ...prof, uid: user.uid, authMode: 'firebase' };
+    setSession(session);
+
+    // Migrate any legacy un-namespaced data and seed per-user once
+    migrateLegacyLocalForUser();
+    seedPerUserOnce();
+
+    try {
+      if (cloud?.isOn?.()) {
+        try{ await firebase.database().goOnline(); }catch{}
+        try{ await cloud.pullAllOnce(); }catch{}
+        try{ cloud.subscribeAll(); }catch{}
+      }
+    } catch {}
+
+    renderApp();
+    setupSessionPrompt();
+  } catch (outer) {
+    console.error('[ensureSessionAndRender] outer crash:', outer);
+    notify(outer?.message || 'Render failed', 'danger');
+    showRescue(outer);
   }
-  if (!user) { session=null; _lsSet('session',null); renderLogin(); return; }
-
-  const email = (user.email || '').toLowerCase();
-  let users = _lsGet('users', []);
-  let prof = users.find(u => (u.email || '').toLowerCase() === email);
-  if (!prof) {
-    const roleGuess = SUPER_ADMINS.includes(email) ? 'admin' : 'user';
-    prof = { name: roleGuess==='admin'?'Admin':'User', username: email.split('@')[0], email, contact:'', role: roleGuess, password:'', img:'' };
-    users.push(prof); _lsSet('users', users);
-  } else if (SUPER_ADMINS.includes(email) && prof.role!=='admin'){
-    prof.role = 'admin'; _lsSet('users', users);
-  }
-  session = { ...prof, authMode: 'firebase' };
-  _lsSet('session', session);
-
-  try{ if (cloud?.isOn?.()) { await firebase.database().goOnline(); await cloud.pullAllOnce(); cloud.subscribeAll(); } }catch{}
-
-  ensurePerUserSeed();
-  currentRoute = load('_route','home');
-  renderApp();
-  setupSessionPrompt();
 }
 
-/* ---------- Local auth fallbacks ---------- */
-function localLogin(email, pass){
-  const users = _lsGet('users', []);
-  const e = (email||'').toLowerCase();
+/* ---------- Local Auth helpers (fallback) ---------- */
+const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
+const DEMO_ADMIN_PASS  = 'admin123';
 
+function localLogin(email, pass){
+  const e = (email||'').toLowerCase();
+  const users = load('users', []);
+  // Demo admin
   if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS) {
     let u = users.find(x => (x.email||'').toLowerCase() === e);
-    if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); _lsSet('users', users); }
-    session = { ...u, authMode: 'local' }; _lsSet('session', session);
-    ensurePerUserSeed(); notify('Signed in (Local mode)'); renderApp(); setupSessionPrompt(); return true;
+    if (!u) { u = { name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
+    session = { ...u, uid: 'local-demo', authMode: 'local' };
+    setSession(session);
+    migrateLegacyLocalForUser();
+    seedPerUserOnce();
+    notify('Signed in (Local mode)');
+    renderApp(); setupSessionPrompt();
+    return true;
   }
   const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
-  if (u2) { session = { ...u2, authMode: 'local' }; _lsSet('session', session); ensurePerUserSeed(); notify('Signed in (Local mode)'); renderApp(); setupSessionPrompt(); return true; }
+  if (u2) {
+    session = { ...u2, uid: `local-${e}`, authMode: 'local' };
+    setSession(session);
+    migrateLegacyLocalForUser();
+    seedPerUserOnce();
+    notify('Signed in (Local mode)');
+    renderApp(); setupSessionPrompt();
+    return true;
+  }
   return false;
 }
+
 function localSignup({name,email,pass}){
   const e = (email||'').toLowerCase();
-  const users = _lsGet('users', []);
+  const users = load('users', []);
   if (users.find(x => (x.email||'').toLowerCase() === e)) {
     if (localLogin(email, pass)) return true;
-    notify('User already exists locally. Use Sign In.','warn');
+    notify('User already exists locally. Use Sign In.', 'warn');
     return false;
   }
   const role = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
   const u = { name: name || e.split('@')[0], username: e.split('@')[0], email: e, role, password: pass, img:'', contact:'' };
-  users.push(u); _lsSet('users', users);
-  session = { ...u, authMode: 'local' }; _lsSet('session', session);
-  ensurePerUserSeed(); notify('Account created (Local mode)'); renderApp(); setupSessionPrompt(); return true;
+  users.push(u); save('users', users);
+  session = { ...u, uid: `local-${e}`, authMode: 'local' }; setSession(session);
+  migrateLegacyLocalForUser(); seedPerUserOnce();
+  notify('Account created (Local mode)'); renderApp(); setupSessionPrompt(); return true;
 }
+
 function localResetPassword(email){
   const e = (email||'').toLowerCase();
-  const users = _lsGet('users', []);
+  const users = load('users', []);
   const i = users.findIndex(x => (x.email||'').toLowerCase() === e);
   if (i < 0) return { ok:false, msg:'No local user found.' };
   const temp = 'reset' + Math.floor(1000 + Math.random()*9000);
-  users[i].password = temp; _lsSet('users', users);
+  users[i].password = temp; save('users', users);
   return { ok:true, temp };
 }
 
-/* ---------- Login screen ---------- */
+/* ---------- Sidebar + Topbar ---------- */
+let currentRoute = _lsGet('_route', 'home');
+let searchQuery  = _lsGet('_searchQ', '');
+
+function renderSidebar(active='home'){
+  const links = [
+    { route:'home',      icon:'ri-home-5-line',              label:'Home' },
+    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
+    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
+    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
+    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
+    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
+    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
+  ];
+  const pages = [
+    { route:'about',   icon:'ri-information-line',        label:'About' },
+    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
+    { route:'license', icon:'ri-copyright-line',          label:'License' },
+    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
+    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
+    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
+  ];
+  return `
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="logo">📦</div>
+        <div class="title">Inventory</div>
+      </div>
+
+      <div class="search-wrap">
+        <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+
+      <h6>Menu</h6>
+      <nav class="nav">
+        ${links.map(l => `
+          <div class="item ${active===l.route?'active':''}" data-route="${l.route}">
+            <i class="${l.icon}"></i> <span>${l.label}</span>
+          </div>`).join('')}
+      </nav>
+
+      <h6>Links</h6>
+      <div class="links">
+        ${pages.map(p => `
+          <div class="item" data-route="${p.route}">
+            <i class="${p.icon}"></i> <span>${p.label}</span>
+          </div>`).join('')}
+      </div>
+
+      <h6>Social</h6>
+      <div class="socials-row">
+        <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+        <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+        <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+        <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
+        <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
+      </div>
+    </aside>
+  `;
+}
+
+function renderTopbar(){
+  const socialsCompact = `
+    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
+      <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+      <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+      <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+    </div>`;
+  return `
+    <div class="topbar">
+      <div class="left">
+        <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
+        <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
+      </div>
+      <div class="right">
+        ${socialsCompact}
+        <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
+        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
+      </div>
+    </div>
+    <div class="backdrop" id="backdrop"></div>
+  `;
+}
+
+// delegated sidebar nav
+document.addEventListener('click', (e)=>{
+  const item = e.target.closest('.sidebar .item[data-route]');
+  if (!item) return;
+  const r = item.getAttribute('data-route');
+  if (r) { go(r); closeSidebar(); }
+});
+
+// close buttons in modals (generic)
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-close]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-close');
+  if (id && typeof closeModal === 'function') { closeModal(id); }
+});
+
+// Sidebar search
+function hookSidebarInteractions(){
+  const input   = $('#globalSearch');
+  const results = $('#searchResults');
+  if (!input || !results) return;
+
+  let searchTimer;
+  const openResultsPage = (q)=>{
+    window.searchQuery = q; _lsSet('_searchQ', q);
+    if (window.currentRoute !== 'search') go('search'); else renderApp();
+  };
+
+  input.addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter') {
+      const q = input.value.trim();
+      if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
+    }
+  });
+
+  input.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = input.value.trim().toLowerCase();
+    if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
+    searchTimer = setTimeout(() => {
+      const indexData = buildSearchIndex();
+      const out = searchAll(indexData, q).slice(0, 12);
+      if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
+      results.innerHTML = out.map(r => `
+        <div class="result" data-route="${r.route}" data-id="${r.id||''}">
+          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
+        </div>`).join('');
+      results.classList.add('active');
+
+      results.querySelectorAll('.result').forEach(row => {
+        row.onclick = () => {
+          const r = row.getAttribute('data-route');
+          const id = row.getAttribute('data-id') || '';
+          const label = row.textContent.trim();
+          openResultsPage(label);
+          results.classList.remove('active'); input.value = ''; closeSidebar();
+          if (id) setTimeout(()=> scrollToRow(id), 80);
+        };
+      });
+    }, 120);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!results.contains(e.target) && e.target !== input) {
+      results.classList.remove('active');
+    }
+  });
+}
+
+function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('sidebar-open'); }
+function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('sidebar-open'); }
+
+/* =========================
+   Router + renderer
+   ========================= */
+
+function go(route){ currentRoute = route; _lsSet('_route', route); renderApp(); }
+
+function safeView(route) {
+  switch ((route || 'home')) {
+    case 'home':       return viewHome();
+    case 'search':     return viewSearch();
+    case 'dashboard':  return viewDashboard();
+    case 'inventory':  return viewInventory();
+    case 'products':   return viewProducts();
+    case 'cogs':       return viewCOGS();
+    case 'tasks':      return viewTasks();
+    case 'settings':   return viewSettings();
+    case 'about':
+    case 'policy':
+    case 'license':
+    case 'setup':
+    case 'contact':
+    case 'guide':      return viewPage(route);
+    default:           return viewHome();
+  }
+}
+
+function wireRoute(route) {
+  // Topbar actions
+  $('#btnLogout')?.addEventListener('click', doLogout);
+  $('#btnHome')?.addEventListener('click', () => go('home'));
+  $('#burger')?.addEventListener('click', openSidebar);
+  $('#backdrop')?.addEventListener('click', closeSidebar);
+
+  // In-content navigation buttons like: <button data-go="inventory">
+  document.querySelectorAll('[data-go]').forEach(el => {
+    el.addEventListener('click', () => {
+      const r  = el.getAttribute('data-go');
+      const id = el.getAttribute('data-id');
+      if (r) {
+        go(r);
+        if (id) setTimeout(() => { try { scrollToRow(id); } catch(_) {} }, 80);
+      }
+    });
+  });
+
+  hookSidebarInteractions();
+  ensureGlobalModals();   // creates modals if not present
+  wireSessionModal();     // bind stay/logout
+  enableMobileImagePreview();
+
+  switch ((route || 'home')) {
+    case 'home':      wireHome(); break;
+    case 'dashboard': wireDashboard(); wirePosts(); break;
+    case 'inventory': wireInventory(); break;
+    case 'products':  wireProducts(); break;
+    case 'cogs':      wireCOGS(); break;
+    case 'tasks':     wireTasks(); break;
+    case 'settings':  wireSettings(); break;
+    case 'contact':   wireContact(); break;
+  }
+}
+
+function renderApp() {
+  try {
+    if (!session) { renderLogin(); return; }
+
+    const root = document.getElementById('root');
+    if (!root) return;
+
+    const route = currentRoute || 'home';
+
+    root.innerHTML = `
+      <div class="app">
+        ${renderSidebar(route)}
+        <div>
+          ${renderTopbar()}
+          <div class="main" id="main">
+            ${safeView(route)}
+          </div>
+        </div>
+      </div>
+    `;
+
+    wireRoute(route);
+  } catch (e) {
+    console.error('[renderApp] crash:', e);
+    notify(e?.message || 'Render failed', 'danger');
+    showRescue(e);
+  }
+}
+
+/* =========================
+   Login screen
+   ========================= */
+
 function renderLogin() {
   const root = document.getElementById('root');
   root.innerHTML = `
@@ -276,9 +631,9 @@ function renderLogin() {
               <a id="link-register" href="#" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
             </div>
 
-            <div class="login-note" style="margin-top:6px">
+            <!-- <div class="login-note" style="margin-top:6px">
               Tip: you can log in with <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong> (local admin).
-            </div>
+            </div> -->
           </div>
         </div>
       </div>
@@ -324,17 +679,17 @@ function renderLogin() {
 
     // Local demo admin
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS) {
-      let users = _lsGet('users', []);
+      let users = load('users', []);
       let prof = users.find(u => (u.email||'').toLowerCase() === email);
       if (!prof) {
         prof = { name:'Admin', username:'admin', email: DEMO_ADMIN_EMAIL, contact:'', role:'admin', password:'', img:'' };
-        users.push(prof); _lsSet('users', users);
+        users.push(prof); await save('users', users);
       }
-      session = { ...prof, authMode: 'local' };
-      _lsSet('session', session);
-      ensurePerUserSeed();
+      session = { ...prof, uid: 'local-demo', authMode: 'local' };
+      setSession(session);
+      migrateLegacyLocalForUser(); seedPerUserOnce();
       notify('Welcome, Admin (local mode)');
-      renderApp();
+      try { await ensureSessionAndRender(null); } catch(e){ console.error(e); }
       setupSessionPrompt();
       return;
     }
@@ -431,251 +786,157 @@ async function doLogout(){
   try { renderLogin(); } catch (e) { console.error(e); }
 }
 
-/* ---------- Sidebar / Topbar ---------- */
-function role(){ return (session?.role)||'user'; }
-function canAdd(){ return ['admin','manager','associate'].includes(role()); }
-function canEdit(){ return ['admin','manager'].includes(role()); }
-function canDelete(){ return ['admin'].includes(role()); }
+/* ===================== Part C.1 — Home (Hot videos) ===================== */
 
-function renderSidebar(active='home'){
-  const links = [
-    { route:'home',      icon:'ri-home-5-line',              label:'Home' },
-    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
-    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
-    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
-    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
-    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
-    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
+(function(){
+  const DEFAULT_LIB = [
+    { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
+    { title:'DEAF KEV – Invincible (NCS Release)', id:'J2X5mJ3HDYE' },
+    { title:'Ikson – Anywhere (NCM)', id:'OZLUa8JUR18' },
+    { title:'Elektronomia – Sky High (NCS)', id:'TW9d8vYrVFQ' },
+    { title:'Janji – Heroes Tonight (NCS)', id:'3nQNiWdeH2Q' },
+    { title:'Jim Yosef – Firefly (NCS)', id:'x_OwcYTNbHs' },
+    { title:'Syn Cole – Feel Good (NCS)', id:'q1ULJ92aldE' },
+    { title:'Itro & Tobu – Cloud 9 (NCS)', id:'VtKbiyyVZks' },
+    { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
+    { title:'Tobu – Candyland (NCS)', id:'IIrCDAV3EgI' },
   ];
-  const pages = [
-    { route:'about',   icon:'ri-information-line',        label:'About' },
-    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
-    { route:'license', icon:'ri-copyright-line',          label:'License' },
-    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
-    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
-    { route:'guide',   icon:'ri-video-line',              label:'User Guide' },
-  ];
-  return `
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <div class="logo">📦</div><div class="title">Inventory</div>
-      </div>
+  if (!window.HOT_MUSIC_LIBRARY) window.HOT_MUSIC_LIBRARY = DEFAULT_LIB.slice();
 
-      <div class="search-wrap">
-        <input id="globalSearch" placeholder="Search everything…" autocomplete="off" />
-        <div id="searchResults" class="search-results"></div>
-      </div>
+  if (!window.buildWeeklyMusicSet) window.buildWeeklyMusicSet = (size = 10) => {
+    const lib = window.HOT_MUSIC_LIBRARY || [];
+    if (!lib.length) return [];
+    const week = getISOWeek(new Date());
+    const start = week % lib.length;
+    const out = [];
+    for (let i=0; i<size; i++) out.push(lib[(start + i) % lib.length]);
+    return out;
+  };
+  window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
 
-      <h6>Menu</h6>
-      <nav class="nav">
-        ${links.map(l => `<div class="item ${active===l.route?'active':''}" data-route="${l.route}"><i class="${l.icon}"></i> <span>${l.label}</span></div>`).join('')}
-      </nav>
-
-      <h6>Links</h6>
-      <div class="links">
-        ${pages.map(p => `<div class="item" data-route="${p.route}"><i class="${p.icon}"></i> <span>${p.label}</span></div>`).join('')}
-      </div>
-
-      <h6>Social</h6>
-      <div class="socials-row">
-        <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-        <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-        <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-        <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
-        <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
-      </div>
-    </aside>
-  `;
-}
-function renderTopbar(){
-  const socialsCompact = `
-    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
-      <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-      <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-      <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-    </div>`;
-  return `
-    <div class="topbar">
-      <div class="left">
-        <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
-        <div><strong>${(currentRoute||'home').slice(0,1).toUpperCase()+ (currentRoute||'home').slice(1)}</strong></div>
-      </div>
-      <div class="right">
-        ${socialsCompact}
-        <button class="btn ghost" id="btnHome"><i class="ri-home-5-line"></i> Home</button>
-        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
-      </div>
-    </div>
-    <div class="backdrop" id="backdrop"></div>
-  `;
-}
-
-/* Delegated sidebar clicks + close buttons */
-document.addEventListener('click', (e)=>{
-  const item = e.target.closest('.sidebar .item[data-route]');
-  if (!item) return;
-  const r = item.getAttribute('data-route');
-  if (r) { go(r); closeSidebar(); }
-});
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-close]');
-  if (!btn) return;
-  const id = btn.getAttribute('data-close');
-  if (id) closeModal(id);
-});
-
-function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('sidebar-open'); }
-function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('sidebar-open'); }
-
-/* ---------- Router ---------- */
-function go(route){ currentRoute = route; save('_route', route); renderApp(); }
-function safeView(route) {
-  switch ((route || 'home')) {
-    case 'home':       return viewHome();
-    case 'search':     return viewSearch();
-    case 'dashboard':  return viewDashboard();
-    case 'inventory':  return viewInventory();
-    case 'products':   return viewProducts();
-    case 'cogs':       return viewCOGS();
-    case 'tasks':      return viewTasks();
-    case 'settings':   return viewSettings();
-    case 'about':
-    case 'policy':
-    case 'license':
-    case 'setup':
-    case 'contact':
-    case 'guide':      return viewPage(route);
-    default:           return viewHome();
-  }
-}
-function wireRoute(route) {
-  $('#btnLogout')?.addEventListener('click', doLogout);
-  $('#btnHome')?.addEventListener('click', () => go('home'));
-  $('#burger')?.addEventListener('click', openSidebar);
-  $('#backdrop')?.addEventListener('click', closeSidebar);
-  hookSidebarSearch();
-  ensureGlobalModals();
-  wireSessionModal();
-  enableMobileImagePreview();
-
-  switch ((route || 'home')) {
-    case 'home':      wireHome(); break;
-    case 'dashboard': wireDashboard(); wirePosts(); break;
-    case 'inventory': wireInventory(); break;
-    case 'products':  wireProducts(); break;
-    case 'cogs':      wireCOGS(); break;
-    case 'tasks':     wireTasks(); break;
-    case 'settings':  wireSettings(); break;
-    case 'contact':   wireContact(); break;
-  }
-}
-function renderApp() {
-  if (!session) { renderLogin(); return; }
-  const root = document.getElementById('root');
-  const route = currentRoute || 'home';
-  root.innerHTML = `
-    <div class="app">
-      ${renderSidebar(route)}
-      <div>
-        ${renderTopbar()}
-        <div class="main" id="main">${safeView(route)}</div>
-      </div>
-    </div>`;
-  wireRoute(route);
-}
-
-/* ---------- Sidebar Search (typeahead) ---------- */
-function buildSearchIndex(){
-  const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=_lsGet('users', []);
-  const pages = [
-    { id:'about',   label:'About',       section:'Pages', route:'about'   },
-    { id:'policy',  label:'Policy',      section:'Pages', route:'policy'  },
-    { id:'license', label:'License',     section:'Pages', route:'license' },
-    { id:'setup',   label:'Setup Guide', section:'Pages', route:'setup'   },
-    { id:'contact', label:'Contact',     section:'Pages', route:'contact' },
-    { id:'guide',   label:'User Guide',  section:'Pages', route:'guide'   },
-  ];
-  const ix=[]; posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
-  inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`}));
-  prods.forEach(p=>ix.push({id:p.id,label:p.name,section:'Products',route:'products',text:`${p.name} ${p.barcode} ${p.type} ${p.ingredients}`}));
-  cogs.forEach(r=>ix.push({id:r.id,label:r.date,section:'COGS',route:'cogs',text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.delivery} ${r.other}`}));
-  users.forEach(u=>ix.push({id:u.email,label:u.name,section:'Users',route:'settings',text:`${u.name} ${u.email} ${u.role}`}));
-  pages.forEach(p=>ix.push(p));
-  return ix;
-}
-function searchAll(index, q){
-  const norm = s => (s||'').toLowerCase();
-  const tokens = norm(q).split(/\s+/).filter(Boolean);
-  return index
-    .map(item=>{
-      const label = norm(item.label);
-      const text  = norm(item.text||'');
-      let hitCount = 0;
-      const ok = tokens.every(t=>{
-        const hit = label.includes(t) || text.includes(t);
-        if (hit) hitCount++;
-        return hit;
-      });
-      const score = ok ? (hitCount*3 + (label.includes(tokens[0]||'')?2:0)) : 0;
-      return { item, score };
-    })
-    .filter(x=>x.score>0)
-    .sort((a,b)=>b.score-a.score)
-    .map(x=>x.item);
-}
-function hookSidebarSearch(){
-  const input   = $('#globalSearch');
-  const results = $('#searchResults');
-  if (!input || !results) return;
-
-  let searchTimer;
-  const openResultsPage = (q)=>{
-    window.searchQuery = q; save('_searchQ', q);
-    if (window.currentRoute !== 'search') go('search'); else renderApp();
+  if (!window.pickWeeklyVideoIndex) window.pickWeeklyVideoIndex = () => {
+    const n = Math.max(1, (window.HOT_MUSIC_VIDEOS||[]).length);
+    return getISOWeek(new Date()) % n;
   };
 
-  input.addEventListener('keydown', (e)=>{
-    if (e.key === 'Enter') {
-      const q = input.value.trim();
-      if (q) { openResultsPage(q); results.classList.remove('active'); input.blur(); closeSidebar(); }
-    }
-  });
+  function _ytBLLoad(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
+  function _ytBLSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
+  window.ytBlacklistAdd   = (id)=>{ const m=_ytBLLoad(); m[id]=Date.now(); _ytBLSave(m); };
+  window.ytIsBlacklisted  = (id)=>{ const m=_ytBLLoad(); return !!m[id]; };
+  window.ytBlacklistClear = ()=> _ytBLSave({});
+})();
 
-  input.addEventListener('input', () => {
-    clearTimeout(searchTimer);
-    const q = input.value.trim().toLowerCase();
-    if (!q) { results.classList.remove('active'); results.innerHTML=''; return; }
-    searchTimer = setTimeout(() => {
-      const indexData = buildSearchIndex();
-      const out = searchAll(indexData, q).slice(0, 12);
-      if (!out.length) { results.classList.remove('active'); results.innerHTML=''; return; }
-      results.innerHTML = out.map(r => `
-        <div class="result" data-route="${r.route}" data-id="${r.id||''}">
-          <strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section||''}</span>
-        </div>`).join('');
-      results.classList.add('active');
+function viewHome(){
+  const weeklyIdx = pickWeeklyVideoIndex();
+  return `
+    <div class="card">
+      <div class="card-body">
+        <h3 style="margin-top:0">Welcome 👋</h3>
+        <p style="color:var(--muted)">Pick a section or watch this week’s hot videos. Tap Shuffle to change.</p>
 
-      results.querySelectorAll('.result').forEach(row => {
-        row.onclick = () => {
-          const r = row.getAttribute('data-route');
-          const id = row.getAttribute('data-id') || '';
-          const label = row.textContent.trim();
-          openResultsPage(label);
-          results.classList.remove('active'); input.value = ''; closeSidebar();
-          if (id) setTimeout(()=> scrollToRow(id), 80);
-        };
-      });
-    }, 120);
-  });
+        <div class="grid cols-4 auto" style="margin-bottom:12px">
+          <div class="card tile" data-go="inventory"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-archive-2-line"></i><div>Inventory</div></div></div>
+          <div class="card tile" data-go="products"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-store-2-line"></i><div>Products</div></div></div>
+          <div class="card tile" data-go="cogs"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-money-dollar-circle-line"></i><div>COGS</div></div></div>
+          <div class="card tile" data-go="tasks"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-list-check-2"></i><div>Tasks</div></div></div>
+        </div>
 
-  document.addEventListener('click', (e) => {
-    if (!results.contains(e.target) && e.target !== input) {
-      results.classList.remove('active');
-    }
-  });
+        <div class="grid">
+          <div class="card">
+            <div class="card-body">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <h4 style="margin:0">Hot Music / Videos</h4>
+                <div style="display:flex;gap:8px">
+                  <button class="btn ghost" id="btnShuffleVideo"><i class="ri-shuffle-line"></i> Shuffle</button>
+                  <a class="btn secondary" id="btnOpenYouTube" href="#" target="_blank" rel="noopener"><i class="ri-youtube-fill"></i> Open on YouTube</a>
+                </div>
+              </div>
+
+              <div id="musicVideoWrap" data-vid-index="${weeklyIdx}">
+                <div id="ytPlayerHost" style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px;overflow:hidden"></div>
+                <div style="margin-top:8px;font-weight:700" id="mvTitle"></div>
+                <div style="color:var(--muted);font-size:12px;margin-top:4px">On mobile, playback may require a tap.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>`;
 }
 
-/* ---------- Views ---------- */
+function wireHome(){
+  const wrap   = $('#musicVideoWrap');
+  const title  = $('#mvTitle');
+  const openYT = $('#btnOpenYouTube');
+  const btn    = $('#btnShuffleVideo');
+  const hostId = 'ytPlayerHost';
+  if (!wrap || !title || !openYT) return;
+
+  function loadYT(){
+    return new Promise((resolve)=>{
+      if (window.YT && YT.Player) return resolve();
+      const s = document.createElement('script');
+      s.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(s);
+      window.onYouTubeIframeAPIReady = ()=> resolve();
+    });
+  }
+
+  function nextValidIndex(start){
+    const list = window.HOT_MUSIC_VIDEOS || [];
+    if (!list.length) return 0;
+    for (let k=0; k<list.length; k++){
+      const i = (start + k) % list.length;
+      if (!ytIsBlacklisted(list[i].id)) return i;
+    }
+    ytBlacklistClear();
+    return start % list.length;
+  }
+
+  let player = null;
+
+  function setVideoByIndex(idx){
+    const list = window.HOT_MUSIC_VIDEOS || [];
+    if (!list.length) return;
+
+    const i = nextValidIndex(idx);
+    const { id, title: t } = list[i];
+
+    wrap.setAttribute('data-vid-index', String(i));
+    title.textContent = t || 'Hot videos';
+    openYT.href = `https://www.youtube.com/watch?v=${id}`;
+
+    const options = {
+      host: 'https://www.youtube-nocookie.com',
+      videoId: id,
+      playerVars: { rel:0, modestbranding:1, playsinline:1, origin: location.origin },
+      events: {
+        onError: ()=>{ try { ytBlacklistAdd(id); } catch {} notify('Video not available. Skipping…','warn'); setVideoByIndex(i + 1); }
+      }
+    };
+
+    if (!player){ player = new YT.Player(hostId, options); } else { player.loadVideoById(id); }
+  }
+
+  loadYT().then(()=>{
+    const startIdx = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
+    setVideoByIndex(startIdx);
+
+    btn?.addEventListener('click', ()=>{
+      const list = window.HOT_MUSIC_VIDEOS || [];
+      if (!list.length) return;
+      const curr = parseInt(wrap.getAttribute('data-vid-index') || '0', 10) || 0;
+      let next = Math.floor(Math.random()*list.length);
+      if (list.length > 1 && next === curr) next = (next+1) % list.length;
+      setVideoByIndex(next);
+      notify('Shuffled video','ok');
+    });
+  }).catch(()=> notify('YouTube player couldn’t load','warn'));
+}
+
+/* ===================== Search ===================== */
+
 function viewSearch(){
   const q = (window.searchQuery || '').trim();
   const index = buildSearchIndex();
@@ -695,161 +956,53 @@ function viewSearch(){
       </div>` : `<p style="color:var(--muted)">No results.</p>`}
     </div></div>`;
 }
-
-/* ----- Home: Hot Music + Hot Videos ----- */
-(function(){
-  const MUSIC_DEFAULT = [
-    { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
-    { title:'DEAF KEV – Invincible (NCS Release)', id:'J2X5mJ3HDYE' },
-    { title:'Ikson – Anywhere (NCM)', id:'OZLUa8JUR18' },
-    { title:'Elektronomia – Sky High (NCS)', id:'TW9d8vYrVFQ' },
-    { title:'Janji – Heroes Tonight (NCS)', id:'3nQNiWdeH2Q' },
-    { title:'Jim Yosef – Firefly (NCS)', id:'x_OwcYTNbHs' },
-    { title:'Syn Cole – Feel Good (NCS)', id:'q1ULJ92aldE' },
-    { title:'Itro & Tobu – Cloud 9 (NCS)', id:'VtKbiyyVZks' },
-    { title:'Alan Walker – Spectre (NCS)', id:'AOeY-nDp7hI' },
-    { title:'Tobu – Candyland (NCS)', id:'IIrCDAV3EgI' },
+window.buildSearchIndex = function(){
+  const posts = load('posts', []), inv=load('inventory', []), prods=load('products', []), cogs=load('cogs', []), users=load('users', []);
+  const pages = [
+    { id:'about',   label:'About',       section:'Pages', route:'about'   },
+    { id:'policy',  label:'Policy',      section:'Pages', route:'policy'  },
+    { id:'license', label:'License',     section:'Pages', route:'license' },
+    { id:'setup',   label:'Setup Guide', section:'Pages', route:'setup'   },
+    { id:'contact', label:'Contact',     section:'Pages', route:'contact' },
+    { id:'guide',   label:'User Guide',  section:'Pages', route:'guide'   },
   ];
-  const ANY_DEFAULT = [
-    { title:'Relaxing Scenic Drone 4K', id:'2OEL4P1Rz04' },
-    { title:'Japan Street Food Tour',  id:'r7qovpFAGrQ' },
-    { title:'Insane Marble Machine',   id:'IvUU8joBb1Q' },
-    { title:'Satisfying Woodworking',  id:'dQZfL6fFzNM' },
-    { title:'SpaceX Falcon 9 Landing', id:'O5bTbVbe4e4' },
-    { title:'National Geographic – Wild', id:'C0DPdy98e4c' },
-    { title:'Red Bull Bike Highlights', id:'gODZzSOelss' },
-    { title:'World’s Best Parkour',     id:'aIyQqg6gN8Y' }
-  ];
-  if (!window.HOT_MUSIC_LIBRARY) window.HOT_MUSIC_LIBRARY = MUSIC_DEFAULT.slice();
-  if (!window.HOT_ANY_LIBRARY)   window.HOT_ANY_LIBRARY   = ANY_DEFAULT.slice();
+  const ix=[]; posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
+  inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`}));
+  prods.forEach(p=>ix.push({id:p.id,label:p.name,section:'Products',route:'products',text:`${p.name} ${p.barcode} ${p.type} ${p.ingredients}`}));
+  cogs.forEach(r=>ix.push({id:r.id,label:r.date,section:'COGS',route:'cogs',text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.delivery} ${r.other}`}));
+  users.forEach(u=>ix.push({id:u.email,label:u.name,section:'Users',route:'settings',text:`${u.name} ${u.email} ${u.role}`}));
+  pages.forEach(p=>ix.push(p));
+  return ix;
+};
+window.searchAll = function(index, q){
+  const norm = s => (s||'').toLowerCase();
+  const tokens = norm(q).split(/\s+/).filter(Boolean);
+  return index
+    .map(item=>{
+      const label = norm(item.label);
+      const text  = norm(item.text||'');
+      let hitCount = 0;
+      const ok = tokens.every(t=>{
+        const hit = label.includes(t) || text.includes(t);
+        if (hit) hitCount++;
+        return hit;
+      });
+      const score = ok ? (hitCount*3 + (label.includes(tokens[0]||'')?2:0)) : 0;
+      return { item, score };
+    })
+    .filter(x=>x.score>0)
+    .sort((a,b)=>b.score-a.score)
+    .map(x=>x.item);
+};
+window.scrollToRow = function(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); };
 
-  const weeklyStart = (list)=> (getISOWeek(new Date()) % Math.max(1, list.length));
-  function buildSet(list, size=10){
-    if (!list.length) return [];
-    const start = weeklyStart(list);
-    const out = [];
-    for (let i=0;i<size;i++) out.push(list[(start+i)%list.length]);
-    return out;
-  }
-  window.HOT_MUSIC_VIDEOS = buildSet(window.HOT_MUSIC_LIBRARY, 10);
-  window.HOT_ANY_VIDEOS   = buildSet(window.HOT_ANY_LIBRARY,   8);
+/* ===================== Dashboard + Posts ===================== */
 
-  function _ytBlacklistLoad(){ try { return JSON.parse(localStorage.getItem('_ytBlacklist') || '{}'); } catch { return {}; } }
-  function _ytBlacklistSave(m){ try { localStorage.setItem('_ytBlacklist', JSON.stringify(m)); } catch {} }
-  window.ytBlacklistAdd   = (id)=>{ const m=_ytBlacklistLoad(); m[id]=Date.now(); _ytBlacklistSave(m); };
-  window.ytIsBlacklisted  = (id)=>{ const m=_ytBlacklistLoad(); return !!m[id]; };
-  window.ytBlacklistClear = ()=> _ytBlacklistSave({});
-})();
-function viewHome(){
-  return `
-    <div class="card"><div class="card-body">
-      <h3 style="margin-top:0">Welcome 👋</h3>
-      <p style="color:var(--muted)">Pick a section or watch <strong>Hot Music Videos</strong> and other <strong>Hot Videos</strong>.</p>
-
-      <div class="grid cols-4 auto" style="margin-bottom:12px">
-        <div class="card tile" data-go="inventory"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-archive-2-line"></i><div>Inventory</div></div></div>
-        <div class="card tile" data-go="products"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-store-2-line"></i><div>Products</div></div></div>
-        <div class="card tile" data-go="cogs"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-money-dollar-circle-line"></i><div>COGS</div></div></div>
-        <div class="card tile" data-go="tasks"><div class="card-body" style="display:flex;gap:10px;align-items:center"><i class="ri-list-check-2"></i><div>Tasks</div></div></div>
-      </div>
-
-      <!-- Video Tabs -->
-      <div class="card"><div class="card-body">
-        <div style="display:flex;gap:8px;margin-bottom:10px">
-          <button class="btn ghost" data-tab="music" id="tab-music"><i class="ri-music-2-line"></i> Hot Music</button>
-          <button class="btn ghost" data-tab="any"   id="tab-any"><i class="ri-fire-line"></i> Hot Videos</button>
-        </div>
-
-        <!-- Music panel -->
-        <div id="panel-music">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <h4 style="margin:0">Hot Music Videos</h4>
-            <div style="display:flex;gap:8px">
-              <button class="btn ghost" id="btnShuffleMusic"><i class="ri-shuffle-line"></i> Shuffle</button>
-              <a class="btn secondary" id="btnOpenYouTubeMusic" href="#" target="_blank" rel="noopener"><i class="ri-youtube-fill"></i> Open on YouTube</a>
-            </div>
-          </div>
-          <div id="musicVideoWrap">
-            <div id="ytPlayerMusic" style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px;overflow:hidden"></div>
-            <div id="mvTitle" style="margin-top:8px;font-weight:700"></div>
-          </div>
-        </div>
-
-        <!-- Any panel -->
-        <div id="panel-any" style="display:none;margin-top:16px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <h4 style="margin:0">Hot Videos</h4>
-            <div style="display:flex;gap:8px">
-              <button class="btn ghost" id="btnShuffleAny"><i class="ri-shuffle-line"></i> Shuffle</button>
-              <a class="btn secondary" id="btnOpenYouTubeAny" href="#" target="_blank" rel="noopener"><i class="ri-youtube-fill"></i> Open on YouTube</a>
-            </div>
-          </div>
-          <div id="anyVideoWrap">
-            <div id="ytPlayerAny" style="width:100%;aspect-ratio:16/9;border:1px solid var(--card-border);border-radius:12px;overflow:hidden"></div>
-            <div id="anyTitle" style="margin-top:8px;font-weight:700"></div>
-          </div>
-        </div>
-      </div></div>
-    </div>`;
-}
-function wireHome(){
-  const btnTabMusic = $('#tab-music'), btnTabAny = $('#tab-any');
-  const panelMusic  = $('#panel-music'), panelAny  = $('#panel-any');
-
-  function showPanel(which){
-    if (which==='music'){ panelMusic.style.display='block'; panelAny.style.display='none'; }
-    else { panelMusic.style.display='none'; panelAny.style.display='block'; }
-  }
-  btnTabMusic?.addEventListener('click', ()=> showPanel('music'));
-  btnTabAny?.addEventListener('click', ()=> showPanel('any'));
-
-  function loadYT(){ return new Promise((resolve)=>{ if (window.YT && YT.Player) return resolve(); const s=document.createElement('script'); s.src="https://www.youtube.com/iframe_api"; document.head.appendChild(s); window.onYouTubeIframeAPIReady=()=>resolve(); }); }
-  function nextValidIndex(list, start){
-    if (!list.length) return 0;
-    for (let k=0;k<list.length;k++){ const i=(start+k)%list.length; if(!ytIsBlacklisted(list[i].id)) return i; }
-    ytBlacklistClear(); return start % list.length;
-  }
-  let playerMusic=null, playerAny=null;
-
-  function setVideo(playerRef, hostId, list, idx, titleEl, openBtn){
-    if (!list.length) return;
-    const i=nextValidIndex(list, idx);
-    const { id, title } = list[i];
-    titleEl.textContent = title || '';
-    openBtn.href = `https://www.youtube.com/watch?v=${id}`;
-    const options = {
-      host: 'https://www.youtube-nocookie.com',
-      videoId: id,
-      playerVars: { rel:0, modestbranding:1, playsinline:1, origin: location.origin },
-      events: { onError: ()=>{ ytBlacklistAdd(id); notify('Video not available. Skipping…','warn'); setVideo(playerRef, hostId, list, i+1, titleEl, openBtn); } }
-    };
-    if (!playerRef.ref){ playerRef.ref = new YT.Player(hostId, options); } else { playerRef.ref.loadVideoById(id); }
-  }
-
-  loadYT().then(()=>{
-    const musicList = window.HOT_MUSIC_VIDEOS || [];
-    const anyList   = window.HOT_ANY_VIDEOS || [];
-
-    setVideo({get ref(){return playerMusic}, set ref(v){playerMusic=v;}}, 'ytPlayerMusic', musicList, getISOWeek(new Date())%Math.max(1,musicList.length), $('#mvTitle'), $('#btnOpenYouTubeMusic'));
-    setVideo({get ref(){return playerAny},   set ref(v){playerAny=v;}},   'ytPlayerAny',   anyList,   getISOWeek(new Date())%Math.max(1,anyList.length),   $('#anyTitle'), $('#btnOpenYouTubeAny'));
-
-    $('#btnShuffleMusic')?.addEventListener('click', ()=>{
-      const list = window.HOT_MUSIC_VIDEOS || []; if (!list.length) return;
-      const idx = Math.floor(Math.random()*list.length); setVideo({get ref(){return playerMusic}, set ref(v){playerMusic=v;}}, 'ytPlayerMusic', list, idx, $('#mvTitle'), $('#btnOpenYouTubeMusic')); notify('Shuffled music video','ok');
-    });
-    $('#btnShuffleAny')?.addEventListener('click', ()=>{
-      const list = window.HOT_ANY_VIDEOS || []; if (!list.length) return;
-      const idx = Math.floor(Math.random()*list.length); setVideo({get ref(){return playerAny}, set ref(v){playerAny=v;}}, 'ytPlayerAny', list, idx, $('#anyTitle'), $('#btnOpenYouTubeAny')); notify('Shuffled video','ok');
-    });
-  }).catch(()=> notify('YouTube player couldn’t load','warn'));
-}
-
-/* ---------- Dashboard + Posts ---------- */
 function viewDashboard(){
   const posts = load('posts', []);
   const inv   = load('inventory', []);
   const prods = load('products', []);
-  const users = _lsGet('users', []);
+  const users = load('users', []);
   const tasks = load('tasks', []);
   const cogs  = load('cogs', []);
 
@@ -927,7 +1080,7 @@ function wirePosts(){
   const btn = $('#save-post');
   if (btn && !btn.__wired){
     btn.__wired = true;
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', async ()=>{
       if (btn.dataset.busy) return;
       btn.dataset.busy = '1';
 
@@ -938,14 +1091,14 @@ function wirePosts(){
       if (!obj.title) { notify('Title required','warn'); btn.dataset.busy=''; return; }
       const i = posts.findIndex(x=>x.id===id);
       if (i>=0) { if (!canEdit()) { notify('No permission','warn'); btn.dataset.busy=''; return; } posts[i]=obj; } else posts.unshift(obj);
-      save('posts', posts); closeModal('m-post'); notify('Saved'); renderApp();
+      await save('posts', posts); closeModal('m-post'); notify('Saved'); renderApp();
       btn.dataset.busy='';
     });
   }
 
   if (!sec.__wired){
     sec.__wired = true;
-    sec.addEventListener('click', (e)=>{
+    sec.addEventListener('click', async (e)=>{
       const b = e.target.closest('button'); if (!b) return;
       const id = b.getAttribute('data-edit') || b.getAttribute('data-del'); if (!id) return;
       if (b.hasAttribute('data-edit')) {
@@ -954,13 +1107,15 @@ function wirePosts(){
         openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body; $('#post-img').value=p.img||'';
       } else {
         if (!canDelete()) return notify('No permission','warn');
-        save('posts', load('posts', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
+        await save('posts', load('posts', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
       }
     });
   }
 }
 
-/* ---------- CSV (no image columns) ---------- */
+/* ===================== Inventory / Products / COGS / Tasks ===================== */
+
+// CSV export (no img column)
 function downloadCSV(filename, rows, headers) {
   try {
     const csvRows = [];
@@ -984,45 +1139,18 @@ function downloadCSV(filename, rows, headers) {
   } catch (e) { notify('Export failed', 'danger'); }
 }
 
-/* ---------- Image uploads: auto-compress ---------- */
-async function resizeImageFile(file, max=1024, quality=0.82){
-  return new Promise((resolve)=>{
-    try{
-      const reader = new FileReader();
-      reader.onload = ()=>{
-        const img = new Image();
-        img.onload = ()=>{
-          let { width:w, height:h } = img;
-          if (w > max || h > max){
-            const ratio = Math.min(max/w, max/h);
-            w = Math.round(w*ratio); h = Math.round(h*ratio);
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = w; canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', quality);
-          resolve(dataUrl);
-        };
-        img.onerror = ()=> resolve(reader.result);
-        img.src = reader.result;
-      };
-      reader.onerror=()=> resolve('');
-      reader.readAsDataURL(file);
-    }catch{ resolve(''); }
-  });
-}
+// Generic image upload helper (file -> dataURL)
 function attachImageUpload(fileInputSel, textInputSel){
   const f = $(fileInputSel), t = $(textInputSel); if (!f || !t) return;
-  f.onchange = async ()=>{
+  f.onchange = ()=>{
     const file = f.files && f.files[0]; if (!file) return;
-    const dataUrl = await resizeImageFile(file, 1024, 0.82);
-    if (!dataUrl){ notify('Could not read image','warn'); return; }
-    t.value = dataUrl;
+    const reader = new FileReader();
+    reader.onload = ()=>{ t.value = reader.result; };
+    reader.readAsDataURL(file);
   };
 }
 
-/* ---------- Inventory ---------- */
+/* ----- Inventory ----- */
 function viewInventory(){
   const items = load('inventory', []);
   return `
@@ -1063,6 +1191,7 @@ function viewInventory(){
       </div>
     </div></div>`;
 }
+
 function wireInventory(){
   const sec = document.querySelector('[data-section="inventory"]'); if (!sec) return;
 
@@ -1082,7 +1211,7 @@ function wireInventory(){
   const saveBtn = $('#save-inv');
   if (saveBtn && !saveBtn.__wired){
     saveBtn.__wired = true;
-    saveBtn.addEventListener('click', ()=>{
+    saveBtn.addEventListener('click', async ()=>{
       if (saveBtn.dataset.busy) return;
       saveBtn.dataset.busy='1';
 
@@ -1103,7 +1232,7 @@ function wireInventory(){
       const i = items.findIndex(x=>x.id===id);
       if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } items[i]=obj; }
       else items.push(obj);
-      save('inventory', items);
+      await save('inventory', items);
       closeModal('m-inv'); notify('Saved'); renderApp();
       saveBtn.dataset.busy='';
     });
@@ -1111,7 +1240,7 @@ function wireInventory(){
 
   if (!sec.__wired){
     sec.__wired = true;
-    sec.addEventListener('click', (e)=>{
+    sec.addEventListener('click', async (e)=>{
       const btn = e.target.closest('button'); if (!btn) return;
       const items = load('inventory', []);
       const get = (id)=> items.find(x=>x.id===id);
@@ -1130,7 +1259,7 @@ function wireInventory(){
       if (btn.hasAttribute('data-del')) {
         if (!canDelete()) return notify('No permission','warn');
         const id = btn.getAttribute('data-del');
-        save('inventory', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp(); return;
+        await save('inventory', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp(); return;
       }
 
       const id = btn.getAttribute('data-inc') || btn.getAttribute('data-dec') || btn.getAttribute('data-inc-th') || btn.getAttribute('data-dec-th');
@@ -1142,12 +1271,12 @@ function wireInventory(){
       if (btn.hasAttribute('data-inc-th')) it.threshold++;
       if (btn.hasAttribute('data-dec-th')) it.threshold = Math.max(0, it.threshold-1);
 
-      save('inventory', items); renderApp();
+      await save('inventory', items); renderApp();
     });
   }
 }
 
-/* ---------- Products ---------- */
+/* ----- Products ----- */
 function viewProducts(){
   const items = load('products', []);
   return `
@@ -1180,6 +1309,7 @@ function viewProducts(){
       </div>
     </div></div>`;
 }
+
 function wireProducts(){
   const sec = document.querySelector('[data-section="products"]'); if (!sec) return;
 
@@ -1199,7 +1329,7 @@ function wireProducts(){
   const saveBtn = $('#save-prod');
   if (saveBtn && !saveBtn.__wired){
     saveBtn.__wired = true;
-    saveBtn.addEventListener('click', ()=>{
+    saveBtn.addEventListener('click', async ()=>{
       if (saveBtn.dataset.busy) return;
       saveBtn.dataset.busy='1';
 
@@ -1220,7 +1350,7 @@ function wireProducts(){
       const i = items.findIndex(x=>x.id===id);
       if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } items[i]=obj; }
       else items.push(obj);
-      save('products', items);
+      await save('products', items);
       closeModal('m-prod'); notify('Saved'); renderApp();
       saveBtn.dataset.busy='';
     });
@@ -1267,7 +1397,7 @@ function wireProducts(){
   }
 }
 
-/* ---------- COGS ---------- */
+/* ----- COGS ----- */
 function viewCOGS(){
   const rows = load('cogs', []);
   const totals = rows.reduce((a,r)=>({grossIncome:a.grossIncome+(+r.grossIncome||0),produceCost:a.produceCost+(+r.produceCost||0),itemCost:a.itemCost+(+r.itemCost||0),freight:a.freight+(+r.freight||0),delivery:a.delivery+(+r.delivery||0),other:a.other+(+r.other||0)}),{grossIncome:0,produceCost:0,itemCost:0,freight:0,delivery:0,other:0});
@@ -1307,6 +1437,7 @@ function viewCOGS(){
       </div>
     </div></div>`;
 }
+
 function wireCOGS(){
   const sec = document.querySelector('[data-section="cogs"]'); if (!sec) return;
 
@@ -1326,7 +1457,7 @@ function wireCOGS(){
   const saveBtn = $('#save-cogs');
   if (saveBtn && !saveBtn.__wired){
     saveBtn.__wired = true;
-    saveBtn.addEventListener('click', ()=>{
+    saveBtn.addEventListener('click', async ()=>{
       if (saveBtn.dataset.busy) return;
       saveBtn.dataset.busy='1';
 
@@ -1339,14 +1470,14 @@ function wireCOGS(){
         delivery:+($('#cogs-delivery').value||0), other:+($('#cogs-other').value||0) };
       const i = rows.findIndex(x=>x.id===id);
       if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } rows[i]=row; } else rows.push(row);
-      save('cogs', rows); closeModal('m-cogs'); notify('Saved'); renderApp();
+      await save('cogs', rows); closeModal('m-cogs'); notify('Saved'); renderApp();
       saveBtn.dataset.busy='';
     });
   }
 
   if (!sec.__wired){
     sec.__wired = true;
-    sec.addEventListener('click', (e)=>{
+    sec.addEventListener('click', async (e)=>{
       const btn = e.target.closest('button'); if (!btn) return;
       const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
 
@@ -1359,13 +1490,13 @@ function wireCOGS(){
         $('#cogs-delivery').value=r.delivery; $('#cogs-other').value=r.other;
       } else {
         if (!canDelete()) return notify('No permission','warn');
-        save('cogs', load('cogs', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
+        await save('cogs', load('cogs', []).filter(x=>x.id!==id)); notify('Deleted'); renderApp();
       }
     });
   }
 }
 
-/* ---------- Tasks (DnD + mobile tap) ---------- */
+/* ----- Tasks (DnD + mobile tap) ----- */
 function viewTasks(){
   const items = load('tasks', []);
   const lane = (key, label, color)=>`
@@ -1377,7 +1508,7 @@ function viewTasks(){
         </div>
         <div class="grid lane-grid" id="lane-${key}">
           ${items.filter(t=>t.status===key).map(t=>`
-            <div class="card task-card" id="${t.id}" draggable="true" data-task="${t.id}">
+            <div class="card task-card" id="${t.id}" draggable="true" data-task="${t.id}" style="cursor:grab">
               <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
                 <div>${t.title}</div>
                 <div>
@@ -1395,6 +1526,7 @@ function viewTasks(){
     ${lane('done','Done','#10b981')}
   </div>`;
 }
+
 function wireTasks(){
   const root = document.querySelector('[data-section="tasks"]'); if (!root) return;
 
@@ -1406,7 +1538,7 @@ function wireTasks(){
   const saveBtn = $('#save-task');
   if (saveBtn && !saveBtn.__wired){
     saveBtn.__wired = true;
-    saveBtn.addEventListener('click', ()=>{
+    saveBtn.addEventListener('click', async ()=>{
       if (saveBtn.dataset.busy) return;
       saveBtn.dataset.busy='1';
 
@@ -1418,7 +1550,7 @@ function wireTasks(){
       const i = items.findIndex(x=>x.id===id);
       if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } items[i]=obj; }
       else items.push(obj);
-      save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
+      await save('tasks',items); closeModal('m-task'); notify('Saved'); renderApp();
       saveBtn.dataset.busy='';
     });
   }
@@ -1426,7 +1558,7 @@ function wireTasks(){
   // row actions
   if (!root.__wired){
     root.__wired = true;
-    root.addEventListener('click', (e)=>{
+    root.addEventListener('click', async (e)=>{
       const btn = e.target.closest('button'); if (!btn) return;
       const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
       const items = load('tasks', []);
@@ -1436,7 +1568,7 @@ function wireTasks(){
         openModal('m-task'); $('#task-id').value=t.id; $('#task-title').value=t.title; $('#task-status').value=t.status;
       } else {
         if (!canDelete()) return notify('No permission','warn');
-        save('tasks', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
+        await save('tasks', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
       }
     });
   }
@@ -1445,6 +1577,7 @@ function wireTasks(){
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   if (isTouch) {
     $$('.task-card').forEach(card=>{
+      card.style.cursor='pointer';
       card.addEventListener('click', (e)=>{
         if (e.target.closest('button')) return;
         if (!canAdd()) return notify('No permission','warn');
@@ -1459,9 +1592,10 @@ function setupDnD(){
   const root = document.querySelector('[data-section="tasks"]');
   if (!root) return;
 
-  // Make each task-card draggable
+  // Make each task-card draggable and robust across browsers
   root.querySelectorAll('.task-card').forEach(card=>{
     card.setAttribute('draggable','true');
+    card.style.cursor='grab';
 
     card.addEventListener('dragstart', (e)=>{
       const id = card.getAttribute('data-task');
@@ -1470,13 +1604,12 @@ function setupDnD(){
       e.dataTransfer.setData('text/plain', id);
       card.classList.add('dragging');
     });
-
     card.addEventListener('dragend', ()=>{
       card.classList.remove('dragging');
     });
   });
 
-  // Accept drops on every lane grid (even empty)
+  // Accept drops on every lane grid (even when empty)
   root.querySelectorAll('.lane-grid').forEach(grid=>{
     const row = grid.closest('.lane-row');
     const lane = row?.getAttribute('data-lane');
@@ -1486,13 +1619,15 @@ function setupDnD(){
       try { e.dataTransfer.dropEffect = 'move'; } catch {}
       row?.classList.add('drop');
     };
-    const hideDrop = ()=> row?.classList.remove('drop');
+    const hideDrop = ()=>{
+      row?.classList.remove('drop');
+    };
 
     grid.addEventListener('dragenter', showDrop);
     grid.addEventListener('dragover',  showDrop);
     grid.addEventListener('dragleave', hideDrop);
 
-    grid.addEventListener('drop', (e)=>{
+    grid.addEventListener('drop', async (e)=>{
       e.preventDefault();
       hideDrop();
       if (!lane) return;
@@ -1506,15 +1641,16 @@ function setupDnD(){
       if (!t) return;
 
       t.status = lane;
-      save('tasks', items);
+      await save('tasks', items);
       renderApp();
     });
   });
 }
 
-/* ---------- Settings / Users / Contact / Static pages ---------- */
+/* ===================== Settings / Contact / Static Pages ===================== */
+
 function viewSettings(){
-  const users = _lsGet('users', []);
+  const users = load('users', []);
   const theme = getTheme();
   const cloudOn = cloud.isOn();
   return `
@@ -1538,12 +1674,12 @@ function viewSettings(){
         <div class="theme-inline">
           <div><label style="font-size:12px;color:var(--muted)">Mode</label>
             <select id="theme-mode" class="input">
-              ${['light','dark','aqua'].map(k=>`<option value="${k}" ${theme.mode===k?'selected':''}>${k[0].toUpperCase()+k.slice(1)}</option>`).join('')}
+              ${THEME_MODES.map(m=>`<option value="${m.key}" ${theme.mode===m.key?'selected':''}>${m.name}</option>`).join('')}
             </select>
           </div>
           <div><label style="font-size:12px;color:var(--muted)">Font Size</label>
             <select id="theme-size" class="input">
-              ${['small','medium','large'].map(k=>`<option value="${k}" ${theme.size===k?'selected':''}>${k[0].toUpperCase()+k.slice(1)}</option>`).join('')}
+              ${THEME_SIZES.map(s=>`<option value="${s.key}" ${theme.size===s.key?'selected':''}>${s.label}</option>`).join('')}
             </select>
           </div>
         </div>
@@ -1576,6 +1712,7 @@ function viewSettings(){
       </div></div>
     </div>`;
 }
+
 function allowedRoleOptions(){
   const r = role();
   if (r === 'admin') return ROLES;
@@ -1583,10 +1720,11 @@ function allowedRoleOptions(){
   if (r === 'associate') return ['user','associate'];
   return ['user'];
 }
+
 function wireSettings(){
   // Theme instant apply
   const mode = $('#theme-mode'), size = $('#theme-size');
-  const applyThemeNow = ()=>{ saveTheme({ mode: mode.value, size: size.value }); applyTheme(); renderApp(); };
+  const applyThemeNow = ()=>{ save('_theme2', { mode: mode.value, size: size.value }); applyTheme(); renderApp(); };
   mode?.addEventListener('change', applyThemeNow); size?.addEventListener('change', applyThemeNow);
 
   // Cloud controls
@@ -1605,13 +1743,14 @@ function wireSettings(){
       if (!auth.currentUser){ notify('Sign in with Firebase to use Cloud Sync.','warn'); return; }
       if (!cloud.isOn()){ notify('Turn Cloud Sync ON first in Settings.','warn'); return; }
       if (!navigator.onLine){ notify('You appear to be offline.','warn'); return; }
-      await firebase.database().goOnline(); await cloud.pushAll(); notify('Synced');
+      await firebase.database().goOnline(); await cloud.pushAll(); notify('Synced all data to cloud', 'ok');
     }catch(e){ notify((e && e.message) || 'Sync failed','danger'); }
   });
 
-  // Users
+  // Users wiring
   wireUsers();
 }
+
 function wireUsers(){
   const addBtn = $('#addUser'); const table = document.querySelector('[data-section="users"]');
 
@@ -1626,12 +1765,12 @@ function wireUsers(){
   const saveBtn = $('#save-user');
   if (saveBtn && !saveBtn.__wired){
     saveBtn.__wired = true;
-    saveBtn.addEventListener('click', ()=>{
+    saveBtn.addEventListener('click', async ()=>{
       if (saveBtn.dataset.busy) return;
       saveBtn.dataset.busy='1';
 
       if (!canAdd()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; }
-      const users = _lsGet('users', []);
+      const users = load('users', []);
       const email = ($('#user-email')?.value || '').trim().toLowerCase();
       if (!email) { notify('Email required','warn'); saveBtn.dataset.busy=''; return; }
       const allowed = allowedRoleOptions(); const chosenRole = ($('#user-role')?.value || 'user'); if (!allowed.includes(chosenRole)) { notify('Role not allowed','warn'); saveBtn.dataset.busy=''; return; }
@@ -1646,28 +1785,28 @@ function wireUsers(){
       };
       const i = users.findIndex(x=>x.email.toLowerCase()===email);
       if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } users[i]=obj; } else { users.push(obj); }
-      _lsSet('users', users); closeModal('m-user'); notify('Saved'); renderApp();
+      await save('users', users); closeModal('m-user'); notify('Saved'); renderApp();
       saveBtn.dataset.busy='';
     });
   }
 
-  table?.addEventListener('click', (e)=>{
+  table?.addEventListener('click', async (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const email = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!email) return;
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
-      const u = _lsGet('users', []).find(x=>x.email===email); if (!u) return;
+      const u = load('users', []).find(x=>x.email===email); if (!u) return;
       openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
       const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions().includes(u.role) ? u.role : 'user';
       attachImageUpload('#user-imgfile', '#user-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
-      _lsSet('users', _lsGet('users', []).filter(x=>x.email!==email)); notify('Deleted'); renderApp();
+      await save('users', load('users', []).filter(x=>x.email!==email)); notify('Deleted'); renderApp();
     }
   });
 }
 
-/* Static pages + Contact (mailto fallback) */
+// Static pages + Contact (iframe pages are separate HTML files)
 window.pageContent = window.pageContent || {};
 Object.assign(window.pageContent, {
   about:  `<h3>About Inventory</h3><p style="color:var(--muted)">A fast, offline-friendly app for small and medium businesses to manage stock, products, costs, and tasks — anywhere.</p>`,
@@ -1679,9 +1818,10 @@ Object.assign(window.pageContent, {
     <p style="color:var(--muted)">Click to email us: <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Hello%20from%20Inventory&body=Hi%2C%0A"><i class="ri-mail-send-line"></i> Contact via Email</a></p>`
 });
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
-function wireContact(){ /* mailto only */ }
+function wireContact(){ /* Mailto or separate contact.html (EmailJS) */ }
 
-/* ---------- Modals ---------- */
+/* ===================== Modals ===================== */
+
 function openModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.add('active'); mb?.classList.add('active'); document.body.classList.add('modal-open'); }
 function closeModal(id){ const m=$('#'+id); const mb=$('#mb-'+(id.split('-')[1]||'')); m?.classList.remove('active'); mb?.classList.remove('active'); document.body.classList.remove('modal-open'); }
 
@@ -1858,7 +1998,13 @@ function ensureGlobalModals(){
   attachImageUpload('#post-imgfile', '#post-img');
 }
 
-/* ---------- Service Worker (safe GET registration) ---------- */
+/* ===================== Online/offline + SW + Session Prompt ===================== */
+
+// Online / offline hints
+window.addEventListener('online',  ()=> notify('Back online','ok'));
+window.addEventListener('offline', ()=> notify('You are offline','warn'));
+
+// Service Worker (safe GET registration)
 (function(){
   if (!('serviceWorker' in navigator)) return;
   const swUrl = 'service-worker.js';
@@ -1868,20 +2014,22 @@ function ensureGlobalModals(){
     .catch(() => {});
 })();
 
-/* ---------- Idle session prompt (20m ask + 60s auto-logout) ---------- */
+/* ---------- Session prompt after inactivity (ask, then auto-logout after 60s) ---------- */
 const SESSION_PROMPT_ENABLED = true;
-const PROMPT_AFTER_MIN = 20;
-const PROMPT_GRACE_SEC = 60;
+const PROMPT_AFTER_MIN = 20;                         // show modal after 20 mins idle
+const PROMPT_GRACE_SEC = 60;                         // auto-logout if no response in 60s
 const PROMPT_AFTER_MS  = PROMPT_AFTER_MIN * 60 * 1000;
 const PROMPT_GRACE_MS  = PROMPT_GRACE_SEC * 1000;
 
 let __lastActivity = Date.now();
-let __sessionPromptInterval = null;
+let __sessionPromptInterval = null;   // periodic idle checker
 let __sessionPromptOpen = false;
 let __sessionPromptWired = false;
-let __sessionPromptDeadline = 0;
-let __sessionPromptTicker = null;
-let __sessionPromptHardTimeout = null;
+
+// countdown handles
+let __sessionPromptDeadline = 0;      // timestamp to auto-logout
+let __sessionPromptTicker = null;     // interval for UI countdown
+let __sessionPromptHardTimeout = null;// timeout to doLogout
 
 function __updateCountdown(){
   const el = document.getElementById('session-countdown');
@@ -1903,34 +2051,41 @@ function __keepSession(){
 }
 function __openSessionPrompt(){
   if (__sessionPromptOpen) return;
-  ensureGlobalModals();
-  wireSessionModal();
+  openModal('m-session');
+  __sessionPromptOpen = true;
 
-  openModal('m-session'); __sessionPromptOpen = true;
   __sessionPromptDeadline = Date.now() + PROMPT_GRACE_MS;
   __updateCountdown();
   __sessionPromptTicker = setInterval(__updateCountdown, 1000);
   __sessionPromptHardTimeout = setTimeout(()=>{
     __sessionPromptOpen = false;
     __cancelSessionPromptTimers();
-    try{ closeModal('m-session'); }catch{}
     doLogout();
   }, PROMPT_GRACE_MS);
 }
-function __markActivity(){ __lastActivity = Date.now(); if (__sessionPromptOpen) __keepSession(); }
+function __markActivity(){
+  __lastActivity = Date.now();
+  if (__sessionPromptOpen){
+    __keepSession();
+  }
+}
 function setupSessionPrompt(){
   if (!SESSION_PROMPT_ENABLED) return;
+
   if (!window.__activityListenersAdded){
     ['click','keydown','mousemove','scroll','touchstart'].forEach(evt =>
       document.addEventListener(evt, __markActivity, { passive:true })
     );
     window.__activityListenersAdded = true;
   }
+
   if (__sessionPromptInterval) clearInterval(__sessionPromptInterval);
   __sessionPromptInterval = setInterval(()=>{
     if (!session) return;
     const idleFor = Date.now() - __lastActivity;
-    if (idleFor >= PROMPT_AFTER_MS && !__sessionPromptOpen) __openSessionPrompt();
+    if (idleFor >= PROMPT_AFTER_MS && !__sessionPromptOpen){
+      __openSessionPrompt();
+    }
   }, 30000);
 }
 function wireSessionModal(){
@@ -1938,9 +2093,15 @@ function wireSessionModal(){
   const stay   = document.getElementById('session-stay');
   const logout = document.getElementById('session-logout');
   const closeX = document.getElementById('session-close');
+
   if (stay)   stay.addEventListener('click', __keepSession);
   if (closeX) closeX.addEventListener('click', __keepSession);
-  if (logout) logout.addEventListener('click', ()=>{ __cancelSessionPromptTimers(); __sessionPromptOpen=false; doLogout(); });
+  if (logout) logout.addEventListener('click', ()=>{
+    __cancelSessionPromptTimers();
+    __sessionPromptOpen = false;
+    doLogout();
+  });
+
   __sessionPromptWired = true;
 }
 
@@ -1968,12 +2129,9 @@ function showRescue(err){
 /* ---------- Boot ---------- */
 (function boot(){
   try {
-    if (typeof renderApp === 'function' && window.session) { ensurePerUserSeed(); renderApp(); }
+    if (typeof renderApp === 'function' && window.session) renderApp();
     else if (typeof renderLogin === 'function') renderLogin();
   } catch(e){
     notify(e.message || 'Startup error','danger'); if (typeof renderLogin === 'function') renderLogin();
   }
 })();
-
-/* ---------- Helpers used above ---------- */
-function scrollToRow(id){ const el=document.getElementById(id); if (el) el.scrollIntoView({behavior:'smooth',block:'center'}); }

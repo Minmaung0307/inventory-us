@@ -136,3 +136,7 @@ textarea{ min-height:120px; resize:vertical }
   .sidebar{ position:fixed; left:0; transform:translateX(-105%); width:280px; z-index:6 }
   .sidebar.open{ transform:none }
 }
+
+/* in styles.css */
+.table tbody tr.tr-warn { background: rgba(245, 158, 11, .12); }
+.table tbody tr.tr-danger { background: rgba(239, 68, 68, .14); }
