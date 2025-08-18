@@ -1,67 +1,42 @@
 <!doctype html>
-<html lang="en">
-<head>
+<html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>User Guide – Inventory</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --border:#1f2a37; --brand:#0ea5a5 }
-body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,system-ui }
-.wrap{ max-width:900px; margin:20px auto; padding:0 16px 40px }
-.card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0 }
-h1{ margin:6px 0 10px } h2{ margin:16px 0 8px }
-ul{ margin:0 0 8px 18px }
-.badge{ color:var(--muted) }
+  :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5 }
+  body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui }
+  .wrap{ max-width:900px; margin:24px auto; padding:0 16px 40px }
+  .card{ background:var(--panel); border:1px solid #1f2a37; border-radius:14px; padding:16px; margin:12px 0 }
+  h1{ margin:6px 0 12px } h2{ margin:18px 0 8px } .muted{ color:var(--muted) }
+  code{ background:#0f1520; border:1px solid #1f2a37; padding:2px 6px; border-radius:8px }
+  ul{ margin:0 0 0 18px }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>User Guide</h1>
-  <div class="card">
-    <h2>Getting started</h2>
-    <ul>
-      <li>Sign in (or use demo: <code>admin@inventory.com</code>/<code>admin123</code> for local).</li>
-      <li>Use the sidebar to navigate: Inventory, Products, COGS, Tasks, Settings.</li>
-      <li>Search anything from the global search bar.</li>
-    </ul>
+  <div class="wrap">
+    <h1>User Guide</h1>
+    <div class="card">
+      <h2>Getting started</h2>
+      <ul>
+        <li>Sign in or create an account.</li>
+        <li>Go to <strong>Inventory</strong> / <strong>Products</strong> to add items.</li>
+        <li>Use <strong>Tasks</strong> for team work; drag cards between lanes.</li>
+        <li>Export CSV anytime for reporting.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>Images</h2>
+      <p>Upload images with the file picker; we store them as Data URLs — no external hosting needed.</p>
+      <p>Hover thumbnails to see enlarged previews (mobile shows a preview modal on tap).</p>
+    </div>
+    <div class="card">
+      <h2>Cloud Sync</h2>
+      <p>In <strong>Settings → Cloud Sync</strong>, turn it on to mirror your data to Firebase under your account.</p>
+    </div>
+    <div class="card">
+      <h2>Search</h2>
+      <p>Type in the sidebar search to find posts, items, products, users, and pages. It matches partial words (e.g. “tu” will find “tuna”).</p>
+    </div>
   </div>
-  <div class="card">
-    <h2>Inventory</h2>
-    <ul>
-      <li>Add items (name, code, type, price, stock, threshold, optional image).</li>
-      <li>Low/critical stock outlined automatically.</li>
-      <li>Export to CSV (no image column).</li>
-    </ul>
-  </div>
-  <div class="card">
-    <h2>Products</h2>
-    <ul>
-      <li>Create products with barcode, price, ingredients and instructions.</li>
-      <li>Click thumbnail to view a product card modal.</li>
-    </ul>
-  </div>
-  <div class="card">
-    <h2>COGS</h2>
-    <ul>
-      <li>Add daily rows; totals and gross profit calculate automatically.</li>
-      <li>Export to CSV for accounting.</li>
-    </ul>
-  </div>
-  <div class="card">
-    <h2>Tasks</h2>
-    <ul>
-      <li>Drag tasks between lanes (To-do / In progress / Done).</li>
-      <li>On mobile, tap a task to cycle its lane.</li>
-    </ul>
-  </div>
-  <div class="card">
-    <h2>Settings & Users</h2>
-    <ul>
-      <li>Enable/disable Cloud Sync (per-user Firebase path).</li>
-      <li>Manage users with role-based permissions.</li>
-      <li>Change theme and font size.</li>
-    </ul>
-  </div>
-</div>
 </body>
 </html>

@@ -3,6 +3,8 @@
 # ------------------------------
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
 
 # ------------------------------
 # Logs
@@ -38,6 +40,7 @@ public/dist/
 .tmp/
 tmp/
 temp/
+.build/
 .cache/
 .parcel-cache/
 .vite/

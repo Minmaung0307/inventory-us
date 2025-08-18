@@ -1,61 +1,44 @@
 <!doctype html>
-<html lang="en">
-<head>
+<html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>About – Inventory</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{ --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --border:#1f2a37 }
-body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.6 Inter,system-ui }
-.wrap{ max-width:900px; margin:20px auto; padding:0 16px 40px }
-.card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0 }
-h1{ margin:6px 0 10px } h2{ margin:16px 0 8px } p{ color:var(--text) } .muted{ color:var(--muted) }
-.grid{ display:grid; gap:10px; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)) }
-.hero{ display:flex; gap:12px; align-items:center }
-.logo{ width:42px; height:42px; border-radius:11px; display:grid; place-items:center; background: radial-gradient(ellipse at 30% 30%, var(--brand), #0891b2); color:#fff; font-weight:800 }
-.badge{ font-size:12px; color:var(--muted) }
+  :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; }
+  body{ margin:0; background:radial-gradient(1200px 600px at 20% 0%, #0ea5a522, transparent), var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui, -apple-system, Segoe UI, Roboto; }
+  .wrap{ max-width:900px; margin:24px auto; padding:0 16px 40px }
+  h1{ margin:6px 0 12px } h2{ margin:18px 0 8px } p{ color:var(--text) } .muted{ color:var(--muted) }
+  .card{ background:var(--panel); border:1px solid #1f2a37; border-radius:14px; padding:16px; margin:12px 0 }
+  ul{ margin:0 0 0 18px }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="hero">
-    <div class="logo">📦</div>
-    <div>
-      <h1 style="margin:0">Inventory — About</h1>
-      <div class="badge">Built for small & medium businesses • Offline-first • No backend required</div>
-    </div>
-  </div>
+  <div class="wrap">
+    <h1>About Inventory</h1>
+    <p class="muted">A lightweight, offline-friendly app that helps small and medium businesses manage stock, products, costs, and teamwork — from any device.</p>
 
-  <div class="card">
-    <p><strong>Inventory</strong> keeps your stock, products, costs and tasks in one fast app that works online or offline. It’s ideal for cafés, retail shelves, home businesses, and growing teams.</p>
-  </div>
-
-  <div class="grid">
     <div class="card">
-      <h2>Why it’s useful</h2>
+      <h2>Why people love it</h2>
       <ul>
-        <li>Track stock levels and thresholds with instant highlights.</li>
-        <li>Create products with images, ingredients, instructions.</li>
-        <li>COGS sheet with totals and gross profit.</li>
-        <li>Kanban tasks (To-do / In progress / Done).</li>
-        <li>Global search across everything.</li>
+        <li><strong>Fast, zero-install:</strong> runs as a PWA right in your browser.</li>
+        <li><strong>Works offline:</strong> keep using it during flaky internet, sync later.</li>
+        <li><strong>Role-based access:</strong> viewer, associate, manager, admin.</li>
+        <li><strong>All-in-one:</strong> inventory, products, COGS, tasks, posts, and search.</li>
       </ul>
     </div>
+
     <div class="card">
-      <h2>Where it shines</h2>
+      <h2>Who is it for?</h2>
+      <p>Independent shops, cafés, restaurants, and growing teams that need a simple system today — without servers or IT overhead.</p>
+    </div>
+
+    <div class="card">
+      <h2>How it works</h2>
       <ul>
-        <li>Solo owners to teams: role-based permissions.</li>
-        <li>Works fully offline (LocalStorage).</li>
-        <li>Optional Cloud Sync with Firebase per user.</li>
-        <li>Installs like an app (PWA).</li>
+        <li>Data is saved locally per signed-in user, and (optionally) mirrored to your Firebase.</li>
+        <li>Uploads are stored as secure data URLs (no separate image hosting required).</li>
+        <li>You can export CSVs at any time for audits or accounting.</li>
       </ul>
     </div>
   </div>
-
-  <div class="card">
-    <h2>Data ownership</h2>
-    <p class="muted">Your data is stored locally in your browser. If you enable Cloud Sync, your signed-in Firebase user gets their own private path (<code>tenants/&lt;uid&gt;/kv/&lt;key&gt;</code>).</p>
-  </div>
-</div>
 </body>
 </html>
