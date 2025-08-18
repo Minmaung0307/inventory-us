@@ -28,7 +28,16 @@ function _lsSet(k, v){ _lsSetRaw(lsKey(k), v); }
    - Always writes/reads local (namespaced when needed)
    - Also mirrors to Cloud (under plain key) when enabled */
 function load(k, f){ return _lsGet(k, f); }
-function save(k, v){ _lsSet(k, v); try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
+// REPLACE your current save() with this one
+function save(k, v){
+  _lsSet(lsKey(k), v);
+  try {
+    if (cloud.isOn() && auth.currentUser) {
+      cloud.noteLocalWrite(k);      // mark local write (prevents stale remote overwrites)
+      cloud.saveKV(k, v);           // mirror to cloud (server adds updatedAt)
+    }
+  } catch {}
+}
 function notify(msg,type='ok'){ const n=$('#notification'); if(!n)return; n.textContent=msg; n.className=`notification show ${type}`; setTimeout(()=>{ n.className='notification'; },2400); }
 function setSession(s){ session=s; _lsSetRaw('session', s); }
 
@@ -65,21 +74,114 @@ function applyTheme(){
 applyTheme();
 
 // --- Cloud Sync --------------------------------------------------------------
-const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2']; // cloud is per-user by DB path (uid)
+// --- Cloud Sync (with write-shield to prevent stale overwrite) --------------
+const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2'];
+
 const cloud = (function(){
   let liveRefs = [];
+
+  // track local write times and a brief suppression window per key
+  const localWriteTs   = Object.create(null);
+  const suppressUntil  = Object.create(null);
+
   const on      = ()=> !!_lsGetRaw('_cloudOn', false);
   const setOn   = v => _lsSetRaw('_cloudOn', !!v);
   const uid     = ()=> auth.currentUser?.uid;
   const pathFor = key => db.ref(`tenants/${uid()}/kv/${key}`);
-  async function saveKV(key, val){ if (!on() || !uid()) return; await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP }); }
-  async function pullAllOnce(){ if (!uid()) return; const snap = await db.ref(`tenants/${uid()}/kv`).get(); if (!snap.exists()) return; const all = snap.val() || {}; Object.values(all).forEach(row=>{ if (row && row.key && 'val' in row) _lsSet(row.key, row.val); }); }
-  function subscribeAll(){ if (!uid()) return; unsubscribeAll(); CLOUD_KEYS.forEach(key=>{ const ref = pathFor(key); const handler = ref.on('value',(snap)=>{ const data=snap.val(); if(!data)return; const curr=_lsGet(key,null); if (JSON.stringify(curr)!==JSON.stringify(data.val)){ _lsSet(key,data.val); if (key==='_theme2') applyTheme(); renderApp(); } }); liveRefs.push({ref,handler}); }); }
-  function unsubscribeAll(){ liveRefs.forEach(({ref})=>{ try{ref.off();}catch{} }); liveRefs=[]; }
-  async function pushAll(){ if (!uid()) return; for (const k of CLOUD_KEYS){ const v=_lsGet(k,null); if (v!==null && v!==undefined) await saveKV(k,v); } }
-  async function enable(){ if (!uid()) throw new Error('Sign in first.'); setOn(true); await firebase.database().goOnline(); await pullAllOnce(); await pushAll(); subscribeAll(); }
-  function disable(){ setOn(false); unsubscribeAll(); }
-  return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
+
+  function noteLocalWrite(key){
+    const t = Date.now();
+    localWriteTs[key]  = t;
+    suppressUntil[key] = t + 2000;               // ignore remote for 2s after a local write
+    _lsSetRaw(`_kv_local_ts_${key}`, t);         // persist (also used across reloads)
+  }
+
+  async function saveKV(key, val){
+    if (!on() || !uid()) return;
+    // server will set updatedAt; we just send val
+    await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+  }
+
+  async function pullAllOnce(){
+    if (!uid()) return;
+    const snap = await db.ref(`tenants/${uid()}/kv`).get();
+    if (!snap.exists()) return;
+    const all = snap.val() || {};
+    Object.values(all).forEach(row=>{
+      if (row && row.key && 'val' in row) {
+        // only adopt remote if it’s not older than our local write
+        const key = row.key;
+        const remoteTs = row.updatedAt || 0;
+        const localTs  = _lsGetRaw(`_kv_local_ts_${key}`, 0);
+        if (remoteTs && localTs && remoteTs < localTs) return; // keep local newer
+        _lsSet(lsKey(key), row.val);
+      }
+    });
+  }
+
+  function subscribeAll(){
+    if (!uid()) return;
+    unsubscribeAll();
+
+    CLOUD_KEYS.forEach(key=>{
+      const ref = pathFor(key);
+      const handler = ref.on('value',(snap)=>{
+        const data = snap.val();
+        if (!data) return;
+
+        const remoteVal = data.val;
+        const remoteTs  = data.updatedAt || 0;
+
+        // If we very recently wrote locally, give our write time to land in RTDB
+        if (Date.now() < (suppressUntil[key] || 0)) return;
+
+        // If remote is older than our last local write, ignore it
+        const localTs = _lsGetRaw(`_kv_local_ts_${key}`, 0) || localWriteTs[key] || 0;
+        if (remoteTs && localTs && remoteTs < localTs) return;
+
+        // Only update if different
+        const curr = _lsGet(lsKey(key), null);
+        if (JSON.stringify(curr) !== JSON.stringify(remoteVal)){
+          _lsSet(lsKey(key), remoteVal);
+          if (key === '_theme2') applyTheme();
+          renderApp();
+        }
+      });
+      liveRefs.push({ ref, handler });
+    });
+  }
+
+  function unsubscribeAll(){
+    liveRefs.forEach(({ref})=>{ try{ ref.off(); } catch{} });
+    liveRefs = [];
+  }
+
+  async function pushAll(){
+    if (!uid()) return;
+    for (const k of CLOUD_KEYS){
+      const v = _lsGet(lsKey(k), null);
+      if (v !== null && v !== undefined){
+        noteLocalWrite(k);         // mark these initial pushes too
+        await saveKV(k, v);
+      }
+    }
+  }
+
+  async function enable(){
+    if (!uid()) throw new Error('Sign in first.');
+    setOn(true);
+    await firebase.database().goOnline();
+    await pullAllOnce();           // pull once to get server state
+    await pushAll();               // push our local state
+    subscribeAll();                // then subscribe
+  }
+
+  function disable(){
+    setOn(false);
+    unsubscribeAll();
+  }
+
+  return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll, noteLocalWrite };
 })();
 
 // --- Roles & permissions ------------------------------------------------------
