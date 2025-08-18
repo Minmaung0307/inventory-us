@@ -140,3 +140,40 @@ textarea{ min-height:120px; resize:vertical }
 /* in styles.css */
 .table tbody tr.tr-warn { background: rgba(245, 158, 11, .12); }
 .table tbody tr.tr-danger { background: rgba(239, 68, 68, .14); }
+
+/* --- Warning rows use background (not borders) --- */
+.table tr.tr-warn td { background: rgba(245, 158, 11, 0.12); }
+.table tr.tr-danger td { background: rgba(239, 68, 68, 0.14); }
+
+/* Totals row subtle bg */
+.table tr.tr-total th, .table tr.tr-total td { background: rgba(14,165,165,.08); }
+
+/* --- Tasks: make empty lanes droppable & visible highlighting --- */
+.lane-grid { min-height: 52px; padding: 4px; }
+.lane-row.drop .lane-grid { outline: 2px dashed var(--brand, #0ea5a5); outline-offset: 2px; border-radius: 12px; }
+.task-card { cursor: grab; }
+.task-card.dragging { opacity: .8; }
+
+/* --- Big image preview should not be clipped by table --- */
+.table-wrap { overflow: visible; }
+.thumb-wrap { position: relative; overflow: visible; }
+.thumb-large {
+  position: absolute; z-index: 50; display: none; width: 220px; max-width: 40vw;
+  box-shadow: 0 10px 24px rgba(0,0,0,.35); border-radius: 12px; border: 1px solid var(--card-border,#1f2a37);
+  top: 50%; left: 100%; transform: translate(12px,-50%); background: #000;
+}
+.thumb-wrap:hover .thumb-large { display: block; }
+
+/* --- Sidebar: different styles for Menu vs Links --- */
+.sidebar h6 { font-size: 11px; letter-spacing: .08em; opacity: .7; margin: 10px 12px 6px; text-transform: uppercase; }
+.sidebar .nav .item { font-weight: 600; color: var(--text); }
+.sidebar .links .item { font-weight: 500; color: var(--muted); }
+.sidebar .links .item:hover { color: var(--text); }
+
+/* --- Static pages in iframes --- */
+.static-iframe { border:1px solid var(--card-border,#1f2a37); border-radius:12px; overflow:hidden; background:var(--panel-2,#0f1520); }
+.static-iframe iframe{ width:100%; height:calc(100vh - 220px); border:none; background:transparent; color:var(--text); }
+
+/* --- Optional small utilities --- */
+.card.warn-bg { background: rgba(245, 158, 11, 0.08); }
+.card.danger-bg { background: rgba(239, 68, 68, 0.09); }
