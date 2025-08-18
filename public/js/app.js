@@ -96,6 +96,23 @@ function seedPerUserOnce(){
   save('cogs',      isDemo? demoCogs : []);
   save('users',     users);
 
+// --- add this block inside seedPerUserOnce(), just before _lsSet(flag, true);
+{
+  const users = load('users', []);
+  const addIfMissing = (name,email,role) => {
+    const e = email.toLowerCase();
+    if (!users.find(u => (u.email||'').toLowerCase() === e)) {
+      users.push({ name, username:e.split('@')[0], email:e, role, img:'', contact:'', password:'' });
+    }
+  };
+  // make sure roles exist as examples
+  addIfMissing('Admin Demo',     'admin@inventory.com','admin');
+  addIfMissing('Manager Demo',   'manager@inventory.com','manager');
+  addIfMissing('Associate Demo', 'associate@inventory.com','associate');
+  addIfMissing('User Demo',      'user@inventory.com','user');
+  save('users', users);
+}
+
   _lsSet(flag, true);
 }
 
@@ -225,7 +242,8 @@ const cloud = (function(){
 })();
 
 // --- Roles & permissions ------------------------------------------------------
-const ROLES = ['user','associate','manager','admin'];
+// Roles: keep exactly these strings everywhere
+const ROLES = ['admin','manager','associate','user'];
 const SUPER_ADMINS = ['admin@sushi.com','admin@inventory.com'];
 function role(){ return (session?.role)||'user'; }
 function canView(){ return true; }
@@ -1311,55 +1329,33 @@ function viewProducts(){
 }
 
 function wireProducts(){
-  const sec = document.querySelector('[data-section="products"]'); if (!sec) return;
+  const sec = document.querySelector('[data-section="products"]');
+  if (!sec) return;
 
+  // Export
   $('#export-products')?.addEventListener('click', ()=>{
     const items = load('products', []);
-    downloadCSV('products.csv', items, ['id','name','barcode','price','type','ingredients','instructions']); // no img
+    downloadCSV('products.csv', items, ['id','name','barcode','price','type','ingredients','instructions']);
   });
 
+  // Open new-product modal
   $('#addProd')?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-prod');
-    $('#prod-id').value=''; $('#prod-name').value=''; $('#prod-barcode').value=''; $('#prod-price').value='';
-    $('#prod-type').value=''; $('#prod-ingredients').value=''; $('#prod-instructions').value=''; $('#prod-img').value='';
+    $('#prod-id').value='';
+    $('#prod-name').value='';
+    $('#prod-barcode').value='';
+    $('#prod-price').value='';
+    $('#prod-type').value='';
+    $('#prod-ingredients').value='';
+    $('#prod-instructions').value='';
+    $('#prod-img').value='';
     attachImageUpload('#prod-imgfile', '#prod-img');
   });
 
-  const saveBtn = $('#save-prod');
-  if (saveBtn && !saveBtn.__wired){
-    saveBtn.__wired = true;
-    saveBtn.addEventListener('click', async ()=>{
-      if (saveBtn.dataset.busy) return;
-      saveBtn.dataset.busy='1';
-
-      if (!canAdd()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; }
-      const items = load('products', []);
-      const id = $('#prod-id').value || ('p_'+Date.now());
-      const obj = {
-        id,
-        name: $('#prod-name').value.trim(),
-        barcode: $('#prod-barcode').value.trim(),
-        price: parseFloat($('#prod-price').value || '0'),
-        type: $('#prod-type').value.trim(),
-        ingredients: $('#prod-ingredients').value.trim(),
-        instructions: $('#prod-instructions').value.trim(),
-        img: $('#prod-img').value.trim()
-      };
-      if (!obj.name) { notify('Name required','warn'); saveBtn.dataset.busy=''; return; }
-      const i = items.findIndex(x=>x.id===id);
-      if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } items[i]=obj; }
-      else items.push(obj);
-      await save('products', items);
-      closeModal('m-prod'); notify('Saved'); renderApp();
-      saveBtn.dataset.busy='';
-    });
-  }
-
-  if (!sec.__wired){
-    sec.__wired = true;
-
-    // open product card modal
+  // Card click → quick product preview (kept as before)
+  if (!sec.__wiredPreview){
+    sec.__wiredPreview = true;
     sec.addEventListener('click', (e)=>{
       const prodCard = e.target.closest('.prod-thumb');
       if (prodCard){
@@ -1374,24 +1370,79 @@ function wireProducts(){
         $('#pc-ingredients').textContent = it.ingredients || '';
         $('#pc-instructions').textContent = it.instructions || '';
         openModal('m-card');
-        return;
       }
+    });
+  }
 
+  // Row edit/delete (kept)
+  if (!sec.__wiredRowButtons){
+    sec.__wiredRowButtons = true;
+    sec.addEventListener('click', async (e)=>{
       const btn = e.target.closest('button'); if (!btn) return;
       const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!id) return;
-
       const items = load('products', []);
+
       if (btn.hasAttribute('data-edit')) {
         if (!canEdit()) return notify('No permission','warn');
         const it = items.find(x=>x.id===id); if (!it) return;
         openModal('m-prod');
-        $('#prod-id').value=id; $('#prod-name').value=it.name; $('#prod-barcode').value=it.barcode||'';
-        $('#prod-price').value=it.price; $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||'';
-        $('#prod-instructions').value=it.instructions||''; $('#prod-img').value=it.img||'';
+        $('#prod-id').value=id;
+        $('#prod-name').value=it.name;
+        $('#prod-barcode').value=it.barcode||'';
+        $('#prod-price').value=it.price;
+        $('#prod-type').value=it.type||'';
+        $('#prod-ingredients').value=it.ingredients||'';
+        $('#prod-instructions').value=it.instructions||'';
+        $('#prod-img').value=it.img||'';
         attachImageUpload('#prod-imgfile', '#prod-img');
       } else {
         if (!canDelete()) return notify('No permission','warn');
-        save('products', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
+        await save('products', items.filter(x=>x.id!==id)); notify('Deleted'); renderApp();
+      }
+    });
+  }
+
+  // ✅ Global delegated handler for the Save button (works even if modal is created once)
+  if (!document.__saveProdGlobal){
+    document.__saveProdGlobal = true;
+    document.addEventListener('click', async (e)=>{
+      const saveBtn = e.target.closest('#save-prod');
+      if (!saveBtn) return;
+
+      try{
+        if (!canAdd()) return notify('No permission','warn');
+
+        const items = load('products', []);
+        const id = $('#prod-id').value || ('p_'+Date.now());
+        const name = ($('#prod-name')?.value||'').trim();
+        if (!name) return notify('Name required','warn');
+
+        const obj = {
+          id,
+          name,
+          barcode: ($('#prod-barcode')?.value||'').trim(),
+          price: parseFloat(($('#prod-price')?.value||'0') || '0') || 0,
+          type: ($('#prod-type')?.value||'').trim(),
+          ingredients: ($('#prod-ingredients')?.value||'').trim(),
+          instructions: ($('#prod-instructions')?.value||'').trim(),
+          img: ($('#prod-img')?.value||'').trim()
+        };
+
+        const i = items.findIndex(x=>x.id===id);
+        if (i>=0) {
+          if (!canEdit()) return notify('No permission','warn');
+          items[i]=obj;
+        } else {
+          items.push(obj);
+        }
+
+        await save('products', items);
+        closeModal('m-prod');
+        notify('Product saved','ok');
+        renderApp();
+      }catch(err){
+        console.error('[save product] failed', err);
+        notify('Save failed: ' + (err?.message || err),'danger');
       }
     });
   }
@@ -1751,59 +1802,104 @@ function wireSettings(){
   wireUsers();
 }
 
-function wireUsers(){
-  const addBtn = $('#addUser'); const table = document.querySelector('[data-section="users"]');
+function allowedRoleOptions(){
+  const r = role();
+  if (r === 'admin')   return ['admin','manager','associate','user'];
+  if (r === 'manager') return ['manager','associate','user'];
+  if (r === 'associate') return ['associate','user'];
+  return ['user'];
+}
 
+function wireUsers(){
+  const addBtn = $('#addUser');
+  const table  = document.querySelector('[data-section="users"]');
+
+  // Open new-user modal
   addBtn?.addEventListener('click', ()=>{
     if (!canAdd()) return notify('No permission','warn');
     openModal('m-user');
-    $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-img').value='';
-    const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions()[0];
+    $('#user-name').value='';
+    $('#user-email').value='';
+    $('#user-username').value='';
+    $('#user-img').value='';
+    const sel = $('#user-role');
+    const roles = allowedRoleOptions();
+    sel.innerHTML = roles.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join('');
+    sel.value = roles[0];
     attachImageUpload('#user-imgfile', '#user-img');
   });
 
-  const saveBtn = $('#save-user');
-  if (saveBtn && !saveBtn.__wired){
-    saveBtn.__wired = true;
-    saveBtn.addEventListener('click', async ()=>{
-      if (saveBtn.dataset.busy) return;
-      saveBtn.dataset.busy='1';
-
-      if (!canAdd()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; }
-      const users = load('users', []);
-      const email = ($('#user-email')?.value || '').trim().toLowerCase();
-      if (!email) { notify('Email required','warn'); saveBtn.dataset.busy=''; return; }
-      const allowed = allowedRoleOptions(); const chosenRole = ($('#user-role')?.value || 'user'); if (!allowed.includes(chosenRole)) { notify('Role not allowed','warn'); saveBtn.dataset.busy=''; return; }
-
-      const obj = {
-        name: ($('#user-name')?.value || email.split('@')[0]).trim(),
-        email,
-        username: ($('#user-username')?.value || email.split('@')[0]).trim(),
-        role: chosenRole,
-        img: ($('#user-img')?.value || '').trim(),
-        contact:'', password:''
-      };
-      const i = users.findIndex(x=>x.email.toLowerCase()===email);
-      if (i>=0) { if (!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; } users[i]=obj; } else { users.push(obj); }
-      await save('users', users); closeModal('m-user'); notify('Saved'); renderApp();
-      saveBtn.dataset.busy='';
-    });
-  }
-
+  // Row edit/delete (kept)
   table?.addEventListener('click', async (e)=>{
     const btn = e.target.closest('button'); if (!btn) return;
     const email = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if (!email) return;
+
     if (btn.hasAttribute('data-edit')) {
       if (!canEdit()) return notify('No permission','warn');
       const u = load('users', []).find(x=>x.email===email); if (!u) return;
-      openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username; $('#user-img').value=u.img||'';
-      const sel = $('#user-role'); sel.innerHTML = allowedRoleOptions().map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value = allowedRoleOptions().includes(u.role) ? u.role : 'user';
+      openModal('m-user');
+      $('#user-name').value=u.name||'';
+      $('#user-email').value=u.email||'';
+      $('#user-username').value=u.username||'';
+      $('#user-img').value=u.img||'';
+      const sel = $('#user-role');
+      const roles = allowedRoleOptions();
+      sel.innerHTML = roles.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join('');
+      sel.value = roles.includes(u.role) ? u.role : roles[roles.length-1];
       attachImageUpload('#user-imgfile', '#user-img');
     } else {
       if (!canDelete()) return notify('No permission','warn');
-      await save('users', load('users', []).filter(x=>x.email!==email)); notify('Deleted'); renderApp();
+      await save('users', load('users', []).filter(x=>x.email!==email));
+      notify('User deleted','ok'); renderApp();
     }
   });
+
+  // ✅ Global delegated handler for Save (works even if modal is injected once)
+  if (!document.__saveUserGlobal){
+    document.__saveUserGlobal = true;
+    document.addEventListener('click', async (e)=>{
+      const saveBtn = e.target.closest('#save-user');
+      if (!saveBtn) return;
+
+      try{
+        if (!canAdd()) return notify('No permission','warn');
+        const users = load('users', []);
+
+        const email = ($('#user-email')?.value || '').trim().toLowerCase();
+        if (!email) return notify('Email required','warn');
+
+        const roles = allowedRoleOptions();
+        const selRole = ($('#user-role')?.value || 'user');
+        if (!roles.includes(selRole)) return notify('Role not allowed','warn');
+
+        const obj = {
+          name:      ($('#user-name')?.value || email.split('@')[0]).trim(),
+          email,
+          username:  ($('#user-username')?.value || email.split('@')[0]).trim(),
+          role:      selRole,
+          img:       ($('#user-img')?.value || '').trim(),
+          contact:   '',
+          password:  ''
+        };
+
+        const i = users.findIndex(x => (x.email||'').toLowerCase() === email);
+        if (i>=0) {
+          if (!canEdit()) return notify('No permission','warn');
+          users[i] = obj;
+        } else {
+          users.push(obj);
+        }
+
+        await save('users', users);
+        closeModal('m-user');
+        notify('User saved','ok');
+        renderApp();
+      }catch(err){
+        console.error('[save user] failed', err);
+        notify('Save failed: ' + (err?.message || err),'danger');
+      }
+    });
+  }
 }
 
 // Static pages + Contact (iframe pages are separate HTML files)
