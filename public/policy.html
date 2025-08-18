@@ -2,36 +2,39 @@
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Policy – Inventory</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-  :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; }
-  body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui, -apple-system, Segoe UI, Roboto; }
-  .wrap{ max-width:900px; margin:24px auto; padding:0 16px 40px }
-  .card{ background:var(--panel); border:1px solid #1f2a37; border-radius:14px; padding:16px; margin:12px 0 }
-  h1{ margin:6px 0 12px } h2{ margin:18px 0 8px } p{ color:var(--text) } .muted{ color:var(--muted) }
-  ul{ margin:0 0 0 18px }
+  :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --card:#1f2a37 }
+  body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui }
+  .wrap{ max-width:900px; margin:16px auto; padding:0 12px 28px }
+  .card{ background:var(--panel); border:1px solid var(--card); border-radius:14px; padding:16px; margin:12px 0 }
+  .muted{ color:var(--muted) }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Policy</h1>
     <div class="card">
-      <h2>Data</h2>
+      <h2>Privacy & Data</h2>
+      <p>Inventory stores your data locally in your browser (per user). If you enable Cloud Sync, your data is mirrored to your own Firebase Realtime Database account under your authenticated user ID.</p>
       <ul>
-        <li><strong>Local-first:</strong> your data is stored in the browser per user account.</li>
-        <li><strong>Optional Cloud Sync:</strong> if enabled, your data is mirrored to your own Firebase project.</li>
-        <li><strong>Images:</strong> images are embedded as Data URLs, not uploaded to a third-party host.</li>
+        <li><strong>Local only by default.</strong></li>
+        <li><strong>Per-user separation.</strong> Each account has its own data namespace.</li>
+        <li><strong>Images:</strong> stored as Data URLs in your local/remote database.</li>
+        <li><strong>No tracking:</strong> this app does not include analytics by default.</li>
       </ul>
-    </div>
-    <div class="card">
       <h2>Security</h2>
-      <ul>
-        <li>Use strong passwords. Enable Firebase security rules in production.</li>
-        <li>Sign out on shared devices.</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h2>License</h2>
-      <p class="muted">Code is licensed under MIT (see License page).</p>
+      <p>Authentication uses Firebase Email/Password. Protect your Firebase keys and database rules. Recommended rule:</p>
+      <pre style="background:#0f1520;border:1px solid #1f2a37;border-radius:10px;padding:12px;overflow:auto">
+{
+  "rules": {
+    "tenants": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        "kv": { "$key": { ".write": "$uid === auth.uid" } }
+      }
+    }
+  }
+}</pre>
     </div>
   </div>
 </body>

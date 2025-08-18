@@ -2,40 +2,30 @@
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>User Guide – Inventory</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-  :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5 }
+  :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --card:#1f2a37 }
   body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui }
-  .wrap{ max-width:900px; margin:24px auto; padding:0 16px 40px }
-  .card{ background:var(--panel); border:1px solid #1f2a37; border-radius:14px; padding:16px; margin:12px 0 }
-  h1{ margin:6px 0 12px } h2{ margin:18px 0 8px } .muted{ color:var(--muted) }
-  code{ background:#0f1520; border:1px solid #1f2a37; padding:2px 6px; border-radius:8px }
-  ul{ margin:0 0 0 18px }
-</style>
-</head>
+  .wrap{ max-width:900px; margin:16px auto; padding:0 12px 28px }
+  .card{ background:var(--panel); border:1px solid var(--card); border-radius:14px; padding:16px; margin:12px 0 }
+  .muted{ color:var(--muted) } ul{ margin:6px 0 6px 18px }
+</style></head>
 <body>
   <div class="wrap">
-    <h1>User Guide</h1>
     <div class="card">
-      <h2>Getting started</h2>
+      <h2>Quick Start</h2>
       <ul>
-        <li>Sign in or create an account.</li>
-        <li>Go to <strong>Inventory</strong> / <strong>Products</strong> to add items.</li>
-        <li>Use <strong>Tasks</strong> for team work; drag cards between lanes.</li>
-        <li>Export CSV anytime for reporting.</li>
+        <li>Login or create an account.</li>
+        <li>Use the sidebar to jump between <em>Inventory</em>, <em>Products</em>, <em>COGS</em>, <em>Tasks</em>.</li>
+        <li>Click <strong>Add</strong> to create items; hover thumbnails to preview; tap on mobile to open preview.</li>
+        <li>Tasks: drag between lanes (even if empty) or tap to cycle (mobile).</li>
       </ul>
-    </div>
-    <div class="card">
-      <h2>Images</h2>
-      <p>Upload images with the file picker; we store them as Data URLs — no external hosting needed.</p>
-      <p>Hover thumbnails to see enlarged previews (mobile shows a preview modal on tap).</p>
-    </div>
-    <div class="card">
-      <h2>Cloud Sync</h2>
-      <p>In <strong>Settings → Cloud Sync</strong>, turn it on to mirror your data to Firebase under your account.</p>
-    </div>
-    <div class="card">
-      <h2>Search</h2>
-      <p>Type in the sidebar search to find posts, items, products, users, and pages. It matches partial words (e.g. “tu” will find “tuna”).</p>
+      <h2>Tips</h2>
+      <ul>
+        <li>CSV export excludes images for smaller files.</li>
+        <li>Cloud Sync mirrors your local data to Firebase per user.</li>
+        <li>Search finds partial or exact words across all sections.</li>
+      </ul>
     </div>
   </div>
 </body>

@@ -2,41 +2,38 @@
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>About – Inventory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-  :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; }
-  body{ margin:0; background:radial-gradient(1200px 600px at 20% 0%, #0ea5a522, transparent), var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui, -apple-system, Segoe UI, Roboto; }
-  .wrap{ max-width:900px; margin:24px auto; padding:0 16px 40px }
-  h1{ margin:6px 0 12px } h2{ margin:18px 0 8px } p{ color:var(--text) } .muted{ color:var(--muted) }
-  .card{ background:var(--panel); border:1px solid #1f2a37; border-radius:14px; padding:16px; margin:12px 0 }
-  ul{ margin:0 0 0 18px }
+  :root{ --bg:#0c1116; --panel:#111821; --text:#e8f1f1; --muted:#9ab0b0; --brand:#0ea5a5; --card:#1f2a37 }
+  body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui }
+  .wrap{ max-width:900px; margin:16px auto; padding:0 12px 28px }
+  .hero{ display:flex; align-items:center; gap:10px }
+  .logo{ width:42px; height:42px; border-radius:12px; display:grid;place-items:center; background: radial-gradient(ellipse at 30% 30%, var(--brand), #0891b2); color:#fff; font-weight:800 }
+  .card{ background:var(--panel); border:1px solid var(--card); border-radius:14px; padding:16px; margin:12px 0 }
+  h1{ margin:8px 0 4px; font-size:26px } h2{ margin:16px 0 8px; font-size:18px } h3{ margin:14px 0 6px; font-size:15px }
+  .muted{ color:var(--muted) }
+  ul{ margin:6px 0 6px 18px }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>About Inventory</h1>
-    <p class="muted">A lightweight, offline-friendly app that helps small and medium businesses manage stock, products, costs, and teamwork — from any device.</p>
-
+    <div class="hero"><div class="logo">📦</div><div><h1>Inventory</h1><div class="muted">A handy everyday companion for small & medium businesses</div></div></div>
     <div class="card">
-      <h2>Why people love it</h2>
+      <p>Inventory helps you track stock, manage products, calculate COGS, organize tasks, and keep everyone on the same page — fast, offline-friendly, and easy to use.</p>
+      <h2>Why people like it</h2>
       <ul>
-        <li><strong>Fast, zero-install:</strong> runs as a PWA right in your browser.</li>
-        <li><strong>Works offline:</strong> keep using it during flaky internet, sync later.</li>
-        <li><strong>Role-based access:</strong> viewer, associate, manager, admin.</li>
-        <li><strong>All-in-one:</strong> inventory, products, COGS, tasks, posts, and search.</li>
+        <li><strong>Speed:</strong> single-page app with instant UI.</li>
+        <li><strong>Works anywhere:</strong> offline first, optional cloud sync.</li>
+        <li><strong>Focus:</strong> only the features you need day-to-day.</li>
+        <li><strong>Flexible:</strong> CSV export, images, search, and roles.</li>
       </ul>
-    </div>
-
-    <div class="card">
-      <h2>Who is it for?</h2>
-      <p>Independent shops, cafés, restaurants, and growing teams that need a simple system today — without servers or IT overhead.</p>
-    </div>
-
-    <div class="card">
-      <h2>How it works</h2>
+      <h2>Who it’s for</h2>
       <ul>
-        <li>Data is saved locally per signed-in user, and (optionally) mirrored to your Firebase.</li>
-        <li>Uploads are stored as secure data URLs (no separate image hosting required).</li>
-        <li>You can export CSVs at any time for audits or accounting.</li>
+        <li><strong>Small shops & cafes:</strong> quick stock checks and low-stock alerts.</li>
+        <li><strong>Teams:</strong> assign/track tasks across lanes with drag & drop.</li>
+        <li><strong>Owners & managers:</strong> snapshot dashboard, COGS rollups.</li>
       </ul>
     </div>
   </div>
