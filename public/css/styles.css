@@ -21,9 +21,19 @@ body{ margin:0; background:var(--bg); color:var(--text);
 .title{ font-weight:800 }
 h6{ margin:12px 0 6px; color:var(--muted); font-size:12px; letter-spacing:.4px; text-transform:uppercase }
 
-.nav .item,.links .item{ padding:8px 10px; border-radius:10px; cursor:pointer; display:flex; align-items:center; gap:10px }
-.nav .item:hover,.links .item:hover{ background:rgba(255,255,255,.04) }
+/* Differentiate Menus vs Links */
+.nav .item{ 
+  padding:8px 10px; border-radius:10px; cursor:pointer; display:flex; align-items:center; gap:10px;
+  font: 600 14px/1.2 Inter, ui-sans-serif; color: var(--text);
+}
+.nav .item:hover{ background:rgba(255,255,255,.04) }
 .nav .item.active{ background:rgba(14,165,165,.14); border:1px solid rgba(14,165,165,.35) }
+
+.links .item{
+  padding:8px 10px; border-radius:10px; cursor:pointer; display:flex; align-items:center; gap:10px;
+  font: italic 400 13px/1.2 "Source Serif 4", ui-serif, Georgia, serif; color: var(--muted);
+}
+.links .item:hover{ background:rgba(255,255,255,.03); color:#c8d7d7 }
 
 .socials-row a,.socials-compact a{ color:var(--muted); text-decoration:none; font-size:18px }
 .socials-row{ display:flex; gap:10px; margin-top:8px }
@@ -73,9 +83,11 @@ textarea{ min-height:120px; resize:vertical }
   border:1px solid var(--card-border); border-radius:12px; background:var(--panel); z-index:5; padding:4px }
 .thumb-wrap:hover .thumb-large{ display:block }
 
-/* Drop targets for tasks */
+/* Tasks: accept drops even when empty + pointer cursor */
 .lane-row.drop{ outline: 2px dashed var(--brand); outline-offset: 2px }
-.lane-grid{ display:grid; gap:12px; min-height:80px } /* <- accepts drop even when empty */
+.lane-grid{ display:grid; gap:12px; min-height:80px }
+.task-card{ cursor: grab; }
+.task-card:active{ cursor: grabbing; }
 .task-card.dragging{ opacity:.6 }
 
 /* Search popover */

@@ -1,6 +1,6 @@
 /* Simple offline cache with version bumping.
    Cache-first for same-origin GET; bypass POST/PUT; skip opaque cross-origin. */
-const VERSION = 'v7';
+const VERSION = 'v8'; // bumped to refresh caches after CSS/JS updates
 const ASSETS = [
   '/', '/index.html',
   '/css/styles.css',
@@ -23,9 +23,9 @@ self.addEventListener('activate', (e)=>{
 });
 self.addEventListener('fetch', (e)=>{
   const req = e.request;
-  if (req.method !== 'GET') return; // don’t cache writes
+  if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  if (url.origin !== location.origin) return; // keep it simple
+  if (url.origin !== location.origin) return;
 
   e.respondWith(
     caches.match(req).then(cached => {
