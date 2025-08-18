@@ -57,13 +57,13 @@ applyTheme();
 // <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 const firebaseConfig = {
   // replace with your config (your earlier config also works)
-  apiKey: "AIzaSy...REPLACE...",
-  authDomain: "your-project.firebaseapp.com",
-  databaseURL: "https://your-project-default-rtdb.firebaseio.com",
-  projectId: "your-project",
-  storageBucket: "your-project.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:xxxxxxxxxxxxx"
+  apiKey: "AIzaSyBY52zMMQqsvssukui3TfQnMigWoOzeKGk",
+  authDomain: "sushi-pos.firebaseapp.com",
+  projectId: "sushi-pos",
+  storageBucket: "sushi-pos.firebasestorage.app",
+  messagingSenderId: "909622476838",
+  appId: "1:909622476838:web:1a1fb221a6a79fcaf4a6e7",
+  measurementId: "G-M8Q8EJ4T7Q"
 };
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
