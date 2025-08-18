@@ -1,5 +1,5 @@
 /* =========================
-   Inventory — single-file SPA (fixed, full)
+   Inventory — Single-file SPA (stable build)
    ========================= */
 
 /* ---------- Tiny utils ---------- */
@@ -13,13 +13,13 @@ const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 function safeJSON(s, f=null){ try{ const v=JSON.parse(s); return (v===null||v===undefined)?f:v; }catch{ return f; } }
 function tenantKey(){
   if (window.session?.authMode === 'local' && window.session?.email) return `local:${session.email.toLowerCase()}:`;
-  const uid = firebase?.auth?.()?.currentUser?.uid;
+  const uid = (window.firebase && firebase.auth && firebase.auth().currentUser && firebase.auth().currentUser.uid) || null;
   if (uid) return `uid:${uid}:`;
   return 'anon:'; // before login
 }
 function kscope(k){ return tenantKey() + k; }
 function load(k, f){ return safeJSON(localStorage.getItem(kscope(k)), f); }
-function save(k, v){ try{ localStorage.setItem(kscope(k), JSON.stringify(v)); }catch{} try{ if (cloud.isOn() && auth.currentUser) cloud.saveKV(k, v); }catch{} }
+function save(k, v){ try{ localStorage.setItem(kscope(k), JSON.stringify(v)); }catch{} try{ if (cloud.isOn() && auth && auth.currentUser) cloud.saveKV(k, v); }catch{} }
 function notify(msg,type='ok'){ const n=$('#notification'); if(!n) return; n.textContent=msg; n.className=`notification show ${type}`; setTimeout(()=>{ n.className='notification'; },2400); }
 
 /* ---------- Theme (robust) ---------- */
@@ -47,72 +47,48 @@ function applyTheme(){
 applyTheme();
 
 /* =========================
-   Part A — Core bootstrap
+   Firebase bootstrap (guarded)
    ========================= */
+const firebaseConfig = (window.__FIREBASE_CONFIG || null);
+if (window.firebase && (!firebase.apps || !firebase.apps.length) && firebaseConfig) {
+  firebase.initializeApp(firebaseConfig);
+}
+const auth = (window.firebase && firebase.auth ? firebase.auth() : null);
+const db   = (window.firebase && firebase.database ? firebase.database() : null);
+if (auth && auth.setPersistence) {
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+}
 
-// --- Firebase (v8) -----------------------------------------------------------
-// Ensure you load the SDKs in index.html:
-// <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-// <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-// <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-/* --- Firebase boot (robust, won’t crash if SDK missing) --- */
-const firebaseConfig = {
-  // ✅ Use your project’s real values
-  apiKey: "AIzaSyBY52zMMQqsvssukui3TfQnMigWoOzeKGk",
-  authDomain: "sushi-pos.firebaseapp.com",
-  databaseURL: "https://sushi-pos-default-rtdb.firebaseio.com",  // ✅ required for Realtime DB
-  projectId: "sushi-pos",
-  storageBucket: "sushi-pos.appspot.com",                        // ✅ appspot.com (not firebasestorage.app)
-  messagingSenderId: "909622476838",
-  appId: "1:909622476838:web:1a1fb221a6a79fcaf4a6e7"
-};
-
-let auth = null, db = null;
-
-(function initFirebase(){
-  try {
-    if (!window.firebase) throw new Error("Firebase SDK not loaded");
-    if (!firebase.apps || !firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
-    auth = firebase.auth();
-    try { auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch {}
-    db = firebase.database();
-    window.__fbReady = true;
-  } catch (e) {
-    console.warn("[firebase] init skipped / deferred:", e.message);
-    window.__fbReady = false;
-  }
-})();
-
-// --- Roles & permissions ------------------------------------------------------
+/* =========================
+   Roles / session / cloud
+   ========================= */
 const ROLES = ['user','associate','manager','admin'];
-const SUPER_ADMINS = ['admin@inventory.com','minmaung0307@gmail.com']; // may add more
+const SUPER_ADMINS = ['admin@inventory.com','minmaung0307@gmail.com'];
 function role(){ return (session?.role)||'user'; }
-function canView(){ return true; }
 function canAdd(){ return ['admin','manager','associate'].includes(role()); }
 function canEdit(){ return ['admin','manager'].includes(role()); }
 function canDelete(){ return ['admin'].includes(role()); }
 
-// --- Cloud Sync (per-tenant KV mirror) ---------------------------------------
 const CLOUD_KEYS = ['inventory','products','posts','tasks','cogs','users','_theme2'];
 const cloud = (function(){
   let liveRefs = [];
-  const on    = ()=> !!load('_cloudOn', false);
-  const setOn = v => save('_cloudOn', !!v);
-  const uid   = ()=> auth.currentUser?.uid;
+  const on    = ()=> !!safeJSON(localStorage.getItem(kscope('_cloudOn')), false);
+  const setOn = v => { try{ localStorage.setItem(kscope('_cloudOn'), JSON.stringify(!!v)); }catch{} };
+  const uid   = ()=> auth && auth.currentUser ? auth.currentUser.uid : null;
   const pathFor = k => db.ref(`tenants/${uid()}/kv/${k}`);
-  async function saveKV(key, val){ if (!on() || !uid()) return; await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP }); }
-  async function pullAllOnce(){ if (!uid()) return; const snap = await db.ref(`tenants/${uid()}/kv`).get(); if (!snap.exists()) return; const all=snap.val()||{}; Object.values(all).forEach(row=>{ if(row && row.key && 'val' in row) localStorage.setItem(kscope(row.key), JSON.stringify(row.val)); }); }
-  function subscribeAll(){ if (!uid()) return; unsubscribeAll(); CLOUD_KEYS.forEach(key=>{ const ref=pathFor(key); const h=ref.on('value',(snap)=>{ const d=snap.val(); if(!d) return; const curr = load(key,null); if (JSON.stringify(curr)!==JSON.stringify(d.val)){ localStorage.setItem(kscope(key), JSON.stringify(d.val)); if (key==='_theme2') applyTheme(); renderApp(); } }); liveRefs.push({ref, h}); }); }
+  async function saveKV(key, val){ if (!on() || !uid() || !db) return; await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP }); }
+  async function pullAllOnce(){ if (!uid() || !db) return; const snap = await db.ref(`tenants/${uid()}/kv`).get(); if (!snap.exists()) return; const all=snap.val()||{}; Object.values(all).forEach(row=>{ if(row && row.key && 'val' in row) localStorage.setItem(kscope(row.key), JSON.stringify(row.val)); }); }
+  function subscribeAll(){ if (!uid() || !db) return; unsubscribeAll(); CLOUD_KEYS.forEach(key=>{ const ref=pathFor(key); ref.on('value',(snap)=>{ const d=snap.val(); if(!d) return; const curr = load(key,null); if (JSON.stringify(curr)!==JSON.stringify(d.val)){ localStorage.setItem(kscope(key), JSON.stringify(d.val)); if (key==='_theme2') applyTheme(); renderApp(); } }); liveRefs.push({ref}); }); }
   function unsubscribeAll(){ liveRefs.forEach(({ref})=>{ try{ref.off();}catch{} }); liveRefs=[]; }
-  async function pushAll(){ if (!uid()) return; for(const k of CLOUD_KEYS){ const v=load(k,null); if (v!==null && v!==undefined) await saveKV(k,v); } }
-  async function enable(){ if (!uid()) throw new Error('Sign in first.'); setOn(true); await firebase.database().goOnline(); await pullAllOnce(); await pushAll(); subscribeAll(); }
+  async function pushAll(){ if (!uid() || !db) return; for(const k of CLOUD_KEYS){ const v=load(k,null); if (v!==null && v!==undefined) await saveKV(k,v); } }
+  async function enable(){ if (!uid()) throw new Error('Sign in first.'); setOn(true); try{ await firebase.database().goOnline(); }catch{} await pullAllOnce(); await pushAll(); subscribeAll(); }
   async function disable(){ setOn(false); unsubscribeAll(); try{ await firebase.database().goOffline(); }catch{} }
   return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
 })();
 
-// --- Globals + seed ----------------------------------------------------------
+/* =========================
+   Globals + seed
+   ========================= */
 let session      = load('session', null);
 let currentRoute = load('_route', 'home');
 let searchQuery  = load('_searchQ', '');
@@ -120,7 +96,6 @@ let searchQuery  = load('_searchQ', '');
 const DEMO_ADMIN_EMAIL = 'admin@inventory.com';
 const DEMO_ADMIN_PASS  = 'admin123';
 
-// Per-user one-time seed
 function seedTenantOnce(){
   const FLAG = load('_seeded_v4', false);
   if (FLAG) return;
@@ -128,7 +103,6 @@ function seedTenantOnce(){
   const me  = (session?.email||'user@example.com').toLowerCase();
   const uname = me.split('@')[0];
 
-  // Users list gets the current user with an appropriate role
   const users = load('users', []);
   if (!users.find(u => (u.email||'').toLowerCase() === me)){
     const guessed = SUPER_ADMINS.includes(me) ? 'admin' : 'user';
@@ -136,7 +110,6 @@ function seedTenantOnce(){
   }
   save('users', users);
 
-  // Private sample data for this tenant
   save('inventory', [
     { id:'inv_'+now, img:'', name:`${uname} Rice`,  code:'RIC-001', type:'Dry', price:1.20, stock:25, threshold:8 },
     { id:'inv_'+(now+1), img:'', name:`${uname} Salmon`, code:'SAL-201', type:'Raw', price:8.50, stock:12, threshold:6 }
@@ -147,33 +120,21 @@ function seedTenantOnce(){
   save('posts', [
     { id:'post_'+now, title:`Welcome, ${uname}`, body:'This is your private workspace. Add inventory, products and tasks.', img:'', createdAt: now }
   ]);
-  save('tasks', [
-    { id:'t_'+now, title:'Sample task', status:'todo' }
-  ]);
-  save('cogs', [
-    { id:'c_'+now, date: new Date().toISOString().slice(0,10), grossIncome:900, produceCost:220, itemCost:130, freight:20, delivery:15, other:8 }
-  ]);
+  save('tasks', [ { id:'t_'+now, title:'Sample task', status:'todo' } ]);
+  save('cogs',  [ { id:'c_'+now, date: new Date().toISOString().slice(0,10), grossIncome:900, produceCost:220, itemCost:130, freight:20, delivery:15, other:8 } ]);
   save('_seeded_v4', true);
 }
 
-// --- Auth state --------------------------------------------------------------
-// const ALLOW_LOCAL_AUTOLOGIN = true;
-
-// auth.onAuthStateChanged(async (user) => {
-//   try { await ensureSessionAndRender(user); }
-//   catch (err) { console.error('[auth] crashed:', err); notify(err?.message || 'Render failed','danger'); showRescue(err); }
-// });
-
-// --- Auth state --------------------------------------------------------------
-const ALLOW_LOCAL_AUTOLOGIN = true;
-
+/* =========================
+   Auth listener (GUARDED)
+   ========================= */
 if (auth && typeof auth.onAuthStateChanged === "function") {
   auth.onAuthStateChanged(async (user) => {
     try { await ensureSessionAndRender(user); }
     catch (err) { console.error("[auth] crashed:", err); notify(err?.message || "Render failed","danger"); showRescue(err); }
   });
 } else {
-  // Fallback: render login/local mode even if Firebase is missing
+  // Fallback if Firebase isn’t present: render local mode
   try {
     session = load('session', null);
     if (session && session.authMode === 'local') {
@@ -187,12 +148,14 @@ if (auth && typeof auth.onAuthStateChanged === "function") {
   }
 }
 
+/* =========================
+   Session bootstrap helpers
+   ========================= */
 async function ensureSessionAndRender(user){
   applyTheme();
 
-  // allow stored local session (demo/fully offline) if no Firebase user
   const stored = load('session', null);
-  if (!user && stored && stored.authMode === 'local' && ALLOW_LOCAL_AUTOLOGIN){
+  if (!user && stored && stored.authMode === 'local'){
     session = stored;
     currentRoute = load('_route','home');
     seedTenantOnce();
@@ -234,44 +197,8 @@ async function ensureSessionAndRender(user){
 }
 
 /* =========================
-   Part B — Login & Shell
+   Navigation + shell
    ========================= */
-
-// ---------- Local Auth helpers ----------
-function localLogin(email, pass){
-  const e = (email||'').toLowerCase();
-  const users = load('users', []);
-  // demo admin always allowed
-  if (e === DEMO_ADMIN_EMAIL && pass === DEMO_ADMIN_PASS){
-    let u = users.find(x => (x.email||'').toLowerCase() === e);
-    if (!u){ u = { name:'Admin', username:'admin', email:e, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
-    session = { ...u, authMode:'local' }; save('session', session);
-    seedTenantOnce(); notify('Signed in (Local admin)'); renderApp(); setupSessionPrompt(); return true;
-  }
-  const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
-  if (u2){ session = { ...u2, authMode:'local' }; save('session', session); seedTenantOnce(); notify('Signed in (Local)'); renderApp(); setupSessionPrompt(); return true; }
-  return false;
-}
-function localSignup({name,email,pass}){
-  const e=(email||'').toLowerCase(); const users=load('users',[]);
-  if (users.find(x => (x.email||'').toLowerCase() === e)){
-    if (localLogin(email, pass)) return true;
-    notify('User exists locally. Use Sign In.','warn'); return false;
-  }
-  const r = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
-  const u = { name: name || e.split('@')[0], username:e.split('@')[0], email:e, role:r, password:pass, img:'', contact:'' };
-  users.push(u); save('users', users);
-  session = { ...u, authMode:'local' }; save('session', session);
-  seedTenantOnce(); notify('Account created (Local)'); renderApp(); setupSessionPrompt(); return true;
-}
-function localResetPassword(email){
-  const e=(email||'').toLowerCase(); const users=load('users',[]); const i=users.findIndex(x=>(x.email||'').toLowerCase()===e);
-  if (i<0) return {ok:false,msg:'No local user found.'};
-  const temp = 'reset' + Math.floor(1000 + Math.random()*9000); users[i].password=temp; save('users',users);
-  return {ok:true,temp};
-}
-
-// ---------- Sidebar + Topbar ----------
 function renderSidebar(active='home'){
   const links = [
     { route:'home',      icon:'ri-home-5-line',              label:'Home' },
@@ -303,9 +230,9 @@ function renderSidebar(active='home'){
       </div>
 
       <h6 class="menu-caption">Menu</h6>
-      <nav class="nav">
+      <div class="nav">
         ${links.map(l=>`<div class="item ${active===l.route?'active':''}" data-route="${l.route}"><i class="${l.icon}"></i><span>${l.label}</span></div>`).join('')}
-      </nav>
+      </div>
 
       <h6 class="links-caption">Links</h6>
       <div class="links">
@@ -344,18 +271,15 @@ function renderTopbar(){
     <div class="backdrop" id="backdrop"></div>`;
 }
 
-// delegated sidebar nav
+/* delegated nav */
 document.addEventListener('click', (e)=>{
   const item = e.target.closest('.sidebar .item[data-route]');
   if (!item) return; go(item.getAttribute('data-route')); closeSidebar();
 });
-
-// generic close buttons in modals
 document.addEventListener('click', (e)=>{
   const btn = e.target.closest('[data-close]'); if (!btn) return;
   closeModal(btn.getAttribute('data-close'));
 });
-
 function hookSidebarInteractions(){
   const input = $('#globalSearch'), results = $('#searchResults');
   if (!input || !results) return;
@@ -388,16 +312,12 @@ function hookSidebarInteractions(){
       });
     },120);
   });
-
   document.addEventListener('click', (e)=>{ if (!results.contains(e.target) && e.target !== input){ results.classList.remove('active'); } });
 }
 function openSidebar(){ $('#sidebar')?.classList.add('open'); $('#backdrop')?.classList.add('active'); document.body.classList.add('sidebar-open'); }
 function closeSidebar(){ $('#sidebar')?.classList.remove('open'); $('#backdrop')?.classList.remove('active'); document.body.classList.remove('sidebar-open'); }
 
-/* =========================
-   Router + renderer
-   ========================= */
-
+/* Router */
 function go(route){ currentRoute=route; save('_route', route); renderApp(); }
 function safeView(route){
   switch(route||'home'){
@@ -446,7 +366,6 @@ function renderApp(){
   try{
     const root = document.getElementById('root'); if (!root) return;
     if (!session){ renderLogin(); return; }
-
     const route = currentRoute || 'home';
     root.innerHTML = `
       <div class="app">
@@ -460,9 +379,7 @@ function renderApp(){
   }catch(e){ console.error('[renderApp] crash:', e); notify(e?.message||'Render failed','danger'); showRescue(e); }
 }
 
-/* =========================
-   Login screen
-   ========================= */
+/* Login screen */
 function renderLogin(){
   const root = document.getElementById('root');
   root.innerHTML = `
@@ -471,20 +388,14 @@ function renderLogin(){
         <div class="card-body">
           <div class="login-logo"><div class="logo">📦</div><div style="font-weight:800;font-size:20px">Inventory</div></div>
           <p class="login-note">Sign in to continue</p>
-
           <div class="grid">
             <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username"/>
             <input id="li-pass"  class="input" type="password" placeholder="Password" autocomplete="current-password"/>
             <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
-
             <div style="display:flex;justify-content:space-between;gap:8px">
               <a id="link-forgot"   href="#" class="btn ghost"    style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</a>
               <a id="link-register" href="#" class="btn secondary"style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Create account</a>
             </div>
-
-           <!-- <div class="login-note" style="margin-top:6px">
-              Tip: demo admin (local): <strong>${DEMO_ADMIN_EMAIL}</strong> / <strong>${DEMO_ADMIN_PASS}</strong>.
-            </div> -->
           </div>
         </div>
       </div>
@@ -517,40 +428,48 @@ function renderLogin(){
   const openAuth = sel => { $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('modal-open'); };
   const closeAuth = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('modal-open'); };
 
+  const localLogin = (email, pass)=>{
+    const e=(email||'').toLowerCase(); const users=load('users',[]);
+    if (e===DEMO_ADMIN_EMAIL && pass===DEMO_ADMIN_PASS){
+      let u = users.find(x => (x.email||'').toLowerCase() === e);
+      if (!u){ u = { name:'Admin', username:'admin', email:e, role:'admin', password:DEMO_ADMIN_PASS, img:'', contact:'' }; users.push(u); save('users', users); }
+      session = { ...u, authMode:'local' }; save('session', session);
+      seedTenantOnce(); notify('Signed in (Local admin)'); renderApp(); setupSessionPrompt(); return true;
+    }
+    const u2 = users.find(x => (x.email||'').toLowerCase() === e && (x.password||'') === pass);
+    if (u2){ session = { ...u2, authMode:'local' }; save('session', session); seedTenantOnce(); notify('Signed in (Local)'); renderApp(); setupSessionPrompt(); return true; }
+    return false;
+  };
+  const localSignup=(name,email,pass)=>{
+    const e=(email||'').toLowerCase(); const users=load('users',[]);
+    if (users.find(x => (x.email||'').toLowerCase() === e)){ return localLogin(email, pass); }
+    const r = SUPER_ADMINS.includes(e) ? 'admin' : 'user';
+    const u = { name: name || e.split('@')[0], username:e.split('@')[0], email:e, role:r, password:pass, img:'', contact:'' };
+    users.push(u); save('users', users);
+    session = { ...u, authMode:'local' }; save('session', session);
+    seedTenantOnce(); notify('Account created (Local)'); renderApp(); setupSessionPrompt(); return true;
+  };
+
   const doSignIn = async ()=>{
     const email = ($('#li-email')?.value || '').trim().toLowerCase();
     const pass  = $('#li-pass')?.value || '';
     const btn   = $('#btnLogin');
     if (!email || !pass) return notify('Enter email & password','warn');
 
-    // Local demo admin
+    // Local demo admin fallback
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS){
-      let users = load('users', []);
-      let prof = users.find(u => (u.email||'').toLowerCase()===email);
-      if (!prof){ prof={ name:'Admin', username:'admin', email:DEMO_ADMIN_EMAIL, role:'admin', img:'', contact:'', password:DEMO_ADMIN_PASS }; users.push(prof); save('users', users); }
-      session = { ...prof, authMode:'local' }; save('session', session);
-      seedTenantOnce(); notify('Welcome, Admin (local)'); ensureSessionAndRender(null); setupSessionPrompt(); return;
+      localLogin(email, pass); return;
     }
-
     try{
       if (!navigator.onLine) throw new Error('You appear to be offline.');
       btn.disabled=true; const keep=btn.innerHTML; btn.innerHTML='Signing in…';
       await auth.signInWithEmailAndPassword(email, pass);
       notify('Welcome!');
-      setTimeout(()=>{ if (!document.querySelector('.app')) ensureSessionAndRender(auth.currentUser); }, 700);
+      setTimeout(()=>{ if (!document.querySelector('.app')) ensureSessionAndRender(auth.currentUser); }, 600);
       btn.disabled=false; btn.innerHTML=keep;
     }catch(e){
-      // fallback to local
       if (localLogin(email, pass)) return;
-      const map = {
-        'auth/invalid-email':'Invalid email.',
-        'auth/user-disabled':'User disabled.',
-        'auth/user-not-found':'No account. Use Create account.',
-        'auth/wrong-password':'Incorrect password.',
-        'auth/too-many-requests':'Too many attempts.',
-        'auth/network-request-failed':'Network error.'
-      };
-      notify(map[e?.code] || (e?.message || 'Login failed'),'danger');
+      notify(e?.message || 'Login failed','danger');
     }
   };
 
@@ -567,7 +486,8 @@ function renderLogin(){
       try { await auth.currentUser.updateProfile({ displayName: name || email.split('@')[0] }); } catch {}
       notify('Account created — you are signed in'); closeAuth();
     }catch(e){
-      localSignup({name,email,pass}); closeAuth();
+      // Local signup
+      localSignup(name,email,pass); closeAuth();
     }
   };
 
@@ -579,9 +499,11 @@ function renderLogin(){
       await auth.sendPasswordResetEmail(email);
       notify('Reset email sent — check your inbox','ok'); closeAuth();
     }catch(e){
-      const r = localResetPassword(email);
-      if (r.ok){ notify(`Local password reset. Temp password: ${r.temp}`,'ok'); }
-      else notify('Reset failed: '+(r.msg||e?.message||'Unknown'),'danger');
+      // Local “temp password”
+      const users=load('users',[]); const i=users.findIndex(x=>(x.email||'').toLowerCase()===email);
+      if (i<0) return notify('No local user found.','warn');
+      const temp='reset'+Math.floor(1000+Math.random()*9000); users[i].password=temp; save('users',users);
+      notify(`Local reset: temp password = ${temp}`,'ok'); closeAuth();
     }
   };
 
@@ -605,7 +527,7 @@ async function doLogout(){
   notify('Signed out'); renderLogin();
 }
 
-/* ===================== Part C.1 — Home (Hot videos) ===================== */
+/* ===================== Home (Hot videos) ===================== */
 (function(){
   const DEFAULT_LIB = [
     { title:'LAKEY INSPIRED – Better Days (NCM)', id:'RXLzvo6kvVQ' },
@@ -623,7 +545,6 @@ async function doLogout(){
   window.buildWeeklyMusicSet = (size=10)=>{ const lib=window.HOT_MUSIC_LIBRARY||[]; if(!lib.length)return[]; const w=getISOWeek(new Date()); const start=w%lib.length; const out=[]; for(let i=0;i<size;i++) out.push(lib[(start+i)%lib.length]); return out; };
   window.HOT_MUSIC_VIDEOS = buildWeeklyMusicSet(10);
   window.pickWeeklyVideoIndex = ()=>{ const n=Math.max(1,(window.HOT_MUSIC_VIDEOS||[]).length); return getISOWeek(new Date())%n; };
-  // blacklist
   function _ytBL(){ return safeJSON(localStorage.getItem(kscope('_ytBlacklist')),'{}'); }
   function _ytSave(m){ try{ localStorage.setItem(kscope('_ytBlacklist'), JSON.stringify(m)); }catch{} }
   window.ytBlacklistAdd = id=>{ const m=_ytBL(); m[id]=Date.now(); _ytSave(m); };
@@ -797,9 +718,7 @@ function wirePosts(){
   }
 }
 
-/* ===================== Inventory / Products / COGS / Tasks ===================== */
-
-// CSV export (no img column)
+/* ===================== Inventory ===================== */
 function downloadCSV(filename, rows, headers){
   try{
     const csvRows=[]; if(headers?.length) csvRows.push(headers.join(','));
@@ -813,13 +732,11 @@ function downloadCSV(filename, rows, headers){
     notify('Exported CSV','ok');
   }catch(e){ notify('Export failed','danger'); }
 }
-// image helper (file -> dataURL)
 function attachImageUpload(fileSel, textSel){
   const f=$(fileSel), t=$(textSel); if(!f||!t) return;
   f.onchange=()=>{ const file=f.files&&f.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{ t.value=reader.result; }; reader.readAsDataURL(file); };
 }
 
-/* ----- Inventory ----- */
 function viewInventory(){
   const items=load('inventory',[]);
   return `
@@ -838,8 +755,8 @@ function viewInventory(){
             ${items.map(it=>{
               const isLow = it.stock <= it.threshold;
               const isCrit= it.stock <= Math.max(1, Math.floor(it.threshold*0.6));
-              const bg = isCrit? 'background:rgba(239,68,68,.10)' : (isLow? 'background:rgba(245,158,11,.08)' : '');
-              return `<tr id="${it.id}" style="${bg}">
+              const trClass = isCrit ? 'tr-crit' : (isLow ? 'tr-warn' : '');
+              return `<tr id="${it.id}" class="${trClass}">
                 <td><div class="thumb-wrap">
                   ${ it.img? `<img class="thumb inv-preview" data-src="${it.img}" src="${it.img}" alt=""/>` : `<div class="thumb inv-preview" data-src="icons/icon-512.png" style="display:grid;place-items:center">📦</div>` }
                   <img class="thumb-large" src="${it.img||'icons/icon-512.png'}" alt=""/>
@@ -915,7 +832,7 @@ function wireInventory(){
   }
 }
 
-/* ----- Products ----- */
+/* ===================== Products ===================== */
 function viewProducts(){
   const items=load('products',[]);
   return `
@@ -1004,7 +921,7 @@ function wireProducts(){
   }
 }
 
-/* ----- COGS ----- */
+/* ===================== COGS ===================== */
 function viewCOGS(){
   const rows=load('cogs',[]);
   const totals=rows.reduce((a,r)=>({grossIncome:a.grossIncome+(+r.grossIncome||0),produceCost:a.produceCost+(+r.produceCost||0),itemCost:a.itemCost+(+r.itemCost||0),freight:a.freight+(+r.freight||0),delivery:a.delivery+(+r.delivery||0),other:a.other+(+r.other||0)}),{grossIncome:0,produceCost:0,itemCost:0,freight:0,delivery:0,other:0});
@@ -1085,7 +1002,7 @@ function wireCOGS(){
   }
 }
 
-/* ----- Tasks (DnD + mobile tap) ----- */
+/* ===================== Tasks (DnD; lanes can be empty) ===================== */
 function viewTasks(){
   const items=load('tasks',[]);
   const lane=(key,label,color)=>`
@@ -1138,7 +1055,6 @@ function wireTasks(){
     });
   }
 
-  // row actions
   if (!root.__wired){
     root.__wired=true;
     root.addEventListener('click',(e)=>{
@@ -1172,15 +1088,11 @@ function wireTasks(){
 }
 function setupDnD(){
   const root=document.querySelector('[data-section="tasks"]'); if(!root) return;
-
-  // Make every card draggable
   root.querySelectorAll('.task-card').forEach(card=>{
     card.setAttribute('draggable','true'); card.style.cursor='grab';
     card.addEventListener('dragstart',(e)=>{ const id=card.getAttribute('data-task'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', id); card.classList.add('dragging'); });
     card.addEventListener('dragend',()=> card.classList.remove('dragging'));
   });
-
-  // Accept drops on empty lanes too
   root.querySelectorAll('.lane-grid').forEach(grid=>{
     const row=grid.closest('.lane-row'); const lane=row?.getAttribute('data-lane');
     const show=(e)=>{ e.preventDefault(); try{ e.dataTransfer.dropEffect='move'; }catch{} row?.classList.add('drop'); };
@@ -1198,7 +1110,7 @@ function setupDnD(){
   });
 }
 
-/* ===================== Settings / Contact / Static Pages ===================== */
+/* ===================== Settings / Users ===================== */
 function viewSettings(){
   const users=load('users',[]); const theme=load('_theme2', {mode:'aqua', size:'medium'}); const cloudOn=cloud.isOn();
   return `
@@ -1206,11 +1118,13 @@ function viewSettings(){
       <div class="card"><div class="card-body">
         <h3 style="margin-top:0">Cloud Sync</h3>
         <p style="color:var(--muted)">Keep your data in Firebase Realtime Database.</p>
-        <div class="theme-inline">
-          <div><label style="font-size:12px;color:var(--muted)">Status</label>
+        <div class="grid cols-2">
+          <div>
+            <label style="font-size:12px;color:var(--muted)">Status</label>
             <select id="cloud-toggle" class="input"><option value="off" ${!cloudOn?'selected':''}>Off</option><option value="on" ${cloudOn?'selected':''}>On</option></select>
           </div>
-          <div><label style="font-size:12px;color:var(--muted)">Actions</label><br/>
+          <div>
+            <label style="font-size:12px;color:var(--muted)">Actions</label><br/>
             <button class="btn" id="cloud-sync-now"><i class="ri-cloud-line"></i> Sync Now</button>
           </div>
         </div>
@@ -1219,7 +1133,7 @@ function viewSettings(){
 
       <div class="card"><div class="card-body">
         <h3 style="margin-top:0">Theme</h3>
-        <div class="theme-inline">
+        <div class="grid cols-2">
           <div><label style="font-size:12px;color:var(--muted)">Mode</label>
             <select id="theme-mode" class="input">
               ${THEME_MODES.map(m=>`<option value="${m.key}" ${theme.mode===m.key?'selected':''}>${m.name}</option>`).join('')}
@@ -1267,7 +1181,7 @@ function allowedRoleOptions(){
   return ['user'];
 }
 function wireSettings(){
-  // Theme instant apply
+  // Theme
   const mode=$('#theme-mode'), size=$('#theme-size');
   const applyNow=()=>{ save('_theme2', { mode:mode.value, size:size.value }); applyTheme(); renderApp(); };
   mode?.addEventListener('change', applyNow); size?.addEventListener('change', applyNow);
@@ -1278,21 +1192,21 @@ function wireSettings(){
     const val=e.target.value;
     try{
       if (val==='on'){
-        if(!auth.currentUser){ notify('Sign in with Firebase to use Cloud Sync.','warn'); toggle.value='off'; return; }
+        if(!auth || !auth.currentUser){ notify('Sign in with Firebase to use Cloud Sync.','warn'); toggle.value='off'; return; }
         await firebase.database().goOnline(); await cloud.enable(); notify('Cloud Sync ON');
       }else{ await cloud.disable(); notify('Cloud Sync OFF'); }
     }catch(err){ notify(err?.message||'Could not change sync','danger'); toggle.value=cloud.isOn()?'on':'off'; }
   });
   syncNow?.addEventListener('click', async ()=>{
     try{
-      if(!auth.currentUser) return notify('Sign in with Firebase','warn');
+      if(!auth || !auth.currentUser) return notify('Sign in with Firebase','warn');
       if(!cloud.isOn()) return notify('Turn Cloud Sync ON in Settings.','warn');
       if(!navigator.onLine) return notify('You appear to be offline.','warn');
       await firebase.database().goOnline(); await cloud.pushAll(); notify('Synced');
     }catch(e){ notify((e&&e.message)||'Sync failed','danger'); }
   });
 
-  // Users wiring
+  // Users
   wireUsers();
 }
 function wireUsers(){
@@ -1336,17 +1250,17 @@ function wireUsers(){
   });
 }
 
-// Static pages + Contact (contact.html is separate EmailJS page)
+/* ===================== Static pages / Contact link ===================== */
 window.pageContent = Object.assign(window.pageContent||{},{
   about:  `<h3>About Inventory</h3><p style="color:var(--muted)">A fast, offline-friendly app for SMBs to manage stock, products, costs, tasks — anywhere.</p>`,
   policy: `<h3>Policy (MIT)</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden;background:var(--panel-2)"><iframe src="policy.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent;color:var(--text)"></iframe></div>`,
   license:`<h3>License</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden;background:var(--panel-2)"><iframe src="license.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent;color:var(--text)"></iframe></div>`,
   setup:  `<h3>Setup Guide</h3><div style="border:1px solid var(--card-border); border-radius:12px; overflow:hidden;background:var(--panel-2)"><iframe src="setup-guide.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent;color:var(--text)"></iframe></div>`,
   guide:  `<h3>User Guide</h3><div style="border:1px solid var(--card-border);border-radius:12px;overflow:hidden;background:var(--panel-2)"><iframe src="guide.html" style="width:100%;height:calc(100vh - 220px);border:none;background:transparent;color:var(--text)"></iframe></div>`,
-  contact:`<h3>Contact</h3><p style="color:var(--muted)">Click to email us: <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Hello%20from%20Inventory&body=Hi%2C%0A"><i class="ri-mail-send-line"></i> Contact via Email</a></p>`
+  contact:`<h3>Contact</h3><p style="color:var(--muted)">Click to email us: <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Hello%20from%20Inventory&body=Hi%2C%0A"><i class="ri-mail-send-line"></i> Contact via Email</a> &nbsp; or open <a class="btn ghost" href="contact.html" target="_blank" rel="noopener">Contact form</a>.</p>`
 });
 function viewPage(key){ return `<div class="card"><div class="card-body">${(window.pageContent && window.pageContent[key]) || '<p>Page</p>'}</div></div>`; }
-function wireContact(){ /* mailto only here (EmailJS lives in contact.html) */ }
+function wireContact(){}
 
 /* ===================== Modals ===================== */
 function openModal(id){ $('#'+id)?.classList.add('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.add('active'); document.body.classList.add('modal-open'); }
@@ -1483,11 +1397,10 @@ function imgPreviewModal(){ return `
   <div class="modal img-modal" id="m-img">
     <div class="dialog">
       <div class="head"><strong>Preview</strong><button class="btn ghost" data-close="m-img">Close</button></div>
-      <div class="body"><div class="imgbox"><img id="preview-img" src="" alt="Preview"/></div></div>
+      <div class="body"><div class="imgbox"><img id="preview-img" src="" alt="Preview" style="max-width:100%"/></div></div>
     </div>
   </div>`; }
-
-/* ----- Session prompt modal (idle → ask → auto-logout) ----- */
+/* session prompt (idle) */
 function sessionPromptModal(){ return `
   <div class="modal-backdrop" id="mb-session"></div>
   <div class="modal" id="m-session" role="dialog" aria-modal="true" aria-labelledby="session-title">

@@ -5,25 +5,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inventory</title>
 
-  <!-- Icons + base styles (optional, keep yours if you have them) -->
-  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
-
-  <!-- Your stylesheet -->
+  <!-- App styles -->
   <link rel="stylesheet" href="css/styles.css" />
 
-  <!-- Firebase v8 (namespaced API) — load BEFORE app.js -->
+  <!-- Remix Icons (for UI icons) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"/>
+
+  <!-- (Optional) Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap">
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0ea5a5"/>
+
+  <!-- Provide your Firebase config here (v8 namespaced). Make sure databaseURL is set. -->
+  <script>
+    window.__FIREBASE_CONFIG = {
+      databaseURL: "https://inventory-us-default-rtdb.firebaseio.com/",
+      apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
+  authDomain: "inventory-us.firebaseapp.com",
+  databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
+  projectId: "inventory-us",
+  storageBucket: "inventory-us.firebasestorage.app",
+  messagingSenderId: "685621968644",
+  appId: "1:685621968644:web:a88ec978f1ab9b4f49da51",
+  measurementId: "G-L6NRD0B1B6"
+    };
+  </script>
+
+  <!-- Firebase v8 (namespaced) – must come BEFORE app.js -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <!-- Your app -->
+  <script defer src="js/app.js"></script>
 </head>
 <body>
-  <!-- App root -->
   <div id="root"></div>
 
-  <!-- Optional: notifications element your app.js uses -->
+  <!-- Global toast/notification -->
   <div id="notification" class="notification"></div>
-
-  <!-- Your app code (loads AFTER Firebase) -->
-  <script defer src="js/app.js"></script>
 </body>
 </html>
