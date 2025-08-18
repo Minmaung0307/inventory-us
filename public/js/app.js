@@ -55,20 +55,35 @@ applyTheme();
 // <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 // <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 // <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+/* --- Firebase boot (robust, won’t crash if SDK missing) --- */
 const firebaseConfig = {
-  // replace with your config (your earlier config also works)
+  // ✅ Use your project’s real values
   apiKey: "AIzaSyBY52zMMQqsvssukui3TfQnMigWoOzeKGk",
   authDomain: "sushi-pos.firebaseapp.com",
+  databaseURL: "https://sushi-pos-default-rtdb.firebaseio.com",  // ✅ required for Realtime DB
   projectId: "sushi-pos",
-  storageBucket: "sushi-pos.firebasestorage.app",
+  storageBucket: "sushi-pos.appspot.com",                        // ✅ appspot.com (not firebasestorage.app)
   messagingSenderId: "909622476838",
-  appId: "1:909622476838:web:1a1fb221a6a79fcaf4a6e7",
-  measurementId: "G-M8Q8EJ4T7Q"
+  appId: "1:909622476838:web:1a1fb221a6a79fcaf4a6e7"
 };
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
-const db   = firebase.database();
+
+let auth = null, db = null;
+
+(function initFirebase(){
+  try {
+    if (!window.firebase) throw new Error("Firebase SDK not loaded");
+    if (!firebase.apps || !firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    auth = firebase.auth();
+    try { auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); } catch {}
+    db = firebase.database();
+    window.__fbReady = true;
+  } catch (e) {
+    console.warn("[firebase] init skipped / deferred:", e.message);
+    window.__fbReady = false;
+  }
+})();
 
 // --- Roles & permissions ------------------------------------------------------
 const ROLES = ['user','associate','manager','admin'];
@@ -142,12 +157,35 @@ function seedTenantOnce(){
 }
 
 // --- Auth state --------------------------------------------------------------
+// const ALLOW_LOCAL_AUTOLOGIN = true;
+
+// auth.onAuthStateChanged(async (user) => {
+//   try { await ensureSessionAndRender(user); }
+//   catch (err) { console.error('[auth] crashed:', err); notify(err?.message || 'Render failed','danger'); showRescue(err); }
+// });
+
+// --- Auth state --------------------------------------------------------------
 const ALLOW_LOCAL_AUTOLOGIN = true;
 
-auth.onAuthStateChanged(async (user) => {
-  try { await ensureSessionAndRender(user); }
-  catch (err) { console.error('[auth] crashed:', err); notify(err?.message || 'Render failed','danger'); showRescue(err); }
-});
+if (auth && typeof auth.onAuthStateChanged === "function") {
+  auth.onAuthStateChanged(async (user) => {
+    try { await ensureSessionAndRender(user); }
+    catch (err) { console.error("[auth] crashed:", err); notify(err?.message || "Render failed","danger"); showRescue(err); }
+  });
+} else {
+  // Fallback: render login/local mode even if Firebase is missing
+  try {
+    session = load('session', null);
+    if (session && session.authMode === 'local') {
+      seedTenantOnce(); renderApp(); setupSessionPrompt();
+    } else {
+      renderLogin();
+    }
+  } catch (err) {
+    console.error('[authless render] crashed:', err);
+    showRescue(err);
+  }
+}
 
 async function ensureSessionAndRender(user){
   applyTheme();
