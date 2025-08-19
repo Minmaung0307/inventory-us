@@ -1,53 +1,37 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="en" data-theme="sunset">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <title>Inventory</title>
 
-    <!-- Icons -->
-    <link
-      rel="icon"
-      type="image/png"
-      sizes="192x192"
-      href="./icons/icon-192.png"
-    />
-    <link
-      rel="icon"
-      type="image/png"
-      sizes="512x512"
-      href="./icons/icon-512.png"
-    />
-    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
-
-    <!-- Remix Icon (icons used across the app) -->
-    <link
-      href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
-      rel="stylesheet"
-    />
-
     <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Public+Sans:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.7.0/fonts/remixicon.css" rel="stylesheet"/>
 
-    <!-- Styles -->
-    <link rel="stylesheet" href="./css/styles.css" />
+    <!-- PWA / Icons -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0ea5a0"/>
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png">
+
+    <link rel="stylesheet" href="/css/styles.css?v=2025-08-19c" />
   </head>
   <body>
     <div id="root"></div>
-    <div id="notification" class="notification"></div>
 
-    <!-- Firebase (compat v9) -->
+    <!-- Firebase (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
+    <!-- Provide your config at runtime -->
     <script>
-      // Provide your config via hosting or paste it here
-      window.__FIREBASE_CONFIG = window.__FIREBASE_CONFIG || {
+      // Fill these with your project’s values:
+      window.__FIREBASE_CONFIG = {
         apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
         authDomain: "inventory-us.firebaseapp.com",
         databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
@@ -59,18 +43,6 @@
       };
     </script>
 
-    <!-- App -->
-    <script src="./js/app.js" defer></script>
-
-    <!-- (Optional) If you want PWA-ish offline -->
-    <script>
-      if ("serviceWorker" in navigator) {
-        window.addEventListener("load", () => {
-          navigator.serviceWorker
-            .register("./service-worker.js")
-            .catch(() => {});
-        });
-      }
-    </script>
+    <script src="/js/app.js?v=2025-08-19c"></script>
   </body>
 </html>
