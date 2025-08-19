@@ -1,195 +1,24 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Inventory App – Developer Setup Guide</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-  <style>
-    :root{
-      --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0;
-      --brand:#0ea5a5; --ok:#10b981; --warn:#f59e0b; --danger:#ef4444; --border:#1f2a37;
+<!doctype html><meta charset="utf-8">
+<title>Setup Guide</title>
+<style>body{font:14px/1.6 system-ui;margin:12px;color:#223}</style>
+<h1>Setup Guide (Firebase)</h1>
+<ol>
+  <li>Create a Firebase project → Web app.</li>
+  <li>Realtime Database → Create database → note the <b>Database URL</b>.</li>
+  <li>Copy your config into <code>index.html</code> → <code>window.__FIREBASE_CONFIG</code>.</li>
+  <li>Auth → enable Email/Password.</li>
+  <li>Security Rules (Realtime Database):
+<pre>{
+  "rules": {
+    "tenants": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        "kv": {
+          "$key": { ".write": "$uid === auth.uid" }
+        }
+      }
     }
-    @media (prefers-color-scheme: light){
-      :root{ --bg:#f7fafc; --panel:#fff; --panel2:#f2f5f8; --text:#0b1220; --muted:#51606f; --border:#e6edf3; }
-    }
-    *{ box-sizing:border-box }
-    body{ margin:0; background:var(--bg); color:var(--text); font: 14px/1.5 Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Arial }
-    .wrap{ max-width: 1000px; margin: 24px auto; padding: 0 16px 40px }
-    .hero{ display:flex; align-items:center; gap:14px; margin-bottom:6px }
-    .logo{ width:46px; height:46px; border-radius:12px; display:grid;place-items:center;
-           background: radial-gradient(ellipse at 30% 30%, var(--brand), #0891b2); color:#fff; font-weight:800; }
-    h1{ margin:6px 0 18px; font-size:28px }
-    h2{ margin:20px 0 10px; font-size:18px }
-    h3{ margin:16px 0 8px; font-size:15px }
-    p,li{ color: var(--text) }
-    p.muted, .muted{ color:var(--muted) }
-    code, pre{ background: var(--panel2); border:1px solid var(--border); border-radius:10px; }
-    code{ padding: 2px 6px; }
-    pre{ padding: 12px; overflow:auto }
-    .card{ background: var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:14px 0 }
-    .ok{ color: var(--ok) } .warn{ color: var(--warn) } .danger{ color: var(--danger) }
-    a{ color: var(--brand) }
-    .grid{ display:grid; gap:12px }
-    .toc a{ text-decoration: none }
-    .callout{ padding:10px 12px; border-left:4px solid var(--brand); background:rgba(14,165,165,.08); border-radius:10px }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="hero">
-      <div class="logo">📦</div>
-      <div>
-        <h1 style="margin:0">Inventory App — Developer Setup</h1>
-        <div class="muted">Single-file SPA (HTML+CSS+JS), Firebase v8, Local storage, optional Cloud Sync</div>
-      </div>
-    </div>
-
-    <div class="card toc">
-      <strong>Contents</strong>
-      <ol>
-        <li><a href="#stack">Stack & Structure</a></li>
-        <li><a href="#run">Run Locally</a></li>
-        <li><a href="#firebase">Firebase Setup (Auth + Database + optional Hosting)</a></li>
-        <li><a href="#config">Configuration Points</a></li>
-        <li><a href="#features">App Features (What’s inside)</a></li>
-        <li><a href="#music">Hot Music Videos (rotation + auto-skip)</a></li>
-        <li><a href="#images">Images & Thumbnails</a></li>
-        <li><a href="#pwa">Service Worker / PWA Notes</a></li>
-        <li><a href="#email">Contact (EmailJS or mailto)</a></li>
-        <li><a href="#troubleshoot">Troubleshooting (Common errors)</a></li>
-        <li><a href="#release">Release checklist</a></li>
-      </ol>
-    </div>
-
-    <h2 id="stack">1) Stack & Structure</h2>
-    <div class="card grid">
-      <div><strong>Zero build tools:</strong> pure static files.</div>
-      <div><strong>Auth:</strong> Firebase Auth (email/password). Also supports a local “demo admin” fallback.</div>
-      <div><strong>Data:</strong> LocalStorage; optional Cloud Sync to Firebase Realtime Database.</div>
-      <div><strong>UI:</strong> Vanilla HTML/CSS, a single <code>app.js</code>, and minimal icons via Remix Icon.</div>
-    </div>
-    <pre><code>/
-├─ index.html
-├─ css/styles.css
-├─ js/app.js
-├─ service-worker.js
-├─ icons/
-├─ policy.html
-├─ license.html
-├─ guide.html
-├─ setup-guide.html
-├─ about.html
-└─ manifest.webmanifest</code></pre>
-
-    <h2 id="run">2) Run Locally</h2>
-    <div class="card">
-      Use any static server (don’t open index.html by double-click — that breaks routing/assets).
-      <pre><code># Option A: Node http-server
-npx http-server -p 8080
-
-# Option B: serve
-npx serve -l 8080
-
-# Option C: Python
-python3 -m http.server 8080</code></pre>
-      Then visit <code>http://localhost:8080</code>.
-    </div>
-
-    <h2 id="firebase">3) Firebase Setup</h2>
-    <div class="card grid">
-      <div>
-        <h3>3.1 Create project</h3>
-        <ol>
-          <li>Create a Firebase project.</li>
-          <li>Add a Web App and copy the config snippet (apiKey, authDomain, etc.).</li>
-          <li>Paste it into <code>app.js</code> (<code>firebaseConfig</code>).</li>
-        </ol>
-      </div>
-      <div>
-        <h3>3.2 Enable Auth</h3>
-        <ol><li>Authentication → Sign-in method → enable <strong>Email/Password</strong>.</li></ol>
-      </div>
-      <div>
-        <h3>3.3 Realtime Database</h3>
-        <ol>
-          <li>Create Realtime Database (pick a region).</li>
-          <li>App writes under <code>tenants/&lt;uid&gt;/kv/&lt;key&gt;</code>.</li>
-        </ol>
-        <p class="muted">Cloud Sync is optional — the app works fully offline with LocalStorage.</p>
-      </div>
-      <div>
-        <h3>3.4 Optional: Firebase Hosting</h3>
-        <pre><code>npm i -g firebase-tools
-firebase login
-firebase init hosting     # project, "public" = .
-firebase deploy</code></pre>
-      </div>
-    </div>
-
-    <h2 id="config">4) Configuration Points</h2>
-    <div class="card grid">
-      <div><h3>4.1 Firebase config</h3><p>Update <code>firebaseConfig</code> in <code>app.js</code>.</p></div>
-      <div><h3>4.2 Demo local admin</h3><pre><code>admin@inventory.com / admin123</code></pre></div>
-      <div><h3>4.3 Cloud Sync toggle</h3><p>Settings → Cloud Sync mirrors <code>inventory, products, posts, tasks, cogs, users, _theme2</code>.</p></div>
-      <div><h3>4.4 Theme</h3><p>Light/Dark/Aqua & font size saved in <code>_theme2</code>.</p></div>
-    </div>
-
-    <h2 id="features">5) App Features</h2>
-    <div class="card grid">
-      <div><strong>SPA Router:</strong> Home, Dashboard, Inventory, Products, COGS, Tasks, Settings, static pages.</div>
-      <div><strong>Auth:</strong> Firebase + Local fallback; session persistence.</div>
-      <div><strong>Inventory & Products:</strong> CRUD, CSV export, images (Data URLs), hover enlarge, product card modal.</div>
-      <div><strong>COGS:</strong> Daily rows with totals and gross profit.</div>
-      <div><strong>Tasks:</strong> Kanban with drag & drop and mobile tap-to-move.</div>
-      <div><strong>Posts:</strong> Simple newsroom with images.</div>
-      <div><strong>Search:</strong> Global search across all entities.</div>
-      <div><strong>Contact:</strong> EmailJS (optional) with mailto fallback.</div>
-    </div>
-
-    <h2 id="music">6) Hot Music Videos</h2>
-    <div class="card">
-      <p>Weekly rotation from a library in <code>app.js</code>, with Shuffle and auto-skip of blocked videos (blacklist).</p>
-    </div>
-
-    <h2 id="images">7) Images & Thumbnails</h2>
-    <div class="card">
-      <p>Uploads are Data URLs stored with the items; hover previews float above tables; mobile opens a modal.</p>
-    </div>
-
-    <h2 id="pwa">8) Service Worker / PWA</h2>
-    <div class="card">
-      <p>GET-only cache with SW; register via a safe GET; installable via <code>manifest.webmanifest</code>.</p>
-    </div>
-
-    <h2 id="email">9) Contact</h2>
-    <div class="card">
-      <ol>
-        <li>Create EmailJS service/template.</li>
-        <li>Put <code>PUBLIC_KEY</code>, <code>SERVICE_ID</code>, <code>TEMPLATE_ID</code> in <code>app.js</code>.</li>
-      </ol>
-    </div>
-
-    <h2 id="troubleshoot">10) Troubleshooting</h2>
-    <div class="card">
-      <ul>
-        <li>Ensure you run a static server (not <code>file://</code>).</li>
-        <li>If images don’t preview, check CSS z-index and overflow.</li>
-        <li>If tasks don’t drag, ensure <code>dragover</code> uses <code>preventDefault()</code>.</li>
-      </ul>
-    </div>
-
-    <h2 id="release">11) Release</h2>
-    <div class="card">
-      <ul>
-        <li>Update Firebase config.</li>
-        <li>Test Cloud Sync on/off.</li>
-        <li>Verify CSV exports (no image columns).</li>
-        <li>Check Contact page (EmailJS or mailto).</li>
-      </ul>
-    </div>
-  </div>
-</body>
-</html>
+  }
+}</pre>
+  </li>
+</ol>

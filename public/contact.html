@@ -1,198 +1,45 @@
-<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Contact – Inventory</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<!doctype html><meta charset="utf-8">
+<title>Contact</title>
 <style>
-  :root{
-    --bg:#0c1116; --panel:#111821; --panel2:#0f1520; --text:#e8f1f1; --muted:#9ab0b0;
-    --brand:#0ea5a5; --ok:#10b981; --warn:#f59e0b; --danger:#ef4444; --border:#1f2a37;
-  }
-  body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.5 Inter, system-ui, -apple-system, Segoe UI, Roboto }
-  .wrap{ max-width:760px; margin:20px auto; padding:0 14px 28px }
-  .hero{ display:flex; align-items:center; gap:10px; margin-bottom:10px }
-  .logo{ width:44px; height:44px; border-radius:12px; display:grid;place-items:center;
-         background: radial-gradient(ellipse at 30% 30%, var(--brand), #0891b2); color:#fff; font-weight:800; }
-  h2{ margin:6px 0 4px }
-  p.muted, .muted{ color:var(--muted) }
-  .card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px; margin:12px 0 }
-  label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px }
-  input, textarea{
-    width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--border);
-    background:var(--panel2); color:var(--text); margin-bottom:10px; outline:none;
-  }
-  input:focus, textarea:focus{ border-color: var(--brand) }
-  .btn{ background:var(--brand); color:#fff; border:none; border-radius:10px; padding:10px 14px; cursor:pointer; font-weight:600 }
-  .btn[disabled]{ opacity:.6; cursor:not-allowed }
-  .btn.alt{ background:#0f766e }
-  .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
-  .status{ margin-top:8px; font-size:13px }
-  .status.ok{ color:var(--ok) } .status.warn{ color:var(--warn) } .status.err{ color:var(--danger) }
-  .callout{ padding:10px 12px; border-left:4px solid var(--brand); background:rgba(14,165,165,.08); border-radius:10px }
+  body{font:14px/1.6 system-ui;margin:12px;color:#223}
+  input,textarea,button{width:100%;padding:8px;margin:6px 0}
 </style>
 
-<!-- EmailJS v4 (browser SDK). Loaded for everyone, but only initialized/used by admin. -->
+<h1>Contact</h1>
+<form id="contactForm">
+  <input  name="name"    placeholder="Your name" required>
+  <input  name="email"   type="email" placeholder="Your email" required>
+  <textarea name="message" rows="5" placeholder="Message" required></textarea>
+  <button type="submit">Send</button>
+  <div id="msg" style="color:#555"></div>
+</form>
+
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-</head>
-<body>
-  <div class="wrap">
-    <div class="hero">
-      <div class="logo">📦</div>
-      <div>
-        <h2 style="margin:0">Contact us</h2>
-        <div class="muted">Questions, feedback, or support</div>
-      </div>
-    </div>
+<script>
+  const EMAILJS = {
+    publicKey:  "WT0GOYrL9HnDKvLUf",
+    serviceId:  "service_z9tkmvr",
+    templateId: "template_q5q471f"
+  };
+  emailjs.init(EMAILJS.publicKey);
 
-    <!-- Admin-only Email form -->
-    <div class="card" id="adminMailCard" style="display:none">
-      <form id="contactForm" novalidate>
-        <div class="row">
-          <div style="flex:1 1 220px">
-            <label>Your name</label>
-            <input name="from_name" placeholder="Jane Doe" required>
-          </div>
-          <div style="flex:1 1 220px">
-            <label>Your email</label>
-            <input name="reply_to" type="email" placeholder="jane@example.com" required>
-          </div>
-        </div>
-        <label>Message</label>
-        <textarea name="message" placeholder="How can we help?" rows="6" required></textarea>
+  const form = document.getElementById('contactForm');
+  const msg  = document.getElementById('msg');
 
-        <div class="row">
-          <button class="btn" type="submit" id="btnSend"><span id="btnText">Send</span></button>
-          <a class="btn alt" id="btnMail" href="mailto:minmaung0307@gmail.com?subject=Hello%20from%20Inventory" rel="noopener">Use Mail app</a>
-        </div>
-
-        <div id="status" class="status muted"></div>
-
-        <div class="callout" style="margin-top:10px">
-          <strong>Note:</strong> This in-app form uses EmailJS and is available to admins only. Other users can use the Mail app button.
-        </div>
-      </form>
-    </div>
-
-    <!-- Non-admin view -->
-    <div class="card" id="publicMailCard" style="display:none">
-      <p class="muted">To reach us quickly, use your mail app:</p>
-      <a class="btn alt" id="btnMailPublic" href="mailto:minmaung0307@gmail.com?subject=Hello%20from%20Inventory" rel="noopener">
-        Use Mail app
-      </a>
-      <p class="status warn" style="margin-top:10px">Admin features (in-app send) are hidden for your role.</p>
-    </div>
-
-    <p class="muted">If EmailJS isn’t configured or fails, you can always use the “Mail app” button.</p>
-  </div>
-
-  <script>
-    // === Configure your EmailJS IDs here (admin-only form uses these) ===
-    const SVC = "service_z9tkmvr";     // e.g. service_123abc
-    const TPL = "template_q5q471f";    // e.g. template_xyz789
-    const PK  = "WT0GOYrL9HnDKvLUf";     // REQUIRED on the client
-
-    // Pull session (same origin as your SPA). Only admins get the EmailJS form.
-    const session = (() => {
-      try { return JSON.parse(localStorage.getItem('session') || 'null'); } catch { return null; }
-    })();
-    const isAdmin = !!(session && (session.role === 'admin'));
-
-    // Basic helpers
-    const $ = (s, r=document) => r.querySelector(s);
-    const statusEl = $('#status');
-    const setStatus = (msg, cls) => {
-      if (!statusEl) return;
-      statusEl.className = 'status ' + (cls || 'muted');
-      statusEl.textContent = msg;
-    };
-
-    // Show correct card
-    const adminCard  = $('#adminMailCard');
-    const publicCard = $('#publicMailCard');
-    if (isAdmin) {
-      adminCard.style.display = '';
-      publicCard.style.display = 'none';
-    } else {
-      adminCard.style.display = 'none';
-      publicCard.style.display = '';
-      // Pre-fill subject/body for public mail link with user's name/email if available
-      try {
-        const name  = encodeURIComponent(session?.name || 'Inventory User');
-        const email = encodeURIComponent(session?.email || '');
-        const subj  = encodeURIComponent('Hello from Inventory');
-        const body  = encodeURIComponent(`Hi Admin,\n\nThis is ${session?.name || 'a user'} (${session?.email || ''}).\n\n`);
-        $('#btnMailPublic').href = `mailto:minmaung0307@gmail.com?subject=${subj}&body=${body}`;
-      } catch {}
-    }
-
-    // Admin-only: init EmailJS if keys are present
-    let emailReady = false;
-    if (isAdmin && window.emailjs && PK && PK !== 'YOUR_PUBLIC_KEY') {
-      try {
-        emailjs.init({ publicKey: PK });
-        emailReady = true;
-      } catch (e) {
-        setStatus('EmailJS init failed. You can still use the Mail app button.', 'warn');
-        console.warn('[EmailJS init error]', e);
-      }
-    }
-
-    // Handle submit (admin-only)
-    const form = $('#contactForm');
-    if (form) {
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const btn = $('#btnSend');
-        const btnText = $('#btnText');
-
-        // simple validation
-        const name = form.elements['from_name'].value.trim();
-        const email = form.elements['reply_to'].value.trim();
-        const message = form.elements['message'].value.trim();
-        if (!name || !email || !message) {
-          setStatus('Please fill in your name, email, and message.', 'warn');
-          return;
-        }
-
-        // If not admin or EmailJS not ready, nudge to Mail app
-        if (!isAdmin || !emailReady || !SVC || !TPL || SVC.includes('YOUR_') || TPL.includes('YOUR_')) {
-          setStatus('EmailJS not configured. Use the Mail app button.', 'warn');
-          return;
-        }
-
-        try {
-          btn.disabled = true; btnText.textContent = 'Sending…';
-          setStatus('Sending message…', 'muted');
-
-          // Template variables must match your EmailJS template fields.
-          const params = {
-            from_name:  name,
-            reply_to:   email,
-            message:    message,
-            to_name:    'Inventory Admin',
-            to_email:   'minmaung0307@gmail.com'
-          };
-
-          await emailjs.send(SVC, TPL, params);
-          setStatus('Message sent ✅', 'ok');
-          form.reset();
-        } catch (err) {
-          console.warn('[EmailJS send error]', err);
-          setStatus('Failed to send via EmailJS. You can use the Mail app button.', 'err');
-        } finally {
-          btn.disabled = false; btnText.textContent = 'Send';
-        }
-      });
-    }
-
-    // Also tweak the Mail app link in admin card to include user info
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    msg.textContent = 'Sending...';
     try {
-      const subj  = encodeURIComponent('Hello from Inventory');
-      const body  = encodeURIComponent(`Hi Admin,\n\nThis is ${session?.name || 'Admin'} (${session?.email || ''}).\n\n`);
-      $('#btnMail').href = `mailto:minmaung0307@gmail.com?subject=${subj}&body=${body}`;
-    } catch {}
-  </script>
-</body>
-</html>
+      const data = {
+        from_name: form.name.value,
+        reply_to:  form.email.value,
+        message:   form.message.value
+      };
+      await emailjs.send(EMAILJS.serviceId, EMAILJS.templateId, data);
+      msg.textContent = 'Sent! We will reply soon.';
+      form.reset();
+    } catch (err) {
+      msg.textContent = 'Send failed: ' + (err?.text || err?.message || 'Unknown error');
+    }
+  });
+</script>

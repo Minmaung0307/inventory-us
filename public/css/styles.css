@@ -16,6 +16,8 @@
   --font-scale:100%;
   --radius:14px;
   --shadow:0 6px 24px rgba(0,0,0,.25);
+  --sidebar-pad: 10px;   /* NEW: extra inner padding */
+  --nav-left-pad: 18px;  /* NEW: more space from the left edge */
 }
 
 html,body{ height:100% }
@@ -47,26 +49,39 @@ body{
   border-right:1px solid var(--card-border);
   position:sticky; top:0; height:100vh; overflow:auto;
   box-shadow: var(--shadow);
+  padding-left: var(--sidebar-pad); /* NEW: comfort gutter */
 }
-.brand{ display:flex; gap:10px; align-items:center; padding:14px 14px 10px }
+.brand{
+  display:flex; gap:10px; align-items:center;
+  padding:14px var(--nav-left-pad) 10px var(--nav-left-pad); /* NEW: symmetric padding */
+}
 .logo{ width:34px; height:34px; display:grid; place-items:center; background:#0e1420; border:1px solid var(--card-border); border-radius:10px }
 .title{ font-weight:800 }
 
-.menu-caption, .links-caption{ font-size:11px; letter-spacing:.06em; color:var(--muted); padding:8px 14px 6px; text-transform:uppercase }
+.menu-caption, .links-caption{
+  font-size:11px; letter-spacing:.06em; color:var(--muted);
+  padding:8px var(--nav-left-pad) 6px var(--nav-left-pad);
+  text-transform:uppercase
+}
 
 .nav .item, .links .item{
   display:flex; align-items:center; gap:10px;
-  padding:10px 14px; cursor:pointer;
-  transition: background .15s ease;
-  border-left:3px solid transparent;
+  padding:10px 14px 10px var(--nav-left-pad); /* NEW: more left padding */
+  cursor:pointer; transition: background .15s ease;
+  border-left:3px solid transparent; border-radius:10px; /* rounded for nicer hitbox */
+  outline: none;
 }
 .nav .item i, .links .item i{ font-size:18px }
 
 .nav .item{ color:#dbe8e8 }
-.links .item{ color:#9ab0b0; font-size:13px } /* different look than menu */
+.links .item{ color:#9ab0b0; font-size:13px }
 
 .nav .item:hover{ background:rgba(14,165,165,.08) }
 .links .item:hover{ background:rgba(255,255,255,.04) }
+
+.nav .item:focus-visible, .links .item:focus-visible{
+  box-shadow:0 0 0 2px rgba(14,165,165,.35);
+}
 
 .nav .item.active{
   background:rgba(14,165,165,.12);
@@ -170,7 +185,7 @@ textarea.input{ min-height:90px }
 .notification{
   position:fixed; left:50%; transform:translateX(-50%); bottom:16px;
   padding:10px 14px; border-radius:12px; background:#0f172a; color:#fff; border:1px solid #1f2a37;
-  box-shadow: var(--shadow); opacity:0; pointer-events:none; transition: opacity .15s ease
+  box-shadow: var(--shadow); opacity:0; pointer-events:none; transition: opacity .15s ease; z-index:9999;
 }
 .notification.show{ opacity:1 }
 .notification.ok{ background:#0a352f }

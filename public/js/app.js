@@ -49,9 +49,8 @@ applyTheme();
 /* =========================
    Firebase bootstrap (guarded)
    ========================= */
-// --- Firebase safe references (do NOT re-initialize if index.html did) ---
 const firebaseConfig = window.__FIREBASE_CONFIG || null;
-if (!firebase || !firebase.initializeApp) {
+if (!window.firebase || !firebase.initializeApp) {
   console.error("Firebase SDK missing. Check script tags in index.html");
 }
 // Guard double init
@@ -63,11 +62,22 @@ if (firebase && firebase.apps && firebase.apps.length === 0 && firebaseConfig) {
 const auth = firebase.auth();
 const db   = firebase.database();
 
+/* EXTRA: auth persistence fallback to reduce IndexedDB errors (Safari Private etc.) */
+(async ()=>{
+  try{
+    await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  }catch{
+    try{ await auth.setPersistence(firebase.auth.Auth.Persistence.SESSION); }catch{}
+  }
+})();
+
 /* =========================
    Roles / session / cloud
    ========================= */
 const ROLES = ['user','associate','manager','admin'];
+/* IMPORTANT: add your admin email(s) here so you get full permissions */
 const SUPER_ADMINS = ['admin@inventory.com','minmaung0307@gmail.com'];
+
 function role(){ return (session?.role)||'user'; }
 function canAdd(){ return ['admin','manager','associate'].includes(role()); }
 function canEdit(){ return ['admin','manager'].includes(role()); }
@@ -138,7 +148,6 @@ if (auth && typeof auth.onAuthStateChanged === "function") {
     catch (err) { console.error("[auth] crashed:", err); notify(err?.message || "Render failed","danger"); showRescue(err); }
   });
 } else {
-  // Fallback if Firebase isn’t present: render local mode
   try {
     session = load('session', null);
     if (session && session.authMode === 'local') {
@@ -235,12 +244,12 @@ function renderSidebar(active='home'){
 
       <h6 class="menu-caption">Menu</h6>
       <div class="nav">
-        ${links.map(l=>`<div class="item ${active===l.route?'active':''}" data-route="${l.route}"><i class="${l.icon}"></i><span>${l.label}</span></div>`).join('')}
+        ${links.map(l=>`<div class="item ${active===l.route?'active':''}" data-route="${l.route}" tabindex="0"><i class="${l.icon}"></i><span>${l.label}</span></div>`).join('')}
       </div>
 
       <h6 class="links-caption">Links</h6>
       <div class="links">
-        ${pages.map(p=>`<div class="item" data-route="${p.route}"><i class="${p.icon}"></i><span>${p.label}</span></div>`).join('')}
+        ${pages.map(p=>`<div class="item" data-route="${p.route}" tabindex="0"><i class="${p.icon}"></i><span>${p.label}</span></div>`).join('')}
       </div>
 
       <h6>Social</h6>
@@ -279,6 +288,12 @@ function renderTopbar(){
 document.addEventListener('click', (e)=>{
   const item = e.target.closest('.sidebar .item[data-route]');
   if (!item) return; go(item.getAttribute('data-route')); closeSidebar();
+});
+document.addEventListener('keydown',(e)=>{
+  if (e.key==='Enter'){
+    const item = e.target.closest('.sidebar .item[data-route]');
+    if (item){ go(item.getAttribute('data-route')); closeSidebar(); }
+  }
 });
 document.addEventListener('click', (e)=>{
   const btn = e.target.closest('[data-close]'); if (!btn) return;
@@ -460,7 +475,6 @@ function renderLogin(){
     const btn   = $('#btnLogin');
     if (!email || !pass) return notify('Enter email & password','warn');
 
-    // Local demo admin fallback
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS){
       localLogin(email, pass); return;
     }
@@ -472,6 +486,10 @@ function renderLogin(){
       setTimeout(()=>{ if (!document.querySelector('.app')) ensureSessionAndRender(auth.currentUser); }, 600);
       btn.disabled=false; btn.innerHTML=keep;
     }catch(e){
+      // Helpful message for private modes where IndexedDB fails
+      if ((e && String(e).includes('IndexedDB')) || (e && e.code==='auth/internal-error')){
+        notify('Your browser blocked secure storage. Try a normal window or use Local login (demo).','warn');
+      }
       if (localLogin(email, pass)) return;
       notify(e?.message || 'Login failed','danger');
     }
@@ -594,7 +612,10 @@ function wireHome(){
     const list=window.HOT_MUSIC_VIDEOS||[]; if(!list.length) return;
     const i=nextValidIndex(idx); const { id, title:t }=list[i];
     wrap.setAttribute('data-vid-index', String(i)); title.textContent=t||'Hot video'; openYT.href=`https://www.youtube.com/watch?v=${id}`;
-    const options={ host:'https://www.youtube-nocookie.com', videoId:id, playerVars:{rel:0,modestbranding:1,playsinline:1,origin:location.origin}, events:{ onError:()=>{ ytBlacklistAdd(id); notify('Video not available. Skipping…','warn'); setVideoByIndex(i+1);} } };
+    const options={ /* host omitted -> default is youtube.com (prevents postMessage mismatch) */
+      videoId:id, playerVars:{rel:0,modestbranding:1,playsinline:1},
+      events:{ onError:()=>{ ytBlacklistAdd(id); notify('Video not available. Skipping…','warn'); setVideoByIndex(i+1);} }
+    };
     if(!player){ player = new YT.Player('ytPlayerHost', options); } else { player.loadVideoById(id); }
   }
   loadYT().then(()=>{

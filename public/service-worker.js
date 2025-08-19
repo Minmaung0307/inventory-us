@@ -1,36 +1,52 @@
-/* Simple offline cache with stale-while-revalidate */
-const CACHE = 'inv-cache-v8';
-const CORE = [
-  '/', 'index.html',
-  'css/styles.css',
-  'js/app.js',
-  'manifest.webmanifest',
-  'icons/icon-192.png',
-  'icons/icon-512.png'
+/* Simple SW: cache app shell, network-first for HTML */
+const CACHE = 'inv-cache-v3';
+const ASSETS = [
+  '/',
+  '/index.html',
+  '/css/styles.css',
+  '/js/app.js',
+  '/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png'
 ];
 
 self.addEventListener('install', (e)=>{
-  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).then(()=>self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)));
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', (e)=>{
   e.waitUntil(
     caches.keys().then(keys=>Promise.all(keys.map(k=> k===CACHE?null:caches.delete(k))))
-      .then(()=>self.clients.claim())
   );
+  self.clients.claim();
 });
 
 self.addEventListener('fetch', (e)=>{
   const req = e.request;
+  const url = new URL(req.url);
+
+  // Only GET
   if (req.method !== 'GET') return;
+
+  // HTML -> network first, fallback to cache
+  if (req.headers.get('accept')?.includes('text/html')) {
+    e.respondWith(
+      fetch(req).then(res=>{
+        const copy = res.clone();
+        caches.open(CACHE).then(c=>c.put(req, copy)).catch(()=>{});
+        return res;
+      }).catch(()=> caches.match(req).then(r=> r || caches.match('/index.html')))
+    );
+    return;
+  }
+
+  // others -> cache first
   e.respondWith(
-    caches.match(req).then(cached=>{
-      const fetchPromise = fetch(req).then(netRes=>{
-        const copy = netRes.clone();
-        caches.open(CACHE).then(c=> c.put(req, copy)).catch(()=>{});
-        return netRes;
-      }).catch(()=> cached || Promise.reject('offline'));
-      return cached || fetchPromise;
-    })
+    caches.match(req).then(found=> found || fetch(req).then(res=>{
+      const copy = res.clone();
+      caches.open(CACHE).then(c=>c.put(req, copy)).catch(()=>{});
+      return res;
+    }))
   );
 });
