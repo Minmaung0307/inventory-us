@@ -106,6 +106,26 @@ function downscaleImage(dataURL, maxDim=1280, quality=0.82){
   });
 }
 
+// Keep images comfortably small before saving (and far below RTDB/string limits)
+async function shrinkDataURLIfNeeded(dataURL, maxBytes = 1.5 * 1024 * 1024) {
+  try {
+    if (!dataURL || typeof dataURL !== 'string' || !dataURL.startsWith('data:')) return dataURL || '';
+    if (dataURL.length <= maxBytes) return dataURL;
+
+    // progressively shrink (dimension + quality)
+    let out = await downscaleImage(dataURL, 1280, 0.82);
+    if (out.length > maxBytes) out = await downscaleImage(out, 1024, 0.80);
+    if (out.length > maxBytes) out = await downscaleImage(out,  800, 0.75);
+
+    // absolute safety valve (should never trigger after the steps above)
+    if (out.length > 9.5 * 1024 * 1024) out = '';
+
+    return out;
+  } catch {
+    return dataURL || '';
+  }
+}
+
 /* =========================
    Firebase bootstrap (guarded)
    ========================= */
@@ -887,12 +907,10 @@ function attachImageUpload(fileSel, textSel){
   f.onchange=()=>{ const file=f.files&&f.files[0]; if(!file) return;
     const reader=new FileReader();
     reader.onload=async ()=>{
-      let dataURL = reader.result;
-      if (typeof dataURL === 'string'){
-        // auto-downscale if large (approx >1.5MB)
-        if (dataURL.length > 1.5*1024*1024) dataURL = await downscaleImage(String(dataURL), 1280, 0.82);
-      }
-      t.value=String(dataURL||'');
+      let dataURL = String(reader.result || '');
+      // always shrink if needed (applies to both Inventory and Products)
+      dataURL = await shrinkDataURLIfNeeded(dataURL, 1.5 * 1024 * 1024);
+      t.value = dataURL;
     };
     reader.readAsDataURL(file);
   };
@@ -1036,23 +1054,54 @@ function wireProducts(){
     $('#prod-type').value=''; $('#prod-ingredients').value=''; $('#prod-instructions').value=''; $('#prod-img').value='';
     attachImageUpload('#prod-imgfile','#prod-img');
   });
+
   const saveBtn=$('#save-prod');
   if (saveBtn && !saveBtn.__wired){
     saveBtn.__wired=true;
-    saveBtn.addEventListener('click', ()=>{
+    saveBtn.addEventListener('click', async ()=>{
       if(saveBtn.dataset.busy) return; saveBtn.dataset.busy='1';
-      if(!canAdd()) { notify('No permission','warn'); return saveBtn.dataset.busy=''; }
+      if(!canAdd()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; }
+
       const items=load('products',[]);
       const id=$('#prod-id').value || ('p_'+Date.now());
-      const obj={ id, name:$('#prod-name').value.trim(), barcode:$('#prod-barcode').value.trim(),
-        price:parseFloat($('#prod-price').value||'0'), type:$('#prod-type').value.trim(),
-        ingredients:$('#prod-ingredients').value.trim(), instructions:$('#prod-instructions').value.trim(),
-        img:($('#prod-img').value||'').trim() };
-      if(!obj.name){ notify('Name required','warn'); return saveBtn.dataset.busy=''; }
-      const i=items.findIndex(x=>x.id===id); if(i>=0){ if(!canEdit()) { notify('No permission','warn'); return saveBtn.dataset.busy=''; } items[i]=obj; } else items.push(obj);
-      save('products', items); closeModal('m-prod'); notify('Saved'); renderApp(); saveBtn.dataset.busy='';
+      let imgRaw = ($('#prod-img').value || '').trim();
+
+      // 🔧 NEW: shrink even if user pasted a huge data URL
+      if (imgRaw && imgRaw.startsWith('data:')) {
+        imgRaw = await shrinkDataURLIfNeeded(imgRaw, 1.5 * 1024 * 1024);
+      }
+
+      const obj={
+        id,
+        name:$('#prod-name').value.trim(),
+        barcode:$('#prod-barcode').value.trim(),
+        price:parseFloat($('#prod-price').value||'0'),
+        type:$('#prod-type').value.trim(),
+        ingredients:$('#prod-ingredients').value.trim(),
+        instructions:$('#prod-instructions').value.trim(),
+        img: imgRaw
+      };
+
+      if(!obj.name){ notify('Name required','warn'); saveBtn.dataset.busy=''; return; }
+
+      const i=items.findIndex(x=>x.id===id);
+      if(i>=0){
+        if(!canEdit()) { notify('No permission','warn'); saveBtn.dataset.busy=''; return; }
+        items[i]=obj;
+      } else {
+        items.push(obj);
+      }
+
+      // Save locally and (if enabled) to cloud; cloud will auto-trim overly large images again
+      save('products', items);
+
+      closeModal('m-prod');
+      notify('Saved');
+      renderApp();
+      saveBtn.dataset.busy='';
     });
   }
+
   if (!sec.__wired){
     sec.__wired=true;
     sec.addEventListener('click',(e)=>{
