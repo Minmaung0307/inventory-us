@@ -16,11 +16,10 @@
   --font-scale:100%;
   --radius:14px;
   --shadow:0 6px 24px rgba(0,0,0,.25);
-  --sidebar-pad: 10px;   /* NEW: extra inner padding */
-  --nav-left-pad: 18px;  /* NEW: more space from the left edge */
 }
 
 html,body{ height:100% }
+html{ scrollbar-gutter: stable both-edges; } /* prevent layout “shake” on scroll on/off */
 body{
   margin:0;
   background:var(--bg);
@@ -49,27 +48,23 @@ body{
   border-right:1px solid var(--card-border);
   position:sticky; top:0; height:100vh; overflow:auto;
   box-shadow: var(--shadow);
-  padding-left: var(--sidebar-pad); /* NEW: comfort gutter */
 }
-.brand{
-  display:flex; gap:10px; align-items:center;
-  padding:14px var(--nav-left-pad) 10px var(--nav-left-pad); /* NEW: symmetric padding */
-}
+.brand{ display:flex; gap:10px; align-items:center; padding:14px 16px 10px }
 .logo{ width:34px; height:34px; display:grid; place-items:center; background:#0e1420; border:1px solid var(--card-border); border-radius:10px }
 .title{ font-weight:800 }
 
-.menu-caption, .links-caption{
+/* captions aligned + uppercase */
+.menu-caption, .links-caption, .social-caption{
   font-size:11px; letter-spacing:.06em; color:var(--muted);
-  padding:8px var(--nav-left-pad) 6px var(--nav-left-pad);
-  text-transform:uppercase
+  padding:8px 16px 6px; text-transform:uppercase
 }
 
+/* nav / links spacing & left padding */
 .nav .item, .links .item{
-  display:flex; align-items:center; gap:10px;
-  padding:10px 14px 10px var(--nav-left-pad); /* NEW: more left padding */
-  cursor:pointer; transition: background .15s ease;
-  border-left:3px solid transparent; border-radius:10px; /* rounded for nicer hitbox */
-  outline: none;
+  display:flex; align-items:center; gap:12px;
+  padding:12px 18px; cursor:pointer;
+  transition: background .15s ease;
+  border-left:4px solid transparent;
 }
 .nav .item i, .links .item i{ font-size:18px }
 
@@ -79,10 +74,6 @@ body{
 .nav .item:hover{ background:rgba(14,165,165,.08) }
 .links .item:hover{ background:rgba(255,255,255,.04) }
 
-.nav .item:focus-visible, .links .item:focus-visible{
-  box-shadow:0 0 0 2px rgba(14,165,165,.35);
-}
-
 .nav .item.active{
   background:rgba(14,165,165,.12);
   border-left-color:var(--brand);
@@ -91,6 +82,7 @@ body{
 .topbar{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; position:sticky; top:0; z-index:5; background:linear-gradient(180deg, rgba(0,0,0,.20), transparent) }
 .topbar .left{ display:flex; gap:10px; align-items:center }
 .burger{ display:none; cursor:pointer }
+
 @media (max-width: 920px){
   .app{ grid-template-columns: 1fr }
   .sidebar{ position:fixed; left:-300px; width:260px; z-index:10; transition:left .2s ease }
@@ -185,7 +177,7 @@ textarea.input{ min-height:90px }
 .notification{
   position:fixed; left:50%; transform:translateX(-50%); bottom:16px;
   padding:10px 14px; border-radius:12px; background:#0f172a; color:#fff; border:1px solid #1f2a37;
-  box-shadow: var(--shadow); opacity:0; pointer-events:none; transition: opacity .15s ease; z-index:9999;
+  box-shadow: var(--shadow); opacity:0; pointer-events:none; transition: opacity .15s ease
 }
 .notification.show{ opacity:1 }
 .notification.ok{ background:#0a352f }
@@ -205,7 +197,9 @@ textarea.input{ min-height:90px }
 .modal.active{ opacity:1; pointer-events:auto }
 .modal .dialog{
   width:min(680px, calc(100% - 24px));
-  background:var(--panel); border:1px solid var(--card-border); border-radius:16px; overflow:hidden; box-shadow: var(--shadow)
+  background:var(--panel); border:1px solid var(--card-border); border-radius:16px; overflow:hidden; box-shadow: var(--shadow);
+  max-height:calc(100vh - 80px); /* keep modal from growing page and causing scroll “shake” */
+  overflow:auto;
 }
 .modal .head{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid var(--card-border) }
 .modal .body{ padding:12px }
@@ -221,7 +215,11 @@ textarea.input{ min-height:90px }
 .task-card:active{ cursor:grabbing }
 .lane-row.drop{ outline:2px dashed rgba(255,255,255,.25); outline-offset:4px }
 
-/* socials (sidebar and topbar small) */
+/* socials (sidebar + topbar compact) */
 .socials-row{ display:flex; gap:8px; padding:10px 12px 14px }
-.socials-row a{ color:#ddd; border:1px solid var(--card-border); width:34px; height:34px; display:grid; place-items:center; border-radius:9px }
+.socials-row a{ color:#ddd; border:1px solid var(--card-border); width:34px; height:34px; display:grid; place-items:center; border-radius:9px; text-decoration:none }
 .socials-row a:hover{ background:rgba(255,255,255,.04) }
+
+.socials-compact{ display:flex; gap:8px; align-items:center }
+.socials-compact a{ color:var(--text); border:1px solid var(--card-border); width:30px; height:30px; display:grid; place-items:center; border-radius:9px; text-decoration:none }
+.socials-compact a:hover{ background:rgba(255,255,255,.06) }

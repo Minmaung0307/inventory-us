@@ -18,8 +18,47 @@ function tenantKey(){
   return 'anon:'; // before login
 }
 function kscope(k){ return tenantKey() + k; }
+
+/* ---- sanitize payload for cloud (avoid RTDB 10MB errors) ---- */
+function sanitizeForCloud(key, val){
+  try{
+    const MAX_BYTES = 7.5 * 1024 * 1024; // keep well under 10MB limit
+    const size = (x)=> (JSON.stringify(x)||'').length;
+
+    if (size(val) <= MAX_BYTES) return val;
+
+    const stripImgs = (arr)=> arr.map(it=>{
+      const o={...it};
+      if (typeof o.img === 'string' && o.img.startsWith('data:') && o.img.length > 200000) o.img = ''; // strip big inline images
+      return o;
+    });
+
+    let payload = val;
+    if (Array.isArray(payload) && (key==='products'||key==='inventory'||key==='posts'||key==='users')){
+      payload = stripImgs(payload);
+    } else if (key==='products' || key==='inventory') {
+      payload = stripImgs([payload]);
+      payload = payload[0];
+    }
+
+    if (size(payload) > MAX_BYTES){
+      // last resort: skip sync (but keep local)
+      notify('Cloud copy trimmed or skipped (payload too large). Local copy kept.', 'warn');
+    }
+    return payload;
+  }catch{ return val; }
+}
+
 function load(k, f){ return safeJSON(localStorage.getItem(kscope(k)), f); }
-function save(k, v){ try{ localStorage.setItem(kscope(k), JSON.stringify(v)); }catch{} try{ if (cloud.isOn() && auth && auth.currentUser) cloud.saveKV(k, v); }catch{} }
+function save(k, v){
+  try{ localStorage.setItem(kscope(k), JSON.stringify(v)); }catch{}
+  try{
+    if (cloud.isOn() && auth && auth.currentUser) {
+      const sanitized = sanitizeForCloud(k, v);
+      cloud.saveKV(k, sanitized);
+    }
+  }catch{}
+}
 function notify(msg,type='ok'){ const n=$('#notification'); if(!n) return; n.textContent=msg; n.className=`notification show ${type}`; setTimeout(()=>{ n.className='notification'; },2400); }
 
 /* ---------- Theme (robust) ---------- */
@@ -46,14 +85,35 @@ function applyTheme(){
 }
 applyTheme();
 
+/* ---------- Image downscale helper (reduce huge base64) ---------- */
+function downscaleImage(dataURL, maxDim=1280, quality=0.82){
+  return new Promise((resolve)=>{
+    try{
+      const img = new Image();
+      img.onload = ()=>{
+        const w=img.width, h=img.height;
+        const scale = Math.min(1, maxDim/Math.max(w,h));
+        const nw = Math.round(w*scale), nh = Math.round(h*scale);
+        const cv = document.createElement('canvas'); cv.width=nw; cv.height=nh;
+        const ctx=cv.getContext('2d'); ctx.drawImage(img,0,0,nw,nh);
+        // Prefer JPEG to keep size small
+        const out = cv.toDataURL('image/jpeg', quality);
+        resolve(out && out.length < dataURL.length ? out : dataURL);
+      };
+      img.onerror = ()=> resolve(dataURL);
+      img.src = dataURL;
+    }catch{ resolve(dataURL); }
+  });
+}
+
 /* =========================
    Firebase bootstrap (guarded)
    ========================= */
+// --- Firebase safe references (do NOT re-initialize if index.html did) ---
 const firebaseConfig = window.__FIREBASE_CONFIG || null;
-if (!window.firebase || !firebase.initializeApp) {
+if (!firebase || !firebase.initializeApp) {
   console.error("Firebase SDK missing. Check script tags in index.html");
 }
-// Guard double init
 if (firebase && firebase.apps && firebase.apps.length === 0 && firebaseConfig) {
   firebase.initializeApp(firebaseConfig);
 }
@@ -62,22 +122,31 @@ if (firebase && firebase.apps && firebase.apps.length === 0 && firebaseConfig) {
 const auth = firebase.auth();
 const db   = firebase.database();
 
-/* EXTRA: auth persistence fallback to reduce IndexedDB errors (Safari Private etc.) */
+/* ---------- Auth persistence: avoid IndexedDB issues ---------- */
+function __checkIndexedDB(){
+  return new Promise(res=>{
+    try{
+      const req = indexedDB.open('__inv_test__');
+      req.onsuccess = ()=>{ try{ req.result.close(); indexedDB.deleteDatabase('__inv_test__'); }catch{}; res(true); };
+      req.onerror   = ()=> res(false);
+    }catch{ res(false); }
+  });
+}
 (async ()=>{
   try{
-    await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-  }catch{
-    try{ await auth.setPersistence(firebase.auth.Auth.Persistence.SESSION); }catch{}
-  }
+    if (auth && auth.setPersistence){
+      const idbOK = await __checkIndexedDB();
+      const mode = idbOK ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION;
+      await auth.setPersistence(mode);
+    }
+  }catch(e){ console.warn('[auth] persistence set failed', e); }
 })();
 
 /* =========================
    Roles / session / cloud
    ========================= */
 const ROLES = ['user','associate','manager','admin'];
-/* IMPORTANT: add your admin email(s) here so you get full permissions */
 const SUPER_ADMINS = ['admin@inventory.com','minmaung0307@gmail.com'];
-
 function role(){ return (session?.role)||'user'; }
 function canAdd(){ return ['admin','manager','associate'].includes(role()); }
 function canEdit(){ return ['admin','manager'].includes(role()); }
@@ -90,11 +159,78 @@ const cloud = (function(){
   const setOn = v => { try{ localStorage.setItem(kscope('_cloudOn'), JSON.stringify(!!v)); }catch{} };
   const uid   = ()=> auth && auth.currentUser ? auth.currentUser.uid : null;
   const pathFor = k => db.ref(`tenants/${uid()}/kv/${k}`);
-  async function saveKV(key, val){ if (!on() || !uid() || !db) return; await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP }); }
-  async function pullAllOnce(){ if (!uid() || !db) return; const snap = await db.ref(`tenants/${uid()}/kv`).get(); if (!snap.exists()) return; const all=snap.val()||{}; Object.values(all).forEach(row=>{ if(row && row.key && 'val' in row) localStorage.setItem(kscope(row.key), JSON.stringify(row.val)); }); }
-  function subscribeAll(){ if (!uid() || !db) return; unsubscribeAll(); CLOUD_KEYS.forEach(key=>{ const ref=pathFor(key); ref.on('value',(snap)=>{ const d=snap.val(); if(!d) return; const curr = load(key,null); if (JSON.stringify(curr)!==JSON.stringify(d.val)){ localStorage.setItem(kscope(key), JSON.stringify(d.val)); if (key==='_theme2') applyTheme(); renderApp(); } }); liveRefs.push({ref}); }); }
+
+  async function saveKV(key, val){
+    if (!on() || !uid() || !db) return;
+    try{
+      // final safety: skip if still too large for RTDB
+      const bytes = (JSON.stringify(val)||'').length;
+      if (bytes > 9.5*1024*1024){
+        console.warn('[cloud] skip push: payload too large for RTDB', key, bytes);
+        notify('Cloud sync skipped (data too large). Kept locally.', 'warn');
+        return;
+      }
+      await pathFor(key).set({ key, val, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+    }catch(e){
+      console.warn('[cloud] saveKV failed', e);
+      notify(e?.message || 'Cloud sync failed', 'warn');
+    }
+  }
+
+  async function pullAllOnce(){
+    if (!uid() || !db) return;
+    const snap = await db.ref(`tenants/${uid()}/kv`).get();
+    if (!snap.exists()) return;
+    const all=snap.val()||{};
+    Object.values(all).forEach(row=>{
+      if(row && row.key && 'val' in row){
+        let incoming = row.val;
+        const curr = load(row.key, null);
+
+        // Merge back full local images if cloud copy is trimmed
+        if (Array.isArray(incoming) && Array.isArray(curr) && (row.key==='products'||row.key==='inventory')){
+          const byId = Object.fromEntries(curr.map(x=>[x.id, x]));
+          incoming = incoming.map(x=>{
+            const local=byId[x.id];
+            if (local && (!x.img || x.img==='') && local.img) return {...x, img: local.img};
+            return x;
+          });
+        }
+
+        localStorage.setItem(kscope(row.key), JSON.stringify(incoming));
+      }
+    });
+  }
+
+  function subscribeAll(){
+    if (!uid() || !db) return; unsubscribeAll();
+    CLOUD_KEYS.forEach(key=>{
+      const ref=pathFor(key);
+      ref.on('value',(snap)=>{
+        const d=snap.val(); if(!d) return;
+        const curr = load(key,null);
+        let incoming = d.val;
+
+        if (Array.isArray(incoming) && Array.isArray(curr) && (key==='products'||key==='inventory')){
+          const byId = Object.fromEntries(curr.map(x=>[x.id, x]));
+          incoming = incoming.map(x=>{
+            const local=byId[x.id];
+            if (local && (!x.img || x.img==='') && local.img) return {...x, img: local.img};
+            return x;
+          });
+        }
+
+        if (JSON.stringify(curr)!==JSON.stringify(incoming)){
+          localStorage.setItem(kscope(key), JSON.stringify(incoming));
+          if (key==='_theme2') applyTheme();
+          renderApp();
+        }
+      });
+      liveRefs.push({ref});
+    });
+  }
   function unsubscribeAll(){ liveRefs.forEach(({ref})=>{ try{ref.off();}catch{} }); liveRefs=[]; }
-  async function pushAll(){ if (!uid() || !db) return; for(const k of CLOUD_KEYS){ const v=load(k,null); if (v!==null && v!==undefined) await saveKV(k,v); } }
+  async function pushAll(){ if (!uid() || !db) return; for(const k of CLOUD_KEYS){ const v=load(k,null); if (v!==null && v!==undefined) await saveKV(k, sanitizeForCloud(k, v)); } }
   async function enable(){ if (!uid()) throw new Error('Sign in first.'); setOn(true); try{ await firebase.database().goOnline(); }catch{} await pullAllOnce(); await pushAll(); subscribeAll(); }
   async function disable(){ setOn(false); unsubscribeAll(); try{ await firebase.database().goOffline(); }catch{} }
   return { isOn:on, enable, disable, saveKV, pullAllOnce, subscribeAll, pushAll };
@@ -148,6 +284,7 @@ if (auth && typeof auth.onAuthStateChanged === "function") {
     catch (err) { console.error("[auth] crashed:", err); notify(err?.message || "Render failed","danger"); showRescue(err); }
   });
 } else {
+  // Fallback if Firebase isn’t present: render local mode
   try {
     session = load('session', null);
     if (session && session.authMode === 'local') {
@@ -244,15 +381,15 @@ function renderSidebar(active='home'){
 
       <h6 class="menu-caption">Menu</h6>
       <div class="nav">
-        ${links.map(l=>`<div class="item ${active===l.route?'active':''}" data-route="${l.route}" tabindex="0"><i class="${l.icon}"></i><span>${l.label}</span></div>`).join('')}
+        ${links.map(l=>`<div class="item ${active===l.route?'active':''}" data-route="${l.route}"><i class="${l.icon}"></i><span>${l.label}</span></div>`).join('')}
       </div>
 
       <h6 class="links-caption">Links</h6>
       <div class="links">
-        ${pages.map(p=>`<div class="item" data-route="${p.route}" tabindex="0"><i class="${p.icon}"></i><span>${p.label}</span></div>`).join('')}
+        ${pages.map(p=>`<div class="item" data-route="${p.route}"><i class="${p.icon}"></i><span>${p.label}</span></div>`).join('')}
       </div>
 
-      <h6>Social</h6>
+      <h6 class="social-caption">SOCIAL</h6>
       <div class="socials-row">
         <a href="https://youtube.com"  target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
         <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
@@ -264,7 +401,7 @@ function renderSidebar(active='home'){
 }
 function renderTopbar(){
   const socialsCompact = `
-    <div class="socials-compact" style="display:flex;gap:8px;align-items:center">
+    <div class="socials-compact">
       <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
       <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
       <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
@@ -288,12 +425,6 @@ function renderTopbar(){
 document.addEventListener('click', (e)=>{
   const item = e.target.closest('.sidebar .item[data-route]');
   if (!item) return; go(item.getAttribute('data-route')); closeSidebar();
-});
-document.addEventListener('keydown',(e)=>{
-  if (e.key==='Enter'){
-    const item = e.target.closest('.sidebar .item[data-route]');
-    if (item){ go(item.getAttribute('data-route')); closeSidebar(); }
-  }
 });
 document.addEventListener('click', (e)=>{
   const btn = e.target.closest('[data-close]'); if (!btn) return;
@@ -475,6 +606,7 @@ function renderLogin(){
     const btn   = $('#btnLogin');
     if (!email || !pass) return notify('Enter email & password','warn');
 
+    // Local demo admin fallback
     if (email === DEMO_ADMIN_EMAIL.toLowerCase() && pass === DEMO_ADMIN_PASS){
       localLogin(email, pass); return;
     }
@@ -486,10 +618,6 @@ function renderLogin(){
       setTimeout(()=>{ if (!document.querySelector('.app')) ensureSessionAndRender(auth.currentUser); }, 600);
       btn.disabled=false; btn.innerHTML=keep;
     }catch(e){
-      // Helpful message for private modes where IndexedDB fails
-      if ((e && String(e).includes('IndexedDB')) || (e && e.code==='auth/internal-error')){
-        notify('Your browser blocked secure storage. Try a normal window or use Local login (demo).','warn');
-      }
       if (localLogin(email, pass)) return;
       notify(e?.message || 'Login failed','danger');
     }
@@ -612,10 +740,7 @@ function wireHome(){
     const list=window.HOT_MUSIC_VIDEOS||[]; if(!list.length) return;
     const i=nextValidIndex(idx); const { id, title:t }=list[i];
     wrap.setAttribute('data-vid-index', String(i)); title.textContent=t||'Hot video'; openYT.href=`https://www.youtube.com/watch?v=${id}`;
-    const options={ /* host omitted -> default is youtube.com (prevents postMessage mismatch) */
-      videoId:id, playerVars:{rel:0,modestbranding:1,playsinline:1},
-      events:{ onError:()=>{ ytBlacklistAdd(id); notify('Video not available. Skipping…','warn'); setVideoByIndex(i+1);} }
-    };
+    const options={ host:'https://www.youtube.com', videoId:id, playerVars:{rel:0,modestbranding:1,playsinline:1,origin:location.origin}, events:{ onError:()=>{ ytBlacklistAdd(id); notify('Video not available. Skipping…','warn'); setVideoByIndex(i+1);} } };
     if(!player){ player = new YT.Player('ytPlayerHost', options); } else { player.loadVideoById(id); }
   }
   loadYT().then(()=>{
@@ -759,7 +884,18 @@ function downloadCSV(filename, rows, headers){
 }
 function attachImageUpload(fileSel, textSel){
   const f=$(fileSel), t=$(textSel); if(!f||!t) return;
-  f.onchange=()=>{ const file=f.files&&f.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{ t.value=reader.result; }; reader.readAsDataURL(file); };
+  f.onchange=()=>{ const file=f.files&&f.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=async ()=>{
+      let dataURL = reader.result;
+      if (typeof dataURL === 'string'){
+        // auto-downscale if large (approx >1.5MB)
+        if (dataURL.length > 1.5*1024*1024) dataURL = await downscaleImage(String(dataURL), 1280, 0.82);
+      }
+      t.value=String(dataURL||'');
+    };
+    reader.readAsDataURL(file);
+  };
 }
 
 function viewInventory(){
@@ -806,7 +942,7 @@ function wireInventory(){
   $('#addInv')?.addEventListener('click', ()=>{
     if(!canAdd()) return notify('No permission','warn');
     openModal('m-inv');
-    $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value=''; $('#inv-type').value='Other';
+    $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value='Other-001'; $('#inv-type').value='Other';
     $('#inv-price').value=''; $('#inv-stock').value=''; $('#inv-threshold').value=''; $('#inv-img').value='';
     attachImageUpload('#inv-imgfile','#inv-img');
   });
