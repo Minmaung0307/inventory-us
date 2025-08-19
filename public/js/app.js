@@ -13,32 +13,31 @@ if(!firebase?.initializeApp){ console.error('Firebase SDK missing'); }
 firebase.apps.length||firebase.initializeApp(window.__FIREBASE_CONFIG||{});
 const auth=firebase.auth(), db=firebase.database();
 
-/* ---------- Global state (in-memory only) ---------- */
+/* ---------- Global state ---------- */
 let session=null;          // {uid,email,name,role}
 let route='home';          // current route
-let state={                // always mirrors RTDB
-  settings:{ theme:{mode:'sunrise', size:'medium'} },
+let state={                // mirrors RTDB
+  settings:{ theme:{mode:'sky', size:'medium'} },
   inventory:{}, products:{}, posts:{}, tasks:{}, cogs:{}, users:{}
 };
 
-/* ---------- DB helpers (per-tenant paths) ---------- */
+/* ---------- DB helpers ---------- */
 const path=(p='')=>`tenants/${auth.currentUser?.uid}/${p}`;
 const ref=(p)=>db.ref(path(p));
 const listToArray=(obj={})=>Object.values(obj||{});
-const arrToMap=(arr,key='id')=>Object.fromEntries((arr||[]).map(x=>[x[key],x]));
 
 /* ---------- Theme ---------- */
 const THEMES=[
-  {key:'sunrise',label:'Sunrise (soft orange)'},
+  {key:'sunrise',label:'Sunrise (soft peach)'},
   {key:'sky',label:'Sky (soft blue)'},
   {key:'mint',label:'Mint (soft green)'},
-  {key:'light',label:'Light'},
-  {key:'dark',label:'Dark'}
+  {key:'slate',label:'Slate (neutral)'},
+  {key:'midnight',label:'Midnight (dark)'}
 ];
 const FONT_SIZES=[{key:'small',pct:90,label:'Small'},{key:'medium',pct:100,label:'Medium'},{key:'large',pct:112,label:'Large'}];
 
 function applyTheme(){
-  const t=state.settings?.theme||{mode:'sunrise',size:'medium'};
+  const t=state.settings?.theme||{mode:'sky',size:'medium'};
   const sizePct = (FONT_SIZES.find(s=>s.key===t.size)?.pct) ?? 100;
   document.documentElement.setAttribute('data-theme', t.mode);
   document.documentElement.style.setProperty('--font-scale', sizePct+'%');
@@ -46,12 +45,10 @@ function applyTheme(){
 async function saveTheme(mode,size){
   state.settings.theme={mode,size};
   applyTheme();
-  try{
-    await ref('settings/theme').set(state.settings.theme);
-  }catch(e){ notify(e?.message||'Theme save failed','warn'); }
+  try{ await ref('settings/theme').set(state.settings.theme); }catch(e){ notify(e?.message||'Theme save failed','warn'); }
 }
 
-/* ---------- Auth flow ---------- */
+/* ---------- Auth ---------- */
 auth.onAuthStateChanged(async user=>{
   if(!user){ renderLogin(); return; }
   session={ uid:user.uid, email:user.email||'', name:user.displayName||user.email?.split('@')[0]||'User', role:'user' };
@@ -94,25 +91,13 @@ function renderLogin(){
   };
 }
 
-/* ---------- Subscriptions (live sync, cloud-only) ---------- */
+/* ---------- Subscriptions (live sync) ---------- */
 let _subs=[];
 async function subscribeAll(){
-  // Clear old subs
   _subs.forEach(s=>s.off && s.off()); _subs=[];
-  const add=(p,handler)=>{
-    const r=ref(p); r.on('value',snap=>handler(snap.val())); _subs.push(r);
-  };
-  // Ensure collections exist (maps)
-  await Promise.all([
-    ref('inventory').set(firebase.database.ServerValue.TIMESTAMP).then(()=>ref('inventory').remove()).catch(()=>{}),
-    ref('products').set(firebase.database.ServerValue.TIMESTAMP).then(()=>ref('products').remove()).catch(()=>{}),
-    ref('posts').set(firebase.database.ServerValue.TIMESTAMP).then(()=>ref('posts').remove()).catch(()=>{}),
-    ref('tasks').set(firebase.database.ServerValue.TIMESTAMP).then(()=>ref('tasks').remove()).catch(()=>{}),
-    ref('cogs').set(firebase.database.ServerValue.TIMESTAMP).then(()=>ref('cogs').remove()).catch(()=>{}),
-    ref('users').set(firebase.database.ServerValue.TIMESTAMP).then(()=>ref('users').remove()).catch(()=>{}),
-    ref('settings/theme').set(state.settings.theme).catch(()=>{})
-  ]).catch(()=>{});
-  add('settings/theme',v=>{ if(v){ state.settings.theme=v; applyTheme(); renderShellOnly(); }});
+  const add=(p,handler)=>{ const r=ref(p); r.on('value',snap=>handler(snap.val())); _subs.push(r); };
+
+  add('settings/theme',v=>{ if(v){ state.settings.theme=v; } applyTheme(); renderShellOnly(); });
   add('inventory',v=>{ state.inventory=v||{}; renderIf('inventory'); });
   add('products', v=>{ state.products =v||{}; renderIf('products'); });
   add('posts',    v=>{ state.posts    =v||{}; renderIf('dashboard'); });
@@ -121,17 +106,28 @@ async function subscribeAll(){
   add('users',    v=>{ state.users    =v||{}; renderIf('settings'); });
 }
 
-/* ---------- Data ops (all write straight to RTDB) ---------- */
+/* ---------- Data ops ---------- */
 const addOrUpdate=(col,obj)=>ref(`${col}/${obj.id}`).set(obj);
 const removeItem=(col,id)=>ref(`${col}/${id}`).remove();
 
-/* ---------- Shell ---------- */
+/* ---------- Rendering helpers ---------- */
 function renderShellOnly(){
   if(!$('.app')) return;
-  $('#sidebar').outerHTML=renderSidebar(route);
-  $('#topbar').outerHTML=renderTopbar();
+  $('#sidebar')?.replaceWith(htmlToEl(renderSidebar(route)));
+  $('#topbar')?.replaceWith(htmlToEl(renderTopbar()));
   wireShell();
 }
+function renderMain(){
+  const main=$('#main'); if(!main) return;
+  main.innerHTML = safeView(route);
+  wireRoute(route);
+}
+function renderIf(target){
+  // Re-render main if we're looking at the affected route or at Home (which shows counts)
+  if (route===target || route==='home') renderMain();
+}
+function htmlToEl(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
+
 function renderApp(){
   const root=$('#root'); if(!session){ renderLogin(); return; }
   if(!route) route='home';
@@ -147,6 +143,8 @@ function renderApp(){
   wireShell();
   wireRoute(route);
 }
+
+/* ---------- Shell ---------- */
 function renderSidebar(active='home'){
   const links=[
     {route:'home',icon:'ri-home-5-line',label:'Home'},
@@ -199,7 +197,6 @@ function renderTopbar(){
     <div class="backdrop" id="backdrop"></div>`;
 }
 function wireShell(){
-  // nav clicks
   document.querySelectorAll('.sidebar .item[data-route]').forEach(el=>el.onclick=()=>{ route=el.dataset.route; renderApp(); closeSidebar(); });
   $('#btnLogout')?.addEventListener('click', async()=>{ try{ await auth.signOut(); }catch{} });
   $('#btnHome')?.addEventListener('click', ()=>{ route='home'; renderApp(); });
@@ -297,39 +294,78 @@ function viewHome(){
   <div class="card" style="margin-top:12px">
     <div class="card-body">
       <h3 style="margin:0">Welcome 👋</h3>
-      <p style="color:var(--muted)">Use the sidebar, search anything, and manage your business on the go. Mobile-first, cloud-synced.</p>
+      <p style="color:var(--muted)">Use the sidebar, search everything, and manage your business on the go. Mobile-first, cloud-synced.</p>
     </div>
   </div>`;
 }
-function wireHome(){
-  $$('.card.tile').forEach(el=> el.onclick=()=>{ route=el.dataset.go; renderApp(); });
-}
+function wireHome(){ $$('.card.tile').forEach(el=> el.onclick=()=>{ route=el.dataset.go; renderApp(); }); }
 
-/* Dashboard + Posts (no images) */
+/* Dashboard (restored KPI tiles) + Posts */
 function viewDashboard(){
   const posts=listToArray(state.posts).sort((a,b)=>b.createdAt-a.createdAt);
+  const inv=listToArray(state.inventory);
+  const prods=listToArray(state.products);
+  const users=listToArray(state.users);
+  const tasks=listToArray(state.tasks);
+  const lowCt  = inv.filter(i => i.stock <= i.threshold && i.stock > Math.max(1, Math.floor(i.threshold*0.6))).length;
+  const critCt = inv.filter(i => i.stock <= Math.max(1, Math.floor(i.threshold*0.6))).length;
+
+  // Month-to-date from COGS
+  const today=new Date(); const cy=today.getFullYear(), cm=today.getMonth()+1;
+  const py=cm===1?(cy-1):cy, pm=cm===1?12:(cm-1), ly=cy-1, lm=cm;
+  const rows=listToArray(state.cogs);
+  const parseMonthTotal=(y,m)=>rows.filter(r=>{ const p=parseYMD(r.date); return p && p.y===y && p.m===m; }).reduce((s,r)=>s+(+r.grossIncome||0),0);
+  const totalThis=parseMonthTotal(cy,cm), totalPrev=parseMonthTotal(py,pm), totalLY=parseMonthTotal(ly,lm);
+  const pct=(a,b)=> (b>0 ? ((a-b)/b)*100 : (a>0?100:0));
+  const mom=pct(totalThis,totalPrev), yoy=pct(totalThis,totalLY);
+  const fmt=v=>`${v>=0?'+':''}${v.toFixed(1)}%`; const col=v=> v>=0?'var(--ok)':'var(--danger)';
+
   return `
-    <div class="card"><div class="card-body">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <h3 style="margin:0">Posts</h3>
-        <button class="btn" id="addPost"><i class="ri-add-line"></i> Add Post</button>
-      </div>
-      <div class="grid" data-section="posts" style="grid-template-columns:1fr">
-        ${posts.map(p=>`
-          <div class="card" id="${p.id}">
-            <div class="card-body">
-              <div style="display:flex;justify-content:space-between;align-items:center">
-                <div><strong>${p.title}</strong><div style="color:var(--muted);font-size:12px">${new Date(p.createdAt).toLocaleString()}</div></div>
-                <div>
-                  <button class="btn ghost" data-edit="${p.id}"><i class="ri-edit-line"></i></button>
-                  <button class="btn danger" data-del="${p.id}"><i class="ri-delete-bin-6-line"></i></button>
+    <div class="grid cols-4">
+      <div class="card tile" data-go="inventory"><div class="card-body"><div>Total Items</div><h2>${inv.length}</h2></div></div>
+      <div class="card tile" data-go="products"><div class="card-body"><div>Products</div><h2>${prods.length}</h2></div></div>
+      <div class="card tile" data-go="settings"><div class="card-body"><div>Users</div><h2>${users.length}</h2></div></div>
+      <div class="card tile" data-go="tasks"><div class="card-body"><div>Tasks</div><h2>${tasks.length}</h2></div></div>
+    </div>
+
+    <div class="grid cols-4" style="margin-top:12px">
+      <div class="card" style="border-left:4px solid var(--warn); background:rgba(245,158,11,.08)"><div class="card-body"><strong>Low stock</strong><div style="color:var(--muted)">${lowCt}</div></div></div>
+      <div class="card" style="border-left:4px solid var(--danger); background:rgba(239,68,68,.10)"><div class="card-body"><strong>Critical</strong><div style="color:var(--muted)">${critCt}</div></div></div>
+
+      <div class="card"><div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong>Sales (Month-to-Date)</strong>
+          <button class="btn ghost" data-go="cogs"><i class="ri-line-chart-line"></i> Details</button>
+        </div>
+        <div style="margin-top:6px"><span style="color:var(--muted)">This month:</span> <strong>${USD(totalThis)}</strong></div>
+        <div><span style="color:var(--muted)">Prev month:</span> ${USD(totalPrev)} <span style="color:${col(mom)}">${fmt(mom)} MoM</span></div>
+        <div><span style="color:var(--muted)">Same month last year:</span> ${USD(totalLY)} <span style="color:${col(yoy)}">${fmt(yoy)} YoY</span></div>
+      </div></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="margin:0">Posts</h3>
+          <button class="btn" id="addPost"><i class="ri-add-line"></i> Add Post</button>
+        </div>
+        <div class="grid" data-section="posts" style="grid-template-columns:1fr">
+          ${posts.map(p=>`
+            <div class="card" id="${p.id}">
+              <div class="card-body">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <div><strong>${p.title}</strong><div style="color:var(--muted);font-size:12px">${new Date(p.createdAt).toLocaleString()}</div></div>
+                  <div>
+                    <button class="btn ghost" data-edit="${p.id}"><i class="ri-edit-line"></i></button>
+                    <button class="btn danger" data-del="${p.id}"><i class="ri-delete-bin-6-line"></i></button>
+                  </div>
                 </div>
+                <p style="margin-top:8px">${p.body||''}</p>
               </div>
-              <p style="margin-top:8px">${p.body||''}</p>
-            </div>
-          </div>`).join('')}
+            </div>`).join('')}
+        </div>
       </div>
-    </div></div>
+    </div>
     ${postModal()}`;
 }
 function wireDashboard(){
@@ -353,7 +389,7 @@ function wireDashboard(){
   });
 }
 
-/* Inventory (no images) */
+/* Inventory */
 function viewInventory(){
   const items=listToArray(state.inventory);
   return `
@@ -390,8 +426,7 @@ function viewInventory(){
 function wireInventory(){
   $('#export-inventory')?.addEventListener('click',()=> downloadCSV('inventory.csv', listToArray(state.inventory), ['id','name','code','type','price','stock','threshold']));
   $('#addInv')?.addEventListener('click',()=>{ openModal('m-inv'); $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value='Other-001'; $('#inv-type').value='Other'; $('#inv-price').value=''; $('#inv-stock').value=''; $('#inv-threshold').value='';});
-  const saveBtn=$('#save-inv');
-  saveBtn?.addEventListener('click', async()=>{
+  $('#save-inv')?.addEventListener('click', async()=>{
     const id=$('#inv-id').value||('inv_'+Date.now());
     const obj={ id, name:$('#inv-name').value.trim(), code:$('#inv-code').value.trim(), type:$('#inv-type').value.trim(),
       price:parseFloat($('#inv-price').value||'0'), stock:parseInt($('#inv-stock').value||'0'), threshold:parseInt($('#inv-threshold').value||'0') };
@@ -401,8 +436,9 @@ function wireInventory(){
   const sec=document.querySelector('[data-section="inventory"]'); if(!sec) return;
   sec.addEventListener('click', async e=>{
     const btn=e.target.closest('button'); if(!btn) return;
-    const id=btn.dataset.edit||btn.dataset.del||btn.dataset.inc||btn.dataset.dec||btn.dataset['incTh']||btn.dataset['decTh']||btn.getAttribute('data-inc-th')||btn.getAttribute('data-dec-th'); if(!id) return;
-    const items=state.inventory; const it=items[id]; if(btn.dataset.edit){
+    const id=btn.dataset.edit||btn.dataset.del||btn.dataset.inc||btn.dataset.dec||btn.getAttribute('data-inc-th')||btn.getAttribute('data-dec-th'); if(!id) return;
+    const it=state.inventory[id];
+    if(btn.dataset.edit){
       openModal('m-inv'); $('#inv-id').value=it.id; $('#inv-name').value=it.name; $('#inv-code').value=it.code; $('#inv-type').value=it.type||'Other'; $('#inv-price').value=it.price; $('#inv-stock').value=it.stock; $('#inv-threshold').value=it.threshold;
     }else if(btn.dataset.del){
       await removeItem('inventory', id); notify('Deleted');
@@ -417,7 +453,7 @@ function wireInventory(){
   });
 }
 
-/* Products (no images) */
+/* Products */
 function viewProducts(){
   const items=listToArray(state.products);
   return `
@@ -484,9 +520,7 @@ function viewCOGS(){
         <h3 style="margin:0">COGS</h3>
         <div style="display:flex;gap:8px;align-items:center">
           <select id="cogs-year" class="input" style="width:auto">${years.map(yy=>`<option ${yy===selY?'selected':''}>${yy}</option>`).join('')}</select>
-          <select id="cogs-month" class="input" style="width:auto">
-            ${[1,2,3,4,5,6,7,8,9,10,11,12].map(mm=>`<option value="${mm}" ${mm===selM?'selected':''}>${String(mm).padStart(2,'0')}</option>`).join('')}
-          </select>
+          <select id="cogs-month" class="input" style="width:auto">${[1,2,3,4,5,6,7,8,9,10,11,12].map(mm=>`<option value="${mm}" ${mm===selM?'selected':''}>${String(mm).padStart(2,'0')}</option>`).join('')}</select>
           <button class="btn secondary" id="cogs-filter"><i class="ri-filter-2-line"></i> Filter</button>
           <button class="btn ok" id="export-cogs-month"><i class="ri-download-2-line"></i> Export Month</button>
           <button class="btn ok" id="export-cogs-year"><i class="ri-download-2-line"></i> Export Year</button>
@@ -523,7 +557,7 @@ function viewCOGS(){
     ${cogsModal()}`;
 }
 function wireCOGS(){
-  $('#cogs-filter')?.addEventListener('click',()=>{ window.__cogsYear=+$('#cogs-year').value; window.__cogsMonth=+$('#cogs-month').value; renderApp(); });
+  $('#cogs-filter')?.addEventListener('click',()=>{ window.__cogsYear=+$('#cogs-year').value; window.__cogsMonth=+$('#cogs-month').value; renderMain(); });
   $('#addCOGS')?.addEventListener('click',()=>{ openModal('m-cogs'); $('#cogs-id').value=''; $('#cogs-date').value=new Date().toISOString().slice(0,10); ['grossIncome','produceCost','itemCost','freight','delivery','other'].forEach(k=>$('#cogs-'+k).value=''); });
   $('#save-cogs')?.addEventListener('click', async()=>{
     const id=$('#cogs-id').value||('c_'+Date.now());
@@ -543,7 +577,6 @@ function wireCOGS(){
       await removeItem('cogs', id); notify('Deleted');
     }
   });
-  // Exports
   $('#export-cogs-month')?.addEventListener('click',()=>{
     const y=+$('#cogs-year').value, m=+$('#cogs-month').value, rows=listToArray(state.cogs).filter(r=>{ const p=parseYMD(r.date); return p && p.y===y && p.m===m; });
     downloadCSV(`cogs_${y}_${String(m).padStart(2,'0')}.csv`, rows, ['id','date','grossIncome','produceCost','itemCost','freight','delivery','other']);
@@ -574,7 +607,6 @@ function viewTasks(){
       ${lane('done','Done','#10b981')}
     </div>`;
   setTimeout(()=>{
-    // fill lanes
     ['todo','inprogress','done'].forEach(k=>{
       const host=$(`#lane-${k}`); if(!host) return;
       items.filter(t=>t.status===k).forEach(t=>{
@@ -615,12 +647,10 @@ function wireTasks(){
   });
 }
 function setupDnD(){
-  // Cards
   $$('.task-card').forEach(card=>{
     card.addEventListener('dragstart',e=>{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', card.dataset.task); card.classList.add('dragging'); });
     card.addEventListener('dragend',()=> card.classList.remove('dragging'));
   });
-  // Lanes (support empty drop)
   $$('.lane-grid').forEach(grid=>{
     const row=grid.closest('.lane-row'); const lane=row.dataset.lane;
     const show=e=>{ e.preventDefault(); row.classList.add('drop'); e.dataTransfer.dropEffect='move'; };
@@ -634,8 +664,6 @@ function setupDnD(){
       await addOrUpdate('tasks', {...t, status:lane});
     });
   });
-
-  // Touch fallback: tap card cycles status
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
   if(isTouch){
     $$('.task-card').forEach(card=>{
@@ -652,7 +680,7 @@ function setupDnD(){
 /* Settings + Users (no avatars) */
 function viewSettings(){
   const users=listToArray(state.users);
-  const theme=state.settings.theme||{mode:'sunrise',size:'medium'};
+  const theme=state.settings.theme||{mode:'sky',size:'medium'};
   return `
     <div class="grid">
       <div class="card"><div class="card-body">
@@ -691,12 +719,11 @@ function wireSettings(){
   $('#theme-mode')?.addEventListener('change',()=> saveTheme($('#theme-mode').value, $('#theme-size').value));
   $('#theme-size')?.addEventListener('change',()=> saveTheme($('#theme-mode').value, $('#theme-size').value));
 
-  // Users
   $('#addUser')?.addEventListener('click',()=>{ openModal('m-user'); $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value=''; $('#user-role').innerHTML=['user','associate','manager','admin'].map(r=>`<option value="${r}">${r}</option>`).join(''); $('#user-role').value='user'; });
   $('#save-user')?.addEventListener('click', async()=>{
     const email=($('#user-email')?.value||'').trim().toLowerCase(); if(!email) return notify('Email required','warn');
-    const obj={ name:($('#user-name')?.value||email.split('@')[0]).trim(), email, username:($('#user-username')?.value||email.split('@')[0]).trim(), role:($('#user-role').value||'user') };
-    await addOrUpdate('users', {...obj, id:email}); closeModal('m-user'); notify('Saved');
+    const obj={ id:email, name:($('#user-name')?.value||email.split('@')[0]).trim(), email, username:($('#user-username')?.value||email.split('@')[0]).trim(), role:($('#user-role').value||'user') };
+    await addOrUpdate('users', obj); closeModal('m-user'); notify('Saved');
   });
   const table=document.querySelector('[data-section="users"]');
   table?.addEventListener('click', async e=>{
@@ -713,11 +740,11 @@ function wireSettings(){
 
 /* Static pages (enriched) */
 const pageContent={
-  about:`<h3>About</h3><p>Inventory is a lightweight, mobile-first app for stock, products, COGS and tasks. It saves directly to your Firebase Realtime Database so your data is always in sync.</p><ul><li>Cloud-first, no images/videos.</li><li>Soft themes (Sunrise, Sky, Mint, …).</li><li>Exports for COGS by month/year.</li></ul>`,
-  policy:`<h3>Privacy & Data Policy</h3><p>Your data lives in your Firebase project. This app only reads/writes under <code>/tenants/{uid}</code>. You manage access via Firebase Auth and RTDB Security Rules.</p><p><strong>Recommended rule:</strong> allow a signed-in user to read/write only their own tenant path.</p>`,
+  about:`<h3>About</h3><p>Inventory is a lightweight, mobile-first app for stock, products, COGS and tasks. It saves directly to your Firebase Realtime Database so your data is always in sync.</p><ul><li>Cloud-first, no images/videos.</li><li>Soft themes (Sunrise, Sky, Mint, Slate, Midnight).</li><li>Exports for COGS by month/year.</li></ul>`,
+  policy:`<h3>Privacy & Data Policy</h3><p>Your data lives in your Firebase project. This app reads/writes under <code>/tenants/{uid}</code> only. You manage access via Firebase Auth + RTDB Security Rules.</p><p><strong>Suggested rules:</strong> allow the signed-in user to read/write only their own tenant path.</p>`,
   license:`<h3>License</h3><p>MIT License. You can use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies.</p>`,
-  setup:`<h3>Setup Guide</h3><ol><li>Create a Firebase project and enable Email/Password auth.</li><li>Enable Realtime Database and set rules to protect <code>/tenants/{uid}</code>.</li><li>Paste your Firebase config into <code>index.html</code>.</li><li>Deploy to Firebase Hosting (optional).</li></ol>`,
-  guide:`<h3>User Guide</h3><ul><li>Use the left search to find posts, inventory, products, users and COGS.</li><li>Drag & drop tasks between lanes — drops on empty lanes are supported.</li><li>Change theme in Settings (Sunrise/Sky/Mint/Light/Dark).</li><li>Export COGS by month or by year from the COGS page.</li></ul>`,
+  setup:`<h3>Setup Guide</h3><ol><li>Create a Firebase project and enable Email/Password auth.</li><li>Enable Realtime Database (in Native/Realtime mode) and set rules to protect <code>/tenants/{uid}</code>.</li><li>Paste your Firebase config into <code>index.html</code>.</li><li>Deploy to Firebase Hosting (optional).</li></ol>`,
+  guide:`<h3>User Guide</h3><ul><li>Use the left search to find posts, inventory, products, users and COGS.</li><li>Drag & drop tasks between lanes — drops on empty lanes are supported.</li><li>Change theme in Settings (Sunrise/Sky/Mint/Slate/Midnight).</li><li>Export COGS by month or by year from the COGS page.</li></ul>`,
   contact:`<h3>Contact</h3><p>Questions or feedback? Click the button below to email us.</p>
   <a class="btn secondary" id="emailUs"><i class="ri-mail-send-line"></i> Email us</a>
   <p style="color:var(--muted);font-size:12px;margin-top:8px">This opens your email app to <strong>minmaung0307@gmail.com</strong> with helpful context.</p>`
@@ -744,7 +771,6 @@ function viewSearch(){
 
 /* ---------- Wiring per-view ---------- */
 function wireRoute(r){
-  // common link buttons inside main
   document.querySelectorAll('[data-go]').forEach(el=> el.onclick=()=>{ route=el.dataset.go; renderApp(); if(el.dataset.id) setTimeout(()=>scrollIntoViewById(el.dataset.id),80); });
   switch(r){
     case 'home': wireHome(); break;
@@ -758,7 +784,7 @@ function wireRoute(r){
   }
 }
 
-/* ---------- Modals (no image inputs) ---------- */
+/* ---------- Modals ---------- */
 function openModal(id){ $('#'+id)?.classList.add('active'); $('#mb-'+(id.split('-')[1]||'')).classList.add('active'); }
 function closeModal(id){ $('#'+id)?.classList.remove('active'); $('#mb-'+(id.split('-')[1]||'')).classList.remove('active'); }
 
@@ -858,12 +884,7 @@ function downloadCSV(filename, rows, headers){
   }catch(e){ notify('Export failed','danger'); }
 }
 
-/* ---------- Static page after-render hooks ---------- */
-function wirePage(r){ if(r==='contact') wireContact(); }
-
-/* ---------- Boot ---------- */
+/* ---------- Online hints + Boot ---------- */
 window.addEventListener('online', ()=> notify('Back online','ok'));
 window.addEventListener('offline',()=> notify('You are offline','warn'));
-(function boot(){
-  renderLogin(); // auth listener will take over
-})();
+(function boot(){ renderLogin(); })();
