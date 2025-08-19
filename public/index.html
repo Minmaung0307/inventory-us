@@ -1,23 +1,21 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="sunrise">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  />
-  <title>Inventory — Cloud</title>
-  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inventory</title>
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
   <link rel="stylesheet" href="css/styles.css" />
-  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="icons/icon-192.png">
+  <meta name="theme-color" content="#fff3e6" />
 </head>
 <body>
   <div id="root"></div>
   <div id="notification" class="notification"></div>
 
-  <!-- ✅ Fill this with your Firebase project config -->
+  <!-- Firebase (Compat) -->
   <script>
-    // Replace with your config from Firebase console
+    /* ==== Fill these from your Firebase project (RTDB enabled) ==== */
     window.__FIREBASE_CONFIG = {
       apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
         authDomain: "inventory-us.firebaseapp.com",
@@ -29,18 +27,10 @@
         measurementId: "G-L6NRD0B1B6",
     };
   </script>
-
-  <!-- Firebase compat v8 (stable for this SPA) -->
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
   <script src="js/app.js"></script>
-  <script>
-    // Optional SW; non-blocking
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('service-worker.js').catch(()=>{});
-    }
-  </script>
 </body>
 </html>
