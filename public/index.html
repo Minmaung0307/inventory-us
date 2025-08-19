@@ -1,30 +1,47 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="sky" data-font="medium">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Inventory</title>
 
-    <!-- Icons & theme color -->
-    <link rel="icon" href="public-icons/icon-192.png" />
-    <meta name="theme-color" content="#eaf3ff" />
-
-    <!-- Remix Icons -->
+    <!-- Icons -->
     <link
-      href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css"
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="./public-icons/icon-192.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="512x512"
+      href="./public-icons/icon-512.png"
+    />
+    <link rel="apple-touch-icon" href="./public-icons/icon-192.png" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap"
       rel="stylesheet"
     />
 
     <!-- Styles -->
-    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="./css/styles.css" />
   </head>
   <body>
     <div id="root"></div>
     <div id="notification" class="notification"></div>
 
-    <!-- Firebase Config (fill yours) -->
+    <!-- Firebase (compat v9) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
     <script>
-      window.__FIREBASE_CONFIG = {
+      // Provide your config via hosting or paste it here:
+      window.__FIREBASE_CONFIG = window.__FIREBASE_CONFIG || {
         apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
         authDomain: "inventory-us.firebaseapp.com",
         databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
@@ -35,20 +52,6 @@
         measurementId: "G-L6NRD0B1B6",
       };
     </script>
-
-    <!-- Firebase (Compat) -->
-    <script
-      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"
-      defer
-    ></script>
-    <script
-      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"
-      defer
-    ></script>
-    <script
-      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"
-      defer
-    ></script>
 
     <!-- App -->
     <script src="./js/app.js" defer></script>
