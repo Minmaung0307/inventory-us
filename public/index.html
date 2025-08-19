@@ -1,22 +1,31 @@
-<!doctype html>
-<html lang="en" data-theme="sky">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Inventory</title>
-  <link href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="icon" href="icons/icon-192.png">
-  <meta name="theme-color" content="#eaf3ff" />
-</head>
-<body>
-  <div id="root"></div>
-  <div id="notification" class="notification"></div>
+<!DOCTYPE html>
+<html lang="en" data-theme="sky" data-font="medium">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inventory</title>
 
-  <!-- Firebase (Compat) -->
-  <script>
-    window.__FIREBASE_CONFIG = {
-      apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
+    <!-- Icons & theme color -->
+    <link rel="icon" href="public-icons/icon-192.png" />
+    <meta name="theme-color" content="#eaf3ff" />
+
+    <!-- Remix Icons -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/remixicon@4.3.0/fonts/remixicon.css"
+      rel="stylesheet"
+    />
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="public-css/styles.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="notification" class="notification"></div>
+
+    <!-- Firebase Config (fill yours) -->
+    <script>
+      window.__FIREBASE_CONFIG = {
+        apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
         authDomain: "inventory-us.firebaseapp.com",
         databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
         projectId: "inventory-us",
@@ -24,14 +33,24 @@
         messagingSenderId: "685621968644",
         appId: "1:685621968644:web:a88ec978f1ab9b4f49da51",
         measurementId: "G-L6NRD0B1B6",
-    };
-  </script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js" defer></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js" defer></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js" defer></script>
+      };
+    </script>
 
-  <!-- 🔧 IMPORTANT: point to the correct file path and bust cache -->
-  <script src="js/app.js?v=2025-08-19a" defer></script>
-</body>
+    <!-- Firebase (Compat) -->
+    <script
+      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"
+      defer
+    ></script>
+    <script
+      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"
+      defer
+    ></script>
+    <script
+      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"
+      defer
+    ></script>
+
+    <!-- App -->
+    <script src="public-js/app.js?v=2025-08-19b" defer></script>
+  </body>
 </html>
-  
