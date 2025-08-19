@@ -1,40 +1,25 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Inventory</title>
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+  <title>Inventory — Cloud</title>
+  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <meta name="color-scheme" content="light dark" />
+</head>
+<body>
+  <div id="root"></div>
+  <div id="notification" class="notification"></div>
 
-    <!-- App styles -->
-    <link rel="stylesheet" href="css/styles.css" />
-
-    <!-- Remix Icons -->
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
-    />
-
-    <!-- Inter font (optional) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap"
-    />
-
-    <!-- PWA -->
-    <link rel="manifest" href="manifest.webmanifest" />
-    <meta name="theme-color" content="#0ea5a5" />
-
-    <!-- Firebase v8 (namespaced) – must come BEFORE app.js -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-
-    <!-- Provide your Firebase config here (v8 namespaced). Make sure databaseURL is set. -->
-    <script>
-      // 🔧 Replace with your project values
-      window.__FIREBASE_CONFIG = {
-        apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
+  <!-- ✅ Fill this with your Firebase project config -->
+  <script>
+    // Replace with your config from Firebase console
+    window.__FIREBASE_CONFIG = {
+      apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
         authDomain: "inventory-us.firebaseapp.com",
         databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
         projectId: "inventory-us",
@@ -42,28 +27,20 @@
         messagingSenderId: "685621968644",
         appId: "1:685621968644:web:a88ec978f1ab9b4f49da51",
         measurementId: "G-L6NRD0B1B6",
-      };
+    };
+  </script>
 
-      // Initialize once here, **before** app.js runs
-      (function initFirebase() {
-        if (!window.firebase) {
-          console.error("Firebase SDK not loaded");
-          return;
-        }
-        if (firebase.apps && firebase.apps.length === 0) {
-          firebase.initializeApp(window.__FIREBASE_CONFIG);
-        }
-        try {
-          firebase.database().goOnline();
-        } catch {}
-      })();
-    </script>
+  <!-- Firebase compat v8 (stable for this SPA) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
-    <!-- Your app -->
-    <script defer src="js/app.js"></script>
-  </head>
-  <body>
-    <div id="root"></div>
-    <div id="notification" class="notification"></div>
-  </body>
+  <script src="js/app.js"></script>
+  <script>
+    // Optional SW; non-blocking
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js').catch(()=>{});
+    }
+  </script>
+</body>
 </html>
