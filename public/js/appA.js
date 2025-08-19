@@ -223,32 +223,31 @@ const cloud = (function(){
   }
 
   function subscribeAll(){
-    if (!uid() || !db) return; unsubscribeAll();
-    CLOUD_KEYS.forEach(key=>{
-      const ref=pathFor(key);
-      ref.on('value',(snap)=>{
-        const d=snap.val(); if(!d) return;
-        const curr = load(key,null);
-        let incoming = d.val;
-
-        if (Array.isArray(incoming) && Array.isArray(curr) && (key==='products'||key==='inventory')){
-          const byId = Object.fromEntries(curr.map(x=>[x.id, x]));
-          incoming = incoming.map(x=>{
-            const local=byId[x.id];
-            if (local && (!x.img || x.img==='') && local.img) return {...x, img: local.img};
-            return x;
-          });
-        }
-
-        if (JSON.stringify(curr)!==JSON.stringify(incoming)){
-          localStorage.setItem(kscope(key), JSON.stringify(incoming));
-          if (key==='_theme2') applyTheme();
+  if(!uid()) return;
+  CLOUD_KEYS.forEach(key=>{
+    db.ref(pathFor(key)).on('value',
+      (snap)=>{
+        const v = snap.val();
+        if (v === null || v === undefined) {
+          // Just mirror an empty/default locally; DON'T write to RTDB here.
+          if (Array.isArray(state[key])) state[key] = [];
+          else if (key === '_theme2') state[key] = state._theme2 || { mode:'aqua', size:'medium' };
+          else state[key] = null;
+          if (key === '_theme2') applyTheme();
           renderApp();
+          return;
         }
-      });
-      liveRefs.push({ref});
-    });
-  }
+        state[key] = v;
+        if (key === '_theme2') applyTheme();
+        renderApp();
+      },
+      (err)=>{
+        console.warn('[listen]', key, err?.message || err);
+      }
+    );
+  });
+}
+
   function unsubscribeAll(){ liveRefs.forEach(({ref})=>{ try{ref.off();}catch{} }); liveRefs=[]; }
   async function pushAll(){ if (!uid() || !db) return; for(const k of CLOUD_KEYS){ const v=load(k,null); if (v!==null && v!==undefined) await saveKV(k, sanitizeForCloud(k, v)); } }
   async function enable(){ if (!uid()) throw new Error('Sign in first.'); setOn(true); try{ await firebase.database().goOnline(); }catch{} await pullAllOnce(); await pushAll(); subscribeAll(); }
