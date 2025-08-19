@@ -10,15 +10,21 @@
       rel="icon"
       type="image/png"
       sizes="192x192"
-      href="./public-icons/icon-192.png"
+      href="./icons/icon-192.png"
     />
     <link
       rel="icon"
       type="image/png"
       sizes="512x512"
-      href="./public-icons/icon-512.png"
+      href="./icons/icon-512.png"
     />
-    <link rel="apple-touch-icon" href="./public-icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+
+    <!-- Remix Icon (icons used across the app) -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
+      rel="stylesheet"
+    />
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -40,7 +46,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
     <script>
-      // Provide your config via hosting or paste it here:
+      // Provide your config via hosting or paste it here
       window.__FIREBASE_CONFIG = window.__FIREBASE_CONFIG || {
         apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
         authDomain: "inventory-us.firebaseapp.com",
@@ -55,5 +61,16 @@
 
     <!-- App -->
     <script src="./js/app.js" defer></script>
+
+    <!-- (Optional) If you want PWA-ish offline -->
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("./service-worker.js")
+            .catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>

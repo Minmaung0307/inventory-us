@@ -1,12 +1,11 @@
 /* =========================
-   Inventory — No-Images SPA
+   Inventory — No-Image SPA
    ========================= */
 
-/* ---------- Tiny utils ---------- */
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 const USD = (x)=> `$${Number(x||0).toFixed(2)}`;
-function notify(msg,type='show'){ const n=$('#notification'); if(!n) return; n.textContent=msg; n.className=`notification ${type}`; setTimeout(()=> n.className='notification', 2200); }
+function notify(msg){ const n=$('#notification'); if(!n) return; n.textContent=msg; n.className='notification show'; setTimeout(()=> n.className='notification', 2000); }
 
 /* ---------- Firebase bootstrap ---------- */
 const firebaseConfig = window.__FIREBASE_CONFIG || null;
@@ -87,7 +86,7 @@ function wireThemeControls(){
   const mode=$('#theme-mode'), size=$('#theme-size');
   const apply=async ()=>{
     state.theme = { mode: mode.value, size: size.value };
-    applyTheme(state.theme);
+    applyTheme(state.theme);                   // Instant change (no reload)
     await cloudSave('theme', state.theme);
     notify('Theme updated');
   };
@@ -183,33 +182,14 @@ function renderApp(){
   wireRoute(state.route);
   applyTheme(state.theme);
 }
-
-/* ---------- Router ---------- */
-function go(route){ state.route = route; renderApp(); }
-function viewFor(route){
-  switch(route){
-    case 'dashboard': return viewDashboard();
-    case 'inventory': return viewInventory();
-    case 'products':  return viewProducts();
-    case 'cogs':      return viewCOGS();
-    case 'tasks':     return viewTasks();
-    case 'settings':  return viewSettings();
-    case 'about': case 'policy': case 'license': case 'setup': case 'contact': case 'guide':
-      return viewPage(route);
-    default: return viewDashboard();
-  }
-}
 function wireShell(){
   $('#btnLogout')?.addEventListener('click', doLogout);
-
-  // Sidebar links
   document.querySelectorAll('.sidebar .item[data-route]').forEach(el=>{
     el.addEventListener('click', ()=> go(el.getAttribute('data-route')));
   });
-
-  // Search
   hookSearch();
 }
+function go(route){ state.route = route; renderApp(); }
 
 /* ---------- Search ---------- */
 function buildSearchIndex(){
@@ -317,8 +297,8 @@ function viewDashboard(){
                   <p style="margin-top:6px">${p.body}</p>
                 </div>
                 <div>
-                  <button class="btn ghost" data-edit="${p.id}"><i class="ri-edit-line"></i></button>
-                  <button class="btn danger" data-del="${p.id}"><i class="ri-delete-bin-6-line"></i></button>
+                  <button class="btn ghost" data-edit="${p.id}" title="Edit"><i class="ri-edit-line"></i></button>
+                  <button class="btn danger" data-del="${p.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>
                 </div>
               </div>
             </div>`).join('')}
@@ -344,8 +324,7 @@ function wireDashboard(){
       await cloudSave('posts', state.posts); notify('Deleted'); renderApp();
     }
   });
-  const saveBtn=$('#save-post');
-  saveBtn?.addEventListener('click', async ()=>{
+  $('#save-post')?.addEventListener('click', async ()=>{
     const id=$('#post-id').value || ('post_'+Date.now());
     const obj={ id, title:($('#post-title').value||'').trim(), body:($('#post-body').value||'').trim(), createdAt: Date.now() };
     if(!obj.title){ notify('Title required'); return; }
@@ -370,16 +349,16 @@ function viewInventory(){
       </div>
       <div class="table-wrap" data-section="inventory">
         <table class="table">
-          <thead><tr><th>Name</th><th>Code</th><th>Type</th><th>Price</th><th>Stock</th><th>Threshold</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Code</th><th>Type</th><th class="num">Price</th><th>Stock</th><th>Threshold</th><th>Actions</th></tr></thead>
           <tbody>
             ${items.map(it=>`
               <tr id="${it.id}">
-                <td>${it.name}</td><td>${it.code}</td><td>${it.type||'-'}</td><td>${USD(it.price)}</td>
-                <td><button class="btn ghost" data-dec="${it.id}">–</button><span style="padding:0 10px">${it.stock}</span><button class="btn ghost" data-inc="${it.id}">+</button></td>
-                <td><button class="btn ghost" data-dec-th="${it.id}">–</button><span style="padding:0 10px">${it.threshold}</span><button class="btn ghost" data-inc-th="${it.id}">+</button></td>
+                <td>${it.name}</td><td>${it.code}</td><td>${it.type||'-'}</td><td class="num">${USD(it.price)}</td>
+                <td><button class="btn ghost" data-dec="${it.id}" title="Decrease">–</button><span style="padding:0 10px">${it.stock}</span><button class="btn ghost" data-inc="${it.id}" title="Increase">+</button></td>
+                <td><button class="btn ghost" data-dec-th="${it.id}" title="Decrease">–</button><span style="padding:0 10px">${it.threshold}</span><button class="btn ghost" data-inc-th="${it.id}" title="Increase">+</button></td>
                 <td>
-                  <button class="btn ghost" data-edit="${it.id}"><i class="ri-edit-line"></i></button>
-                  <button class="btn danger" data-del="${it.id}"><i class="ri-delete-bin-6-line"></i></button>
+                  <button class="btn ghost" data-edit="${it.id}" title="Edit"><i class="ri-edit-line"></i></button>
+                  <button class="btn danger" data-del="${it.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -430,7 +409,7 @@ function wireInventory(){
   });
 }
 
-/* ---------- Products (with card preview) ---------- */
+/* ---------- Products (with stylish card preview) ---------- */
 function viewProducts(){
   const items=state.products;
   return `
@@ -444,15 +423,15 @@ function viewProducts(){
       </div>
       <div class="table-wrap" data-section="products">
         <table class="table">
-          <thead><tr><th>Item</th><th>Barcode</th><th>Price</th><th>Type</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Item</th><th>Barcode</th><th class="num">Price</th><th>Type</th><th>Actions</th></tr></thead>
           <tbody>
             ${items.map(it=>`
               <tr id="${it.id}">
                 <td><a href="#" class="prod-card-link" data-card="${it.id}">${it.name}</a></td>
-                <td>${it.barcode||''}</td><td>${USD(it.price)}</td><td>${it.type||'-'}</td>
+                <td>${it.barcode||''}</td><td class="num">${USD(it.price)}</td><td>${it.type||'-'}</td>
                 <td>
-                  <button class="btn ghost" data-edit="${it.id}"><i class="ri-edit-line"></i></button>
-                  <button class="btn danger" data-del="${it.id}"><i class="ri-delete-bin-6-line"></i></button>
+                  <button class="btn ghost" data-edit="${it.id}" title="Edit"><i class="ri-edit-line"></i></button>
+                  <button class="btn danger" data-del="${it.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -477,7 +456,11 @@ function wireProducts(){
     if (link){
       e.preventDefault();
       const id = link.getAttribute('data-card'); const it = state.products.find(x=>x.id===id);
-      if(it){ $('#pc-name').textContent=it.name; $('#pc-barcode').textContent=it.barcode||''; $('#pc-price').textContent=USD(it.price); $('#pc-type').textContent=it.type||''; $('#pc-ingredients').textContent=it.ingredients||''; $('#pc-instructions').textContent=it.instructions||''; openModal('m-card'); }
+      if(it){
+        $('#pc-name').textContent=it.name; $('#pc-barcode').textContent=it.barcode||''; $('#pc-price').textContent=USD(it.price);
+        $('#pc-type').textContent=it.type||''; $('#pc-ingredients').textContent=it.ingredients||''; $('#pc-instructions').textContent=it.instructions||'';
+        openModal('m-card');
+      }
       return;
     }
     const btn=e.target.closest('button'); if(!btn) return;
@@ -513,14 +496,15 @@ function wireProducts(){
   });
 }
 
-/* ---------- COGS with month/year tracking & exports ---------- */
+/* ---------- COGS with month/year tracking & right-aligned numbers ---------- */
 function viewCOGS(){
-  // Group by YYYY-MM
   const rows = state.cogs.slice().sort((a,b)=> (a.date>b.date?1:-1));
   const now = new Date(); const y=now.getFullYear(); const m=now.getMonth()+1;
-  const ym = $('#cogs-filter')?.value || `${y}-${String(m).padStart(2,'0')}`;
+  const currentYM = `${y}-${String(m).padStart(2,'0')}`;
+  const selectedYM = $('#cogs-filter')?.value || currentYM;
   const allMonths = [...new Set(rows.map(r=> r.date?.slice(0,7)).filter(Boolean))].sort();
-  const filtered = rows.filter(r=> !ym || r.date?.startsWith(ym));
+  const filtered = rows.filter(r=> !selectedYM || r.date?.startsWith(selectedYM));
+
   const gp = r => (+r.grossIncome||0) - ((+r.produceCost||0)+(+r.itemCost||0)+(+r.other||0));
   const totals = filtered.reduce((a,r)=>({
     grossIncome:a.grossIncome+(+r.grossIncome||0),
@@ -535,9 +519,9 @@ function viewCOGS(){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px">
         <h3 style="margin:0">COGS</h3>
         <div style="display:flex;gap:8px;align-items:center">
-          <select id="cogs-filter" class="input" style="min-width:140px">
-            <option value="">All months</option>
-            ${allMonths.map(mm=>`<option value="${mm}" ${mm===ym?'selected':''}>${mm}</option>`).join('')}
+          <select id="cogs-filter" class="input" style="min-width:160px">
+            ${allMonths.map(mm=>`<option value="${mm}" ${mm===selectedYM?'selected':''}>${mm}</option>`).join('')}
+            ${!allMonths.includes(currentYM) ? `<option value="${currentYM}">${currentYM}</option>` : '' }
           </select>
           <button class="btn ok" id="export-cogs"><i class="ri-download-2-line"></i> Export CSV</button>
           <button class="btn" id="addCOGS"><i class="ri-add-line"></i> Add Row</button>
@@ -546,21 +530,21 @@ function viewCOGS(){
       <div class="table-wrap" data-section="cogs">
         <table class="table">
           <thead><tr>
-            <th>Date</th><th>G-Income</th><th>Produce Cost</th><th>Item Cost</th><th>Other</th><th>G-Profit</th><th>Actions</th>
+            <th>Date</th><th class="num">G-Income</th><th class="num">Produce Cost</th><th class="num">Item Cost</th><th class="num">Other</th><th class="num">G-Profit</th><th>Actions</th>
           </tr></thead>
           <tbody>
             ${filtered.map(r=>`
               <tr id="${r.id}">
-                <td>${r.date}</td><td>${USD(r.grossIncome)}</td><td>${USD(r.produceCost)}</td><td>${USD(r.itemCost)}</td>
-                <td>${USD(r.other)}</td><td>${USD(gp(r))}</td>
+                <td>${r.date}</td><td class="num">${USD(r.grossIncome)}</td><td class="num">${USD(r.produceCost)}</td><td class="num">${USD(r.itemCost)}</td>
+                <td class="num">${USD(r.other)}</td><td class="num">${USD(gp(r))}</td>
                 <td>
-                  <button class="btn ghost" data-edit="${r.id}"><i class="ri-edit-line"></i></button>
-                  <button class="btn danger" data-del="${r.id}"><i class="ri-delete-bin-6-line"></i></button>
+                  <button class="btn ghost" data-edit="${r.id}" title="Edit"><i class="ri-edit-line"></i></button>
+                  <button class="btn danger" data-del="${r.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>
                 </td>
               </tr>`).join('')}
             <tr class="tr-total">
-              <th>Total</th><th>${USD(totals.grossIncome)}</th><th>${USD(totals.produceCost)}</th><th>${USD(totals.itemCost)}</th>
-              <th>${USD(totals.other)}</th><th>${USD(totalProfit)}</th><th></th>
+              <th>Total</th><th class="num">${USD(totals.grossIncome)}</th><th class="num">${USD(totals.produceCost)}</th><th class="num">${USD(totals.itemCost)}</th>
+              <th class="num">${USD(totals.other)}</th><th class="num">${USD(totalProfit)}</th><th></th>
             </tr>
           </tbody>
         </table>
@@ -622,8 +606,8 @@ function viewTasks(){
               <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
                 <div>${t.title}</div>
                 <div>
-                  <button class="btn ghost" data-edit="${t.id}"><i class="ri-edit-line"></i></button>
-                  <button class="btn danger" data-del="${t.id}"><i class="ri-delete-bin-6-line"></i></button>
+                  <button class="btn ghost" data-edit="${t.id}" title="Edit"><i class="ri-edit-line"></i></button>
+                  <button class="btn danger" data-del="${t.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>
                 </div>
               </div>
             </div>`).join('')}
@@ -660,7 +644,7 @@ function wireTasks(){
     await cloudSave('tasks', state.tasks); closeModal('m-task'); notify('Saved'); renderApp();
   });
 
-  // Drag and drop
+  // DnD
   $$('.task-card').forEach(card=>{
     card.setAttribute('draggable','true'); card.style.cursor='grab';
     card.addEventListener('dragstart',(e)=>{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); card.classList.add('dragging'); });
@@ -680,7 +664,7 @@ function wireTasks(){
     });
   });
 
-  // Tap-to-advance on touch
+  // Tap-to-advance (mobile)
   const isTouch='ontouchstart' in window || navigator.maxTouchPoints>0;
   if (isTouch){
     $$('.task-card').forEach(card=>{
@@ -716,8 +700,8 @@ function viewSettings(){
               <tr id="${u.email}">
                 <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
                 <td>
-                  <button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>
-                  <button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button>
+                  <button class="btn ghost" data-edit="${u.email}" title="Edit"><i class="ri-edit-line"></i></button>
+                  <button class="btn danger" data-del="${u.email}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -752,14 +736,70 @@ function wireSettings(){
   });
 }
 
-/* ---------- Static pages ---------- */
+/* ---------- Static pages (fuller content & readable) ---------- */
 const pageContent = {
-  about:  `<h3>About</h3><p style="color:var(--muted)">Inventory is a fast, mobile-first, cloud-saved app for tracking stock, products, costs, and tasks.</p>`,
-  policy: `<h3>Policy</h3><p style="color:var(--muted)">Your data is stored under your Firebase user. Keep your credentials secure. Data writes are scoped to your UID path only.</p>`,
-  license:`<h3>License</h3><p style="color:var(--muted)">MIT — free to use and modify. Attribution appreciated.</p>`,
-  setup:  `<h3>Setup</h3><ol><li>Add your Firebase config in <code>public-index.html</code>.</li><li>Deploy with Firebase Hosting.</li><li>Ensure Realtime Database rules allow <code>tenants/{uid}/kv/*</code> read/write for the signed-in user.</li></ol>`,
-  guide:  `<h3>User Guide</h3><ul><li>Use the sidebar to navigate.</li><li>Search anything with the left search bar.</li><li>Drag tasks between lanes (or tap to advance on mobile).</li></ul>`,
-  contact:`<h3>Contact</h3><p>Questions or feedback?</p><p><a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Inventory%20Support"><i class="ri-mail-send-line"></i> Email us</a></p>`
+  about:  `<div class="prose">
+    <h3>About</h3>
+    <p><strong>Inventory</strong> is a fast, mobile-first app for tracking stock, products, COGS, and tasks.</p>
+    <p>It stores your data securely in <em>Firebase Realtime Database</em> under your own account (per-user namespace). You can export CSVs anytime.</p>
+    <ul>
+      <li>Lightning-fast search across items, products, posts, and users.</li>
+      <li>Clean, distraction-free UI, designed to be usable on phones.</li>
+      <li>Theme & font scaling to keep it readable for everyone.</li>
+    </ul>
+  </div>`,
+  policy: `<div class="prose">
+    <h3>Policy</h3>
+    <p>Your data is written to <code>tenants/{uid}/kv/*</code> and only authenticated users can read/write their own path (configure rules accordingly).</p>
+    <ul>
+      <li>No third-party analytics or cookies beyond Firebase.</li>
+      <li>Export your data at any time via CSV from each section.</li>
+      <li>We recommend enabling 2FA on your Google account.</li>
+    </ul>
+  </div>`,
+  license:`<div class="prose">
+    <h3>License</h3>
+    <p>MIT — do anything you want, just don’t hold the authors liable.</p>
+    <p>Attribution is appreciated if you share a derivative.</p>
+  </div>`,
+  setup:  `<div class="prose">
+    <h3>Setup</h3>
+    <ol>
+      <li>Create a Firebase project and enable <strong>Email/Password</strong> auth.</li>
+      <li>Copy your Firebase config into <code>public/index.html</code>.</li>
+      <li>Set <strong>Realtime Database rules</strong> to restrict to <code>tenants/{uid}</code>:</li>
+    </ol>
+    <pre style="white-space:pre-wrap;background:#0c1117;border:1px solid #1f2937;border-radius:10px;padding:10px;overflow:auto">
+{
+  "rules": {
+    "tenants": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid"
+      }
+    }
+  }
+}
+    </pre>
+    <ol start="4">
+      <li>Deploy with Firebase Hosting.</li>
+      <li>Sign in and start adding items, products, and tasks.</li>
+    </ol>
+  </div>`,
+  guide:  `<div class="prose">
+    <h3>User Guide</h3>
+    <ul>
+      <li>Use the left search to jump straight to anything.</li>
+      <li>Drag tasks between lanes; on mobile, tap a task to advance.</li>
+      <li>In COGS, pick any month to filter and export that period.</li>
+      <li>Change theme & font size in <em>Settings</em> instantly.</li>
+    </ul>
+  </div>`,
+  contact:`<div class="prose">
+    <h3>Contact</h3>
+    <p>We’d love to hear from you.</p>
+    <p><a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Inventory%20Support"><i class="ri-mail-send-line"></i> Email us</a></p>
+  </div>`
 };
 function viewPage(key){ return `<div class="card"><div class="card-body">${pageContent[key]||'<p>Page</p>'}</div></div>`; }
 
@@ -932,7 +972,20 @@ let __lastActivity = Date.now();
 ['click','keydown','mousemove','scroll','touchstart'].forEach(evt=> document.addEventListener(evt, ()=>{ __lastActivity=Date.now(); }, {passive:true}));
 setInterval(()=>{ if(auth.currentUser && Date.now()-__lastActivity > IDLE_MS){ doLogout(); } }, 30000);
 
-/* ---------- Wire current route ---------- */
+/* ---------- Router ---------- */
+function viewFor(route){
+  switch(route){
+    case 'dashboard': return viewDashboard();
+    case 'inventory': return viewInventory();
+    case 'products':  return viewProducts();
+    case 'cogs':      return viewCOGS();
+    case 'tasks':     return viewTasks();
+    case 'settings':  return viewSettings();
+    case 'about': case 'policy': case 'license': case 'setup': case 'contact': case 'guide':
+      return viewPage(route);
+    default: return viewDashboard();
+  }
+}
 function wireRoute(route){
   switch(route){
     case 'dashboard': wireDashboard(); break;
@@ -956,11 +1009,11 @@ async function boot(){
     });
     // Ensure defaults
     state.theme = state.theme || { mode:'sky', size:'medium' };
-    state.users = state.users || [{name:user.displayName||user.email.split('@')[0], email:user.email, username:user.email.split('@')[0], role:'admin'}];
+    state.users = state.users?.length ? state.users : [{name:user.displayName||user.email.split('@')[0], email:user.email, username:user.email.split('@')[0], role:'admin'}];
 
     renderApp();
 
-    // Subscribe
+    // Subscribe live
     subs = cloudSubscribeAll((k,val)=>{
       state[k] = val;
       if (k==='theme') applyTheme(state.theme);
