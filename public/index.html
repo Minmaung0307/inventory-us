@@ -1,32 +1,70 @@
-<!doctype html>
-<html lang="en" data-theme="sky">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Inventory</title>
+<!DOCTYPE html>
+<html lang="en" data-theme="sunrise" data-font="medium">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Inventory — SPA</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./css/styles.css" />
+    <!-- Icons -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
+      rel="stylesheet"
+    />
+    <!-- EmailJS (optional but supported) -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"
+      defer
+    ></script>
+    <!-- Firebase v9 compat (no bundler needed) -->
+    <script
+      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"
+      defer
+    ></script>
+    <script
+      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"
+      defer
+    ></script>
+    <script
+      src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"
+      defer
+    ></script>
 
-  <link rel="icon" sizes="192x192" href="/icons/icon-192.png" />
-  <link rel="icon" sizes="512x512" href="/icons/icon-512.png" />
+    <!-- Your Firebase config (fill these) -->
+    <script>
+      window.__FIREBASE_CONFIG = {
+        apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
+        authDomain: "inventory-us.firebaseapp.com",
+        databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
+        projectId: "inventory-us",
+        storageBucket: "inventory-us.firebasestorage.app",
+        messagingSenderId: "685621968644",
+        appId: "1:685621968644:web:a88ec978f1ab9b4f49da51",
+        measurementId: "G-L6NRD0B1B6",
+      };
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
 
-  <!-- Fonts & Icons -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet"/>
+    <!-- Service worker (optional) -->
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/service-worker.js")
+            .catch(() => {});
+        });
+      }
+    </script>
 
-  <link rel="stylesheet" href="/css/styles.css" />
-</head>
-<body>
-  <div id="root"></div>
-  <div id="notification" class="notification" role="status" aria-live="polite"></div>
-
-  <!-- App (ES module; CSP-friendly) -->
-  <script type="module" src="/js/app.js?v=2025-08-20e"></script>
-
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
-      });
-    }
-  </script>
-</body>
+    <script src="./js/app.js?v=1.0.0" defer></script>
+  </body>
 </html>

@@ -1,1094 +1,1259 @@
-/* eslint-disable */
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js';
-import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  updateProfile, sendPasswordResetEmail, signOut
-} from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js';
-import {
-  getDatabase, ref, get, set, onValue, off
-} from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js';
+/* Inventory SPA — Firestore + EmailJS
+   -----------------------------------------------------
+   Fill your Firebase config in index.html (window.__FIREBASE_CONFIG)
+   Fill EmailJS IDs below to enable sending from Contact page.
+   ----------------------------------------------------- */
 
-/* ---------- Helpers ---------- */
-const $  = (s, r=document) => r.querySelector(s);
-const $$ = (s, r=document) => [...r.querySelectorAll(s)];
-const USD = (x)=> `$${Number(x||0).toFixed(2)}`;
-const ADMIN_EMAILS = ['admin@inventory.com','minmaung0307@gmail.com'];
-const notify = (msg)=>{ const n=$('#notification'); if(!n) return; n.textContent=msg; n.className='notification show'; setTimeout(()=>n.className='notification',2200); };
-const deepEq = (a,b)=> JSON.stringify(a)===JSON.stringify(b);
+(() => {
+  'use strict';
 
-/* ---------- Firebase bootstrap (modular; CSP-safe) ---------- */
-const FIREBASE_CONFIG = window.__FIREBASE_CONFIG || {
-  apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
-        authDomain: "inventory-us.firebaseapp.com",
-        databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
-        projectId: "inventory-us",
-        storageBucket: "inventory-us.firebasestorage.app",
-        messagingSenderId: "685621968644",
-        appId: "1:685621968644:web:a88ec978f1ab9b4f49da51",
-        measurementId: "G-L6NRD0B1B6",
-};
-const app = initializeApp(FIREBASE_CONFIG);
-const auth = getAuth(app);
-const db   = getDatabase(app);
+  /* ---------- EmailJS config (optional) ---------- */
+  const EMAILJS_PUBLIC_KEY = 'WT0GOYrL9HnDKvLUf';     // e.g. 'aBc123...'
+  const EMAILJS_SERVICE_ID = 'service_z9tkmvr';     // e.g. 'service_xxx'
+  const EMAILJS_TEMPLATE_ID = 'template_q5q471f';    // e.g. 'template_xxx'
 
-/* ---------- State ---------- */
-let state = {
-  session: null,
-  route: 'dashboard',
-  posts: [], inventory: [], products: [], tasks: [], cogs: [], users: [],
-  theme: { mode:'sky', size:'medium' },
-  registry: {}
-};
-function uid(){ return state.session?.uid || auth.currentUser?.uid || null; }
-function pathKV(k){ return ref(db, `tenants/${uid()}/kv/${k}`); }
-
-/* ---------- Theme (pure apply + explicit persist on user change) ---------- */
-const THEME_SIZES = [{key:'small',pct:90},{key:'medium',pct:100},{key:'large',pct:112}];
-function applyTheme(theme){
-  const t = theme || state.theme;
-  const pct = (THEME_SIZES.find(s=>s.key===t.size)?.pct) ?? 100;
-  document.documentElement.setAttribute('data-theme', t.mode || 'sky');
-  document.documentElement.style.setProperty('--font-scale', pct + '%');
-}
-async function persistThemeIfChanged(next){
-  if (deepEq(next, state.theme)) return;
-  state.theme = next; applyTheme(next);
-  try{ await set(pathKV('_theme'), { key:'_theme', val: next }); }catch(e){ console.warn('save theme', e); }
-}
-
-/* ---------- Live sync ---------- */
-const CLOUD_KEYS = ['posts','inventory','products','tasks','cogs','users','_theme'];
-let liveRefs = [];
-function stopLiveSync(){
-  liveRefs.forEach(r => off(r));
-  liveRefs = [];
-}
-function startLiveSync(){
-  if (!uid()) return;
-  stopLiveSync();
-  CLOUD_KEYS.forEach(k=>{
-    const r = pathKV(k);
-    onValue(r, snap=>{
-      const row = snap.val();
-      if (!row) return;
-      if (k==='_theme'){ state.theme = row.val || state.theme; applyTheme(state.theme); }
-      else { state[k.replace(/^_/, '')] = row.val || []; }
-      renderApp();
-    });
-    liveRefs.push(r);
-  });
-  onValue(ref(db, `registry/users`), snap=>{ state.registry = snap.val()||{}; renderApp(); });
-}
-
-/* ---------- Roles ---------- */
-async function ensureRoleOnFirstLogin(){
-  if (!uid()) return;
-  const roleRef = ref(db, `userRoles/${uid()}`);
-  const snap = await get(roleRef);
-  if (!snap.exists()){
-    const email = (auth.currentUser?.email||'').toLowerCase();
-    const firstRole = ADMIN_EMAILS.includes(email) ? 'admin' : 'user';
-    try{ await set(roleRef, firstRole); }catch(e){ console.warn('seed role failed', e); }
+  /* ---------- Firebase ---------- */
+  if (!window.firebase || !window.__FIREBASE_CONFIG) {
+    console.error('Firebase SDK or config missing.');
   }
-}
-async function fetchRole(){
-  if (!uid()) return 'user';
-  try{ const s = await get(ref(db, `userRoles/${uid()}`)); return s.exists()? s.val() : 'user'; }
-  catch{ return 'user'; }
-}
-function canAdd(){ return ['admin','manager','associate'].includes(state.session?.role || 'user'); }
-function canEdit(){ return ['admin','manager'].includes(state.session?.role || 'user'); }
-function canDelete(){ return ['admin'].includes(state.session?.role || 'user'); }
+  firebase.initializeApp(window.__FIREBASE_CONFIG);
+  const auth = firebase.auth();
+  const db   = firebase.firestore();
 
-/* ---------- Auto logout (20 min) ---------- */
-const AUTO_LOGOUT_MIN = 20;
-let __lastActivity = Date.now();
-['click','keydown','mousemove','scroll','touchstart'].forEach(evt=> document.addEventListener(evt, ()=>{ __lastActivity=Date.now(); }, {passive:true}));
-setInterval(()=> { if (!auth.currentUser) return; if (Date.now() - __lastActivity > AUTO_LOGOUT_MIN*60*1000) doLogout(); }, 30000);
-
-/* ---------- Sidebar / Topbar / Router ---------- */
-function renderSidebar(active='dashboard'){
-  const links = [
-    { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
-    { route:'inventory', icon:'ri-archive-2-line',           label:'Inventory' },
-    { route:'products',  icon:'ri-store-2-line',             label:'Products' },
-    { route:'cogs',      icon:'ri-money-dollar-circle-line', label:'COGS' },
-    { route:'tasks',     icon:'ri-list-check-2',             label:'Tasks' },
-    { route:'settings',  icon:'ri-settings-3-line',          label:'Settings' }
-  ];
-  const pages = [
-    { route:'about',   icon:'ri-information-line',        label:'About' },
-    { route:'policy',  icon:'ri-shield-check-line',       label:'Policy' },
-    { route:'license', icon:'ri-copyright-line',          label:'License' },
-    { route:'setup',   icon:'ri-guide-line',              label:'Setup Guide' },
-    { route:'contact', icon:'ri-customer-service-2-line', label:'Contact' },
-    { route:'guide',   icon:'ri-book-2-line',             label:'User Guide' },
-  ];
-  return `
-    <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <div class="logo">📦</div>
-        <div class="title">Inventory</div>
-      </div>
-
-      <div class="search-wrap">
-        <label for="globalSearch">Search</label>
-        <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
-        <div id="searchResults" class="search-results"></div>
-      </div>
-
-      <h6>Menu</h6>
-      <div class="nav">
-        ${links.map(l=>`<div class="item ${active===l.route?'active':''}" data-route="${l.route}"><i class="${l.icon}"></i><span>${l.label}</span></div>`).join('')}
-      </div>
-
-      <h6>Links</h6>
-      <div class="links">
-        ${pages.map(p=>`<div class="item" data-route="${p.route}"><i class="${p.icon}"></i><span>${p.label}</span></div>`).join('')}
-      </div>
-
-      <h6>SOCIAL</h6>
-      <div class="socials-compact">
-        <a href="https://youtube.com" target="_blank" title="YouTube"><i class="ri-youtube-fill"></i></a>
-        <a href="https://tiktok.com" target="_blank" title="TikTok"><i class="ri-tiktok-fill"></i></a>
-        <a href="https://twitter.com" target="_blank" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
-        <a href="https://facebook.com" target="_blank" title="Facebook"><i class="ri-facebook-fill"></i></a>
-        <a href="https://instagram.com" target="_blank" title="Instagram"><i class="ri-instagram-line"></i></a>
-      </div>
-    </aside>`;
-}
-function renderTopbar(){
-  return `
-    <div class="topbar">
-      <div class="left"><strong>${(state.route||'dashboard').replace(/^\w/, c=>c.toUpperCase())}</strong></div>
-      <div class="right">
-        <button class="btn secondary" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
-      </div>
-    </div>`;
-}
-function go(route){ state.route = route; renderApp(); }
-function safeView(route){
-  switch(route || 'dashboard'){
-    case 'dashboard': return viewDashboard();
-    case 'inventory': return viewInventory();
-    case 'products':  return viewProducts();
-    case 'cogs':      return viewCOGS();
-    case 'tasks':     return viewTasks();
-    case 'settings':  return viewSettings();
-    case 'about': case 'policy': case 'license': case 'setup': case 'contact': case 'guide': return viewPage(route);
-    default: return viewDashboard();
-  }
-}
-
-/* ---------- Search ---------- */
-function buildSearchIndex(){
-  const posts=state.posts||[], inv=state.inventory||[], prods=state.products||[], cogs=state.cogs||[], users=state.users||[];
-  const pages=[
-    { id:'about',label:'About',section:'Pages',route:'about' },
-    { id:'policy',label:'Policy',section:'Pages',route:'policy' },
-    { id:'license',label:'License',section:'Pages',route:'license' },
-    { id:'setup',label:'Setup Guide',section:'Pages',route:'setup' },
-    { id:'contact',label:'Contact',section:'Pages',route:'contact' },
-    { id:'guide',label:'User Guide',section:'Pages',route:'guide' },
-  ];
-  const ix=[];
-  posts.forEach(p=>ix.push({id:p.id,label:p.title,section:'Posts',route:'dashboard',text:`${p.title} ${p.body}`}));
-  inv.forEach(i=>ix.push({id:i.id,label:i.name,section:'Inventory',route:'inventory',text:`${i.name} ${i.code} ${i.type}`}));
-  prods.forEach(p=>ix.push({id:p.id,label:p.name,section:'Products',route:'products',text:`${p.name} ${p.barcode} ${p.type} ${p.ingredients}`}));
-  cogs.forEach(r=>ix.push({id:r.id,label:r.date,section:'COGS',route:'cogs',text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.other}`}));
-  users.forEach(u=>ix.push({id:u.email,label:u.name,section:'Users',route:'settings',text:`${u.name} ${u.email} ${u.role}`}));
-  pages.forEach(p=>ix.push(p));
-  return ix;
-}
-function searchAll(index,q){
-  const norm=s=>(s||'').toLowerCase();
-  const tokens=norm(q).split(/\s+/).filter(Boolean);
-  return index.map(item=>{
-    const label=norm(item.label), text=norm(item.text||''); let hits=0;
-    const ok = tokens.every(t=>{ const hit = label.includes(t)||text.includes(t); if(hit) hits++; return hit; });
-    const score = ok ? (hits*3 + (label.includes(tokens[0]||'')?2:0)) : 0;
-    return { item, score };
-  }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).map(x=>x.item);
-}
-let __wiredSearchClose=false;
-function hookSidebarInteractions(){
-  const input = $('#globalSearch'), results = $('#searchResults');
-  if (!input || !results) return;
-  const openResult = (r)=>{
-    go(r.route);
-    setTimeout(()=>{ try{ const el=document.getElementById(r.id); if(el) el.scrollIntoView({behavior:'smooth',block:'center'});}catch{} }, 80);
-    results.classList.remove('active');
-    input.value='';
+  /* ---------- App State ---------- */
+  const ADMIN_EMAILS = ['admin@inventory.com', 'minmaung0307@gmail.com'];
+  const state = {
+    user: null,
+    role: 'user',           // user | associate | manager | admin
+    route: 'dashboard',
+    searchQ: '',
+    // Firestore-synced collections (per-tenant)
+    inventory: [],
+    products: [],
+    cogs: [],
+    tasks: [],
+    posts: [],
+    users: [],              // optional tenant-local “staff list”
+    theme: { palette:'sunrise', font:'medium' },
+    unsub: []               // snapshot unsubscribers
   };
-  let timer;
-  input.onkeydown = (e)=>{ if (e.key === 'Enter'){ const q=input.value.trim(); if(!q)return; const out=searchAll(buildSearchIndex(), q); if(out[0]) openResult(out[0]); } };
-  input.oninput = ()=>{
-    clearTimeout(timer);
-    const q=input.value.trim(); if(!q){ results.classList.remove('active'); results.innerHTML=''; return; }
-    timer=setTimeout(()=>{
-      const out=searchAll(buildSearchIndex(), q).slice(0,10);
-      if(!out.length){ results.classList.remove('active'); results.innerHTML=''; return; }
-      results.innerHTML=out.map(r=>`<div class="result" data-route="${r.route}" data-id="${r.id}"><strong>${r.label}</strong><span style="color:var(--muted)"> — ${r.section}</span></div>`).join('');
-      results.classList.add('active');
-      results.querySelectorAll('.result').forEach(row=>{
-        row.onclick=()=> openResult({route:row.getAttribute('data-route'), id:row.getAttribute('data-id')});
+
+  /* ---------- Utilities ---------- */
+  const $  = (s, r=document) => r.querySelector(s);
+  const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+  const fmtUSD = v => `$${Number(v||0).toFixed(2)}`;
+  const notify = (msg, type='ok') => {
+    let n = $('#notification');
+    if (!n) {
+      n = document.createElement('div');
+      n.id = 'notification';
+      n.className = 'notification';
+      document.body.appendChild(n);
+    }
+    n.textContent = msg;
+    n.className = `notification show ${type}`;
+    setTimeout(()=> n.className='notification', 2200);
+  };
+  const canAdd    = () => ['associate','manager','admin'].includes(state.role);
+  const canEdit   = () => ['manager','admin'].includes(state.role);
+  const canDelete = () => ['admin'].includes(state.role);
+
+  const uid = () => auth.currentUser?.uid || null;
+  const tcol = (name) => db.collection('tenants').doc(uid()).collection(name);
+  const tdoc = (name) => db.collection('tenants').doc(uid()).collection('kv').doc(name);
+
+  const setTheme = (palette, font) => {
+    if (palette) state.theme.palette = palette;
+    if (font)    state.theme.font    = font;
+    document.documentElement.setAttribute('data-theme', state.theme.palette);
+    document.documentElement.setAttribute('data-font',  state.theme.font);
+  };
+
+  const idle = {
+    timer:null,
+    MAX: 20*60*1000, // 20 minutes
+    arm(){
+      this.disarm();
+      this.timer = setTimeout(()=> auth.signOut().catch(()=>{}), this.MAX);
+    },
+    disarm(){ if (this.timer){ clearTimeout(this.timer); this.timer=null; } },
+    hook(){
+      ['click','keydown','mousemove','scroll','touchstart'].forEach(evt=>{
+        document.addEventListener(evt, ()=> this.arm(), {passive:true});
       });
-    }, 150);
+      this.arm();
+    }
   };
-  if (!__wiredSearchClose){
-    __wiredSearchClose = true;
-    document.addEventListener('click', (e)=>{
-      const rEl=document.getElementById('searchResults');
-      const iEl=document.getElementById('globalSearch');
-      if (!rEl || !iEl) return;
-      if(!rEl.contains(e.target) && e.target !== iEl) rEl.classList.remove('active');
-    });
+
+  /* ---------- Modal helpers ---------- */
+  function openModal(id){ $('#'+id)?.classList.add('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.add('active'); }
+  function closeModal(id){ $('#'+id)?.classList.remove('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.remove('active'); }
+
+  /* ---------- Router ---------- */
+  const routes = ['dashboard','inventory','products','cogs','tasks','settings','links','search'];
+  function go(route){ state.route = routes.includes(route) ? route : 'dashboard'; render(); }
+
+  /* ---------- Firestore sync ---------- */
+  function clearSnapshots(){
+    state.unsub.forEach(u=>{ try{ u(); }catch{} });
+    state.unsub = [];
   }
-}
+  function syncTenant(){
+    if (!uid()) return;
+    clearSnapshots();
 
-/* ---------- Pages ---------- */
-function viewDashboard(){
-  const posts=state.posts||[], inv=state.inventory||[], prods=state.products||[], users=state.users||[], tasks=state.tasks||[], cogs=state.cogs||[];
-  const lowCt  = inv.filter(i => i.stock <= i.threshold && i.stock > Math.max(1, Math.floor(i.threshold*0.6))).length;
-  const critCt = inv.filter(i => i.stock <= Math.max(1, Math.floor(i.threshold*0.6))).length;
-  return `
-    <div class="grid cols-4 auto">
-      <div class="card tile" data-go="inventory"><div class="card-body"><div>Total Items</div><h2>${inv.length}</h2></div></div>
-      <div class="card tile" data-go="products"><div class="card-body"><div>Products</div><h2>${prods.length}</h2></div></div>
-      <div class="card tile" data-go="settings"><div class="card-body"><div>Users</div><h2>${users.length}</h2></div></div>
-      <div class="card tile" data-go="tasks"><div class="card-body"><div>Tasks</div><h2>${tasks.length}</h2></div></div>
-    </div>
+    // theme (kv)
+    state.unsub.push(tdoc('_theme').onSnapshot(snap=>{
+      const data = snap.data() || {};
+      const palette = data.palette || state.theme.palette;
+      const font    = data.font    || state.theme.font;
+      setTheme(palette, font);
+    }));
 
-    <div class="grid cols-4 auto" style="margin-top:12px">
-      <div class="card" style="border-left:4px solid var(--warn); background:rgba(245,158,11,.08)"><div class="card-body"><strong>Low stock</strong><div style="color:var(--muted)">${lowCt}</div></div></div>
-      <div class="card" style="border-left:4px solid var(--danger); background:rgba(239,68,68,.10)"><div class="card-body"><strong>Critical</strong><div style="color:var(--muted)">${critCt}</div></div></div>
+    const attach = (name, targetKey) => {
+      state.unsub.push(tcol(name).orderBy('createdAt','desc').onSnapshot(s=>{
+        state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
+        if (['dashboard',name].includes(state.route)) render();
+      }));
+    };
+    attach('inventory','inventory');
+    attach('products','products');
+    attach('cogs','cogs');
+    attach('tasks','tasks');
+    attach('posts','posts');
+    attach('users','users');
+  }
+
+  async function saveKVTheme(){
+    try {
+      await tdoc('_theme').set({
+        palette: state.theme.palette,
+        font: state.theme.font,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge:true });
+    } catch (e) {
+      console.warn('[theme save]', e);
+      notify('Could not save theme (still applied locally).','warn');
+    }
+  }
+
+  /* ---------- Search ---------- */
+  function buildIndex(){
+    const ix = [];
+    state.inventory.forEach(i=> ix.push({label:i.name, section:'Inventory', route:'inventory', id:i.id, text:`${i.name} ${i.code} ${i.type}`}));
+    state.products.forEach(p=> ix.push({label:p.name, section:'Products', route:'products', id:p.id, text:`${p.name} ${p.barcode} ${p.type}`}));
+    state.cogs.forEach(r=> ix.push({label:r.date, section:'COGS', route:'cogs', id:r.id, text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.other}`}));
+    state.tasks.forEach(t=> ix.push({label:t.title, section:'Tasks', route:'tasks', id:t.id, text:`${t.title} ${t.status}`}));
+    state.posts.forEach(p=> ix.push({label:p.title, section:'Links', route:'links', id:p.id, text:`${p.title} ${p.body}`}));
+    state.users.forEach(u=> ix.push({label:u.name, section:'Users', route:'settings', id:u.id, text:`${u.name} ${u.email} ${u.role}`}));
+    return ix;
+  }
+  function doSearch(q){
+    const index = buildIndex();
+    const tokens = (q||'').toLowerCase().split(/\s+/).filter(Boolean);
+    return index
+      .map(item=>{
+        const l=item.label.toLowerCase(), t=(item.text||'').toLowerCase();
+        const ok = tokens.every(tok => l.includes(tok)||t.includes(tok));
+        return ok ? {item,score: tokens.length + (l.includes(tokens[0]||'')?1:0)} : null;
+      })
+      .filter(Boolean)
+      .sort((a,b)=>b.score-a.score)
+      .map(x=>x.item)
+      .slice(0,20);
+  }
+
+  /* ---------- Views ---------- */
+  function layout(content){
+    return `
+      <div class="app">
+        <aside class="sidebar">
+          <div class="brand">
+            <div class="logo">📦</div>
+            <div class="title">Inventory</div>
+          </div>
+          <div class="nav">
+            ${[
+              ['dashboard','Dashboard','ri-dashboard-line'],
+              ['inventory','Inventory','ri-archive-2-line'],
+              ['products','Products','ri-store-2-line'],
+              ['cogs','COGS','ri-money-dollar-circle-line'],
+              ['tasks','Tasks','ri-list-check-2'],
+              ['links','Link Pages','ri-links-line'],
+              ['settings','Settings','ri-settings-3-line']
+            ].map(([r,label,icon])=>`
+              <div class="item ${state.route===r?'active':''}" data-route="${r}">
+                <i class="${icon}"></i><span>${label}</span>
+              </div>`).join('')}
+          </div>
+          <div class="footer">
+            <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+            <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+            <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+            <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
+            <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
+          </div>
+        </aside>
+
+        <div>
+          <div class="topbar">
+            <div class="badge"><i class="ri-shield-user-line"></i> ${state.role.toUpperCase()}</div>
+            <div class="search" style="position:relative">
+              <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
+              <div id="searchResults" class="search-results"></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn ghost" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
+            </div>
+          </div>
+          <div class="main" id="main">${content}</div>
+        </div>
+      </div>
+
+      <div class="modal" id="m-modal"><div class="dialog">
+        <div class="head"><strong id="mm-title">Modal</strong><button class="btn ghost" id="mm-close">Close</button></div>
+        <div class="body" id="mm-body"></div>
+        <div class="foot" id="mm-foot"></div>
+      </div></div><div class="modal-backdrop" id="mb-modal"></div>
+    `;
+  }
+
+  function viewLogin(){
+    return `
+      <div class="login-page">
+        <div class="card login-card">
+          <div class="card-body">
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+              <div class="logo">📦</div>
+              <div>
+                <div style="font-size:20px;font-weight:800">Inventory</div>
+                <div style="color:var(--muted)">Sign in to continue</div>
+              </div>
+            </div>
+            <div class="login-grid">
+              <label>Email</label>
+              <input id="li-email" class="input" type="email" placeholder="you@example.com" autocomplete="username" />
+              <label>Password</label>
+              <input id="li-pass" class="input" type="password" placeholder="••••••••" autocomplete="current-password" />
+              <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
+              <div style="display:flex;justify-content:space-between;gap:8px">
+                <button id="link-forgot" class="btn ghost" style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</button>
+                <button id="link-register" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Sign up</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function viewDashboard(){
+    const lowCt  = state.inventory.filter(i => i.stock <= i.threshold && i.stock > Math.max(1, Math.floor(i.threshold*0.6))).length;
+    const critCt = state.inventory.filter(i => i.stock <= Math.max(1, Math.floor(i.threshold*0.6))).length;
+    const totals = state.cogs.reduce((a,r)=>({
+      grossIncome:a.grossIncome + (+r.grossIncome||0),
+      produceCost:a.produceCost + (+r.produceCost||0),
+      itemCost:a.itemCost + (+r.itemCost||0),
+      freight:a.freight + (+r.freight||0),
+      other:a.other + (+r.other||0)
+    }), {grossIncome:0,produceCost:0,itemCost:0,freight:0,other:0});
+    const gProfit = totals.grossIncome - (totals.produceCost + totals.itemCost + totals.freight + totals.other);
+
+    return `
+      <div class="grid cols-4">
+        <div class="card"><div class="card-body"><div>Inventory</div><h2>${state.inventory.length}</h2></div></div>
+        <div class="card"><div class="card-body"><div>Products</div><h2>${state.products.length}</h2></div></div>
+        <div class="card"><div class="card-body"><div>Tasks</div><h2>${state.tasks.length}</h2></div></div>
+        <div class="card"><div class="card-body"><div>Users</div><h2>${state.users.length}</h2></div></div>
+      </div>
+
+      <div class="grid cols-3">
+        <div class="card"><div class="card-body"><strong>Low stock</strong><div style="color:var(--muted)">${lowCt}</div></div></div>
+        <div class="card"><div class="card-body"><strong>Critical</strong><div style="color:var(--muted)">${critCt}</div></div></div>
+        <div class="card"><div class="card-body"><strong>G-Profit (YTD)</strong><div style="color:var(--muted)">${fmtUSD(gProfit)}</div></div></div>
+      </div>
 
       <div class="card"><div class="card-body">
-        <div class="space-between">
-          <strong>Quick Actions</strong>
-          <div class="flex">
-            <button class="btn ghost" data-go="inventory"><i class="ri-add-line"></i> Add Inventory</button>
-            <button class="btn ghost" data-go="products"><i class="ri-add-line"></i> Add Product</button>
-            <button class="btn ghost" data-go="tasks"><i class="ri-add-line"></i> Add Task</button>
-          </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Posts</h3>
+          ${canAdd()? `<button class="btn" id="addPost"><i class="ri-add-line"></i> Add Post</button>`:''}
         </div>
-      </div></div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="head"><strong>Posts</strong>${canAdd()?`<button class="btn" id="addPost"><i class="ri-add-line"></i> Add Post</button>`:''}</div>
-      <div class="card-body">
-        ${(posts||[]).length? posts.map(p=>`
-          <div class="card" id="${p.id}" style="margin-bottom:10px">
-            <div class="card-body">
-              <div class="space-between">
-                <div><strong>${p.title}</strong><div style="color:var(--muted);font-size:12px">${new Date(p.createdAt).toLocaleString()}</div></div>
-                <div>
-                  ${canEdit()?`<button class="btn ghost" data-edit="${p.id}" data-scope="post"><i class="ri-edit-line"></i></button>`:''}
-                  ${canDelete()?`<button class="btn danger" data-del="${p.id}" data-scope="post"><i class="ri-delete-bin-6-line"></i></button>`:''}
+        <div class="grid" data-section="posts" style="grid-template-columns: 1fr;">
+          ${(state.posts||[]).map(p=>`
+            <div class="card" id="${p.id}">
+              <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+                <div><strong>${p.title}</strong><div style="color:var(--muted);font-size:12px">${new Date(p.createdAt?.toDate?.()||p.createdAt||Date.now()).toLocaleString()}</div></div>
+                <div class="actions">
+                  ${canEdit()? `<button class="btn ghost" data-edit="${p.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
+                  ${canDelete()? `<button class="btn danger" data-del="${p.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>`:''}
                 </div>
               </div>
-              <p style="margin-top:8px">${p.body}</p>
-            </div>
-          </div>`).join('') : `<p style="color:var(--muted)">No posts yet.</p>`}
-      </div>
-    </div>`;
-}
-function wireDashboard(){
-  $('#addPost')?.addEventListener('click', ()=>{ openModal('m-post'); $('#post-id').value=''; $('#post-title').value=''; $('#post-body').value=''; });
-  document.querySelector('.card-body')?.addEventListener('click', (e)=>{
-    const btn=e.target.closest('button'); if(!btn) return;
-    if (btn.dataset.scope!=='post') return;
-    const id = btn.getAttribute('data-edit') || btn.getAttribute('data-del'); if(!id) return;
-    const posts = state.posts.slice();
-    if (btn.hasAttribute('data-edit')){
-      if(!canEdit()) return notify('No permission');
-      const p = posts.find(x=>x.id===id); if(!p) return;
-      openModal('m-post'); $('#post-id').value=p.id; $('#post-title').value=p.title; $('#post-body').value=p.body;
-    } else {
-      if(!canDelete()) return notify('No permission');
-      const next = posts.filter(x=>x.id!==id);
-      state.posts = next;
-      set(pathKV('posts'), {key:'posts', val: next});
-      renderApp();
-    }
-  });
-  $$('.tile[data-go]').forEach(el=> el.addEventListener('click', ()=> go(el.getAttribute('data-go')) ));
-}
-
-function viewInventory(){
-  const items=state.inventory||[];
-  return `
-    <div class="card">
-      <div class="head"><strong>Inventory</strong><div>${canAdd()?`<button class="btn" id="addInv"><i class="ri-add-line"></i> Add Item</button>`:''} <button class="btn ok" id="export-inventory"><i class="ri-download-2-line"></i> Export CSV</button></div></div>
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>Name</th><th>Code</th><th>Type</th><th class="num">Price</th><th class="num">Stock</th><th class="num">Threshold</th><th>Actions</th></tr></thead>
-          <tbody>
-            ${items.map(it=>`
-              <tr id="${it.id}">
-                <td>${it.name}</td><td>${it.code}</td><td>${it.type||'-'}</td><td class="num">${USD(it.price)}</td>
-                <td class="num">${canAdd()? `<button class="btn ghost" data-dec="${it.id}">–</button> <span style="padding:0 10px">${it.stock}</span> <button class="btn ghost" data-inc="${it.id}">+</button>`: it.stock}</td>
-                <td class="num">${canAdd()? `<button class="btn ghost" data-dec-th="${it.id}">–</button> <span style="padding:0 10px">${it.threshold}</span> <button class="btn ghost" data-inc-th="${it.id}">+</button>`: it.threshold}</td>
-                <td>
-                  ${canEdit()? `<button class="btn ghost" data-edit="${it.id}"><i class="ri-edit-line"></i></button>`:''}
-                  ${canDelete()? `<button class="btn danger" data-del="${it.id}"><i class="ri-delete-bin-6-line"></i></button>`:''}
-                </td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-}
-function wireInventory(){
-  $('#export-inventory')?.addEventListener('click', ()=>{
-    const rows=state.inventory||[]; const headers=['id','name','code','type','price','stock','threshold'];
-    const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='inventory.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
-  });
-  $('#addInv')?.addEventListener('click', ()=>{
-    if(!canAdd()) return notify('No permission');
-    openModal('m-inv'); $('#inv-id').value=''; $('#inv-name').value=''; $('#inv-code').value='Other-001'; $('#inv-type').value='Other';
-    $('#inv-price').value=''; $('#inv-stock').value=''; $('#inv-threshold').value='';
-  });
-  document.querySelector('.table')?.addEventListener('click', (e)=>{
-    const btn=e.target.closest('button'); if(!btn) return;
-    const id = btn.getAttribute('data-edit')||btn.getAttribute('data-del')||btn.getAttribute('data-inc')||btn.getAttribute('data-dec')||btn.getAttribute('data-inc-th')||btn.getAttribute('data-dec-th');
-    if(!id) return;
-    const items = state.inventory.slice(); const it = items.find(x=>x.id===id); if(!it && (btn.hasAttribute('data-edit')||btn.hasAttribute('data-del'))) return;
-
-    if(btn.hasAttribute('data-edit')){
-      if(!canEdit()) return notify('No permission');
-      openModal('m-inv'); $('#inv-id').value=it.id; $('#inv-name').value=it.name; $('#inv-code').value=it.code; $('#inv-type').value=it.type||'Other';
-      $('#inv-price').value=it.price; $('#inv-stock').value=it.stock; $('#inv-threshold').value=it.threshold;
-      return;
-    }
-    if(btn.hasAttribute('data-del')){
-      if(!canDelete()) return notify('No permission');
-      const next=items.filter(x=>x.id!==id); state.inventory=next; set(pathKV('inventory'), {key:'inventory', val: next}); renderApp(); return;
-    }
-    if(!canAdd()) return notify('No permission');
-    const t=items.find(x=>x.id===id); if(!t) return;
-    if(btn.hasAttribute('data-inc')) t.stock++;
-    if(btn.hasAttribute('data-dec')) t.stock=Math.max(0,t.stock-1);
-    if(btn.hasAttribute('data-inc-th')) t.threshold++;
-    if(btn.hasAttribute('data-dec-th')) t.threshold=Math.max(0,t.threshold-1);
-    state.inventory=items; set(pathKV('inventory'), {key:'inventory', val: items}); renderApp();
-  });
-}
-
-function viewProducts(){
-  const items=state.products||[];
-  return `
-    <div class="card">
-      <div class="head"><strong>Products</strong><div>${canAdd()?`<button class="btn" id="addProd"><i class="ri-add-line"></i> Add Product</button>`:''} <button class="btn ok" id="export-products"><i class="ri-download-2-line"></i> Export CSV</button></div></div>
-      <div class="table-wrap" data-section="products">
-        <table class="table">
-          <thead><tr><th>Name</th><th>Barcode</th><th class="num">Price</th><th>Type</th><th>Actions</th></tr></thead>
-          <tbody>
-            ${items.map(it=>`
-              <tr id="${it.id}">
-                <td><span class="clicky" data-card="${it.id}">${it.name}</span></td>
-                <td>${it.barcode||''}</td><td class="num">${USD(it.price)}</td><td>${it.type||'-'}</td>
-                <td>
-                  ${canEdit()? `<button class="btn ghost" data-edit="${it.id}"><i class="ri-edit-line"></i></button>`:''}
-                  ${canDelete()? `<button class="btn danger" data-del="${it.id}"><i class="ri-delete-bin-6-line"></i></button>`:''}
-                </td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Product card modal -->
-    <div class="modal-backdrop" id="mb-card"></div>
-    <div class="modal" id="m-card">
-      <div class="dialog">
-        <div class="head"><strong id="pc-name">Product</strong><button class="btn ghost" data-close="m-card">Close</button></div>
-        <div class="body grid cols-2">
-          <div class="grid">
-            <div><strong>Barcode:</strong> <span id="pc-barcode"></span></div>
-            <div><strong>Price:</strong> <span id="pc-price"></span></div>
-            <div><strong>Type:</strong> <span id="pc-type"></span></div>
-          </div>
-          <div class="grid">
-            <div><strong>Ingredients:</strong><div id="pc-ingredients"></div></div>
-            <div><strong>Instructions:</strong><div id="pc-instructions"></div></div>
-          </div>
-        </div>
-      </div>
-    </div>`;
-}
-function wireProducts(){
-  $('#export-products')?.addEventListener('click', ()=>{
-    const rows=state.products||[]; const headers=['id','name','barcode','price','type','ingredients','instructions'];
-    const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='products.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
-  });
-  $('#addProd')?.addEventListener('click', ()=>{
-    if(!canAdd()) return notify('No permission');
-    openModal('m-prod'); $('#prod-id').value=''; $('#prod-name').value=''; $('#prod-barcode').value=''; $('#prod-price').value='';
-    $('#prod-type').value=''; $('#prod-ingredients').value=''; $('#prod-instructions').value='';
-  });
-  document.querySelector('[data-section="products"]')?.addEventListener('click',(e)=>{
-    const card = e.target.closest('.clicky');
-    if (card){
-      const id=card.getAttribute('data-card'); const it=(state.products||[]).find(x=>x.id===id); if(!it) return;
-      $('#pc-name').textContent=it.name; $('#pc-barcode').textContent=it.barcode||''; $('#pc-price').textContent=USD(it.price); $('#pc-type').textContent=it.type||'';
-      $('#pc-ingredients').textContent=it.ingredients||''; $('#pc-instructions').textContent=it.instructions||''; openModal('m-card'); return;
-    }
-    const btn=e.target.closest('button'); if(!btn) return;
-    const id=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
-    const items = state.products.slice();
-    if(btn.hasAttribute('data-edit')){
-      if(!canEdit()) return notify('No permission');
-      const it=items.find(x=>x.id===id); if(!it) return;
-      openModal('m-prod'); $('#prod-id').value=id; $('#prod-name').value=it.name; $('#prod-barcode').value=it.barcode||''; $('#prod-price').value=it.price;
-      $('#prod-type').value=it.type||''; $('#prod-ingredients').value=it.ingredients||''; $('#prod-instructions').value=it.instructions||'';
-    }else{
-      if(!canDelete()) return notify('No permission');
-      const next=items.filter(x=>x.id!==id); state.products=next; set(pathKV('products'), {key:'products', val: next}); renderApp();
-    }
-  });
-}
-
-function viewCOGS(){
-  const rows=state.cogs||[];
-  const gp=r=>(+r.grossIncome||0)-((+r.produceCost||0)+(+r.itemCost||0)+(+r.freight||0)+(+r.other||0));
-  const totals=rows.reduce((a,r)=>({grossIncome:a.grossIncome+(+r.grossIncome||0),produceCost:a.produceCost+(+r.produceCost||0),itemCost:a.itemCost+(+r.itemCost||0),freight:a.freight+(+r.freight||0),other:a.other+(+r.other||0)}),{grossIncome:0,produceCost:0,itemCost:0,freight:0,other:0});
-  const totalProfit=gp(totals);
-  return `
-    <div class="card">
-      <div class="head"><strong>COGS</strong><div>${canAdd()?`<button class="btn" id="addCOGS"><i class="ri-add-line"></i> Add Row</button>`:''} <button class="btn ok" id="export-cogs"><i class="ri-download-2-line"></i> Export CSV</button></div></div>
-      <div class="table-wrap" data-section="cogs">
-        <table class="table">
-          <thead><tr><th>Date</th><th class="num">G-Income</th><th class="num">Produce</th><th class="num">Item</th><th class="num">Freight</th><th class="num">Other</th><th class="num">G-Profit</th><th>Actions</th></tr></thead>
-          <tbody>
-            ${rows.map(r=>`
-              <tr id="${r.id}">
-                <td>${r.date}</td><td class="num">${USD(r.grossIncome)}</td><td class="num">${USD(r.produceCost)}</td><td class="num">${USD(r.itemCost)}</td>
-                <td class="num">${USD(r.freight)}</td><td class="num">${USD(r.other)}</td><td class="num">${USD(gp(r))}</td>
-                <td>${canEdit()? `<button class="btn ghost" data-edit="${r.id}"><i class="ri-edit-line"></i></button>`:''}
-                    ${canDelete()? `<button class="btn danger" data-del="${r.id}"><i class="ri-delete-bin-6-line"></i></button>`:''}</td>
-              </tr>`).join('')}
-            <tr class="tr-total">
-              <th>Total</th><th class="num">${USD(totals.grossIncome)}</th><th class="num">${USD(totals.produceCost)}</th><th class="num">${USD(totals.itemCost)}</th>
-              <th class="num">${USD(totals.freight)}</th><th class="num">${USD(totals.other)}</th><th class="num">${USD(totalProfit)}</th><th></th>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="foot">
-        <div class="grid cols-3">
-          <div>
-            <label for="cogs-year">Export by Year</label>
-            <input id="cogs-year" class="input" type="number" placeholder="e.g. 2025"/>
-          </div>
-          <div>
-            <label for="cogs-month">Export by Month (1-12)</label>
-            <input id="cogs-month" class="input" type="number" min="1" max="12" placeholder="e.g. 8"/>
-          </div>
-          <div style="display:flex;align-items:flex-end"><button class="btn" id="export-cogs-range"><i class="ri-download-2-line"></i> Export Range</button></div>
-        </div>
-      </div>
-    </div>`;
-}
-function wireCOGS(){
-  // 1) Full COGS export
-$('#export-cogs')?.addEventListener('click', ()=>{
-  const rows = state.cogs || [];
-  const headers = ['id','date','grossIncome','produceCost','itemCost','freight','other'];
-  const csv = [headers.join(',')]
-    .concat(
-      rows.map(r =>
-        headers
-          .map(h => String(r[h] ?? '').replace(/"/g, '""'))  // <-- fixed here
-          .map(s => /[",\n]/.test(s) ? `"${s}"` : s)
-          .join(',')
-      )
-    )
-    .join('\n');
-  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'cogs.csv'; a.click();
-  setTimeout(()=>URL.revokeObjectURL(url),0);
-});
-
-  // 2) Year/Month range export
-$('#export-cogs-range')?.addEventListener('click', ()=>{
-  const y = +($('#cogs-year')?.value || 0), m = +($('#cogs-month')?.value || 0);
-  const rows = (state.cogs || []).filter(r=>{
-    const d = r.date || ''; const Y = +d.slice(0,4), M = +d.slice(5,7);
-    if (y && m) return Y===y && M===m;
-    if (y && !m) return Y===y;
-    return true;
-  });
-  const headers = ['id','date','grossIncome','produceCost','itemCost','freight','other'];
-  const csv = [headers.join(',')]
-    .concat(
-      rows.map(r =>
-        headers
-          .map(h => String(r[h] ?? '').replace(/"/g, '""'))  // <-- fixed here too
-          .map(s => /[",\n]/.test(s) ? `"${s}"` : s)
-          .join(',')
-      )
-    )
-    .join('\n');
-  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = y ? (m ? `cogs_${y}-${String(m).padStart(2,'0')}.csv` : `cogs_${y}.csv`) : 'cogs_range.csv';
-  a.click();
-  setTimeout(()=>URL.revokeObjectURL(url),0);
-});
-
-  $('#addCOGS')?.addEventListener('click', ()=>{
-    if(!canAdd()) return notify('No permission');
-    openModal('m-cogs'); $('#cogs-id').value=''; $('#cogs-date').value=new Date().toISOString().slice(0,10);
-    $('#cogs-grossIncome').value=''; $('#cogs-produceCost').value=''; $('#cogs-itemCost').value=''; $('#cogs-freight').value=''; $('#cogs-other').value='';
-  });
-  document.querySelector('[data-section="cogs"]')?.addEventListener('click',(e)=>{
-    const btn=e.target.closest('button'); if(!btn) return;
-    const id=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
-    const rows = state.cogs.slice();
-    if(btn.hasAttribute('data-edit')){
-      if(!canEdit()) return notify('No permission');
-      const r=rows.find(x=>x.id===id); if(!r) return;
-      openModal('m-cogs');
-      $('#cogs-id').value=id; $('#cogs-date').value=r.date; $('#cogs-grossIncome').value=r.grossIncome;
-      $('#cogs-produceCost').value=r.produceCost; $('#cogs-itemCost').value=r.itemCost; $('#cogs-freight').value=r.freight; $('#cogs-other').value=r.other;
-    }else{
-      if(!canDelete()) return notify('No permission');
-      const next=rows.filter(x=>x.id!==id); state.cogs=next; set(pathKV('cogs'), {key:'cogs', val: next}); renderApp();
-    }
-  });
-}
-
-function viewTasks(){
-  const items=state.tasks||=[];
-  const lane=(key,label,color)=>`
-    <div class="card lane-row" data-lane="${key}">
-      <div class="head"><h3 style="margin:0;color:${color};font-size:16px">${label}</h3></div>
-      <div class="card-body">
-        ${key==='todo' && canAdd()? `<button class="btn" id="addTask"><i class="ri-add-line"></i> Add Task</button>`:''}
-        <div class="grid lane-grid" id="lane-${key}">
-          ${items.filter(t=>t.status===key).map(t=>`
-            <div class="card task-card" id="${t.id}" draggable="true" data-task="${t.id}" style="cursor:grab">
-              <div class="card-body space-between">
-                <div>${t.title}</div>
-                <div>
-                  ${canEdit()? `<button class="btn ghost" data-edit="${t.id}"><i class="ri-edit-line"></i></button>`:''}
-                  ${canDelete()? `<button class="btn danger" data-del="${t.id}"><i class="ri-delete-bin-6-line"></i></button>`:''}
-                </div>
-              </div>
+              <div class="card-body"><p>${p.body||''}</p></div>
             </div>`).join('')}
         </div>
       </div>
-    </div>`;
-  return `<div data-section="tasks" class="grid cols-3">
-    ${lane('todo','To do','#f59e0b')}
-    ${lane('inprogress','In progress','#3b82f6')}
-    ${lane('done','Done','#10b981')}
-  </div>`;
-}
-function wireTasks(){
-  const root=document.querySelector('[data-section="tasks"]'); if(!root) return;
-  $('#addTask')?.addEventListener('click', ()=>{
-    if(!canAdd()) return notify('No permission');
-    openModal('m-task'); $('#task-id').value=''; $('#task-title').value=''; $('#task-status').value='todo';
-  });
-  root.addEventListener('click',(e)=>{
-    const btn=e.target.closest('button'); if(!btn) return;
-    const id=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
-    const items=state.tasks.slice();
-    if(btn.hasAttribute('data-edit')){
-      if(!canEdit()) return notify('No permission');
-      const t=items.find(x=>x.id===id); if(!t) return;
-      openModal('m-task'); $('#task-id').value=t.id; $('#task-title').value=t.title; $('#task-status').value=t.status;
-    }else{
-      if(!canDelete()) return notify('No permission');
-      const next=items.filter(x=>x.id!==id); state.tasks=next; set(pathKV('tasks'), {key:'tasks', val: next}); renderApp();
-    }
-  });
+    `;
+  }
 
-  // DnD, lanes can be empty
-  $$('.task-card').forEach(card=>{
-    card.setAttribute('draggable','true'); card.style.cursor='grab';
-    card.addEventListener('dragstart',(e)=>{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', card.getAttribute('data-task')); card.classList.add('dragging'); });
-    card.addEventListener('dragend',()=> card.classList.remove('dragging'));
-  });
-  $$('.lane-grid').forEach(grid=>{
-    const row=grid.closest('.lane-row'); const lane=row?.getAttribute('data-lane');
-    const show=(e)=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; row?.classList.add('drop'); };
-    const hide=()=> row?.classList.remove('drop');
-    grid.addEventListener('dragenter', show);
-    grid.addEventListener('dragover',  show);
-    grid.addEventListener('dragleave', hide);
-    grid.addEventListener('drop',(e)=>{
-      e.preventDefault(); hide(); if(!lane) return;
-      if (!canAdd()) return notify('No permission');
-      const id=e.dataTransfer.getData('text/plain'); if(!id) return;
-      const items=state.tasks.slice(); const t=items.find(x=>x.id===id); if(!t) return;
-      t.status=lane; state.tasks=items; set(pathKV('tasks'), {key:'tasks', val: items}); renderApp();
-    });
-  });
-}
-
-function viewSettings(){
-  const theme=state.theme||{mode:'sky', size:'medium'};
-  const users=state.users||[];
-  const isAdmin = state.session?.role === 'admin';
-  return `
-    <div class="grid">
+  function viewInventory(){
+    return `
       <div class="card"><div class="card-body">
-        <h3 style="margin-top:0">Theme</h3>
-        <div class="grid cols-2">
-          <div>
-            <label for="theme-mode">Mode</label>
-            <select id="theme-mode" class="input">
-              <option value="sky" ${theme.mode==='sky'?'selected':''}>Sky (Blue)</option>
-              <option value="peach" ${theme.mode==='peach'?'selected':''}>Peach (Soft Orange)</option>
-              <option value="mint" ${theme.mode==='mint'?'selected':''}>Mint (Soft Green)</option>
-              <option value="dark" ${theme.mode==='dark'?'selected':''}>Dark</option>
-            </select>
-          </div>
-          <div>
-            <label for="theme-size">Font Size</label>
-            <select id="theme-size" class="input">
-              <option value="small" ${theme.size==='small'?'selected':''}>Small</option>
-              <option value="medium" ${theme.size==='medium'?'selected':''}>Medium</option>
-              <option value="large" ${theme.size==='large'?'selected':''}>Large</option>
-            </select>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="margin:0">Inventory</h3>
+          <div style="display:flex;gap:8px">
+            <button class="btn ok" id="export-inventory"><i class="ri-download-2-line"></i> Export CSV</button>
+            ${canAdd()? `<button class="btn" id="addInv"><i class="ri-add-line"></i> Add Item</button>`:''}
           </div>
         </div>
-      </div></div>
-
-      <div class="card"><div class="card-body">
-        <div class="space-between">
-          <h3 style="margin:0">Users</h3>
-          ${canAdd()? `<button class="btn" id="addUser"><i class="ri-user-add-line"></i> Add User</button>`:''}
-        </div>
-        <div class="table-wrap" data-section="users">
+        <div class="table-wrap" data-section="inventory">
           <table class="table">
-            <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Code</th><th>Type</th><th class="num">Price</th><th class="num">Stock</th><th class="num">Threshold</th><th>Actions</th></tr></thead>
             <tbody>
-              ${users.map(u=>`
-                <tr id="${u.email}">
-                  <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
-                  <td>
-                    ${canEdit()? `<button class="btn ghost" data-edit="${u.email}"><i class="ri-edit-line"></i></button>`:''}
-                    ${canDelete()? `<button class="btn danger" data-del="${u.email}"><i class="ri-delete-bin-6-line"></i></button>`:''}
-                    ${isAdmin? `<button class="btn secondary" data-role="${u.email}"><i class="ri-shield-user-line"></i> Set Role</button>`:''}
+              ${state.inventory.map(it=>`
+                <tr id="${it.id}">
+                  <td>${it.name}</td>
+                  <td>${it.code}</td>
+                  <td>${it.type||'-'}</td>
+                  <td class="num">${fmtUSD(it.price)}</td>
+                  <td class="num">${it.stock}</td>
+                  <td class="num">${it.threshold}</td>
+                  <td class="actions">
+                    ${canEdit()? `<button class="btn ghost" data-edit="${it.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
+                    ${canDelete()? `<button class="btn danger" data-del="${it.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>`:''}
                   </td>
                 </tr>`).join('')}
             </tbody>
           </table>
         </div>
       </div></div>
-    </div>`;
-}
-function allowedRoleOptions(){
-  const r=state.session?.role||'user'; if(r==='admin') return ['user','associate','manager','admin'];
-  if(r==='manager') return ['user','associate','manager']; if(r==='associate') return ['user','associate']; return ['user'];
-}
-function wireSettings(){
-  const mode=$('#theme-mode'), size=$('#theme-size');
-  const onChange=async ()=>{ await persistThemeIfChanged({ mode:mode.value, size:size.value }); };
-  mode?.addEventListener('change', onChange); size?.addEventListener('change', onChange);
-
-  // Users CRUD + roles
-  $('#addUser')?.addEventListener('click', ()=>{
-    if(!canAdd()) return notify('No permission');
-    openModal('m-user'); $('#user-name').value=''; $('#user-email').value=''; $('#user-username').value='';
-    const sel=$('#user-role'); const opts=allowedRoleOptions(); sel.innerHTML=opts.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value=opts[0];
-  });
-  document.querySelector('[data-section="users"]')?.addEventListener('click',(e)=>{
-    const btn=e.target.closest('button'); if(!btn) return;
-    const email=btn.getAttribute('data-edit')||btn.getAttribute('data-del')||btn.getAttribute('data-role'); if(!email) return;
-    const users = state.users.slice();
-    if(btn.hasAttribute('data-edit')){
-      if(!canEdit()) return notify('No permission');
-      const u=users.find(x=>x.email===email); if(!u) return;
-      openModal('m-user'); $('#user-name').value=u.name; $('#user-email').value=u.email; $('#user-username').value=u.username;
-      const sel=$('#user-role'); const opts=allowedRoleOptions(); sel.innerHTML=opts.map(r=>`<option value="${r}">${r[0].toUpperCase()+r.slice(1)}</option>`).join(''); sel.value= opts.includes(u.role) ? u.role : 'user';
-    } else if (btn.hasAttribute('data-del')){
-      if(!canDelete()) return notify('No permission');
-      const next=users.filter(x=>x.email!==email); state.users=next; set(pathKV('users'), {key:'users', val: next}); renderApp();
-    } else if (btn.hasAttribute('data-role')) {
-      if (state.session?.role!=='admin') return notify('Admins only');
-      const u=users.find(x=>x.email===email); if(!u) return;
-      const newRole = prompt('Set role (user, associate, manager, admin):', u.role||'user'); if(!/^(user|associate|manager|admin)$/.test(newRole||'')) return;
-      u.role = newRole; state.users = users; set(pathKV('users'), {key:'users', val: users});
-      set(ref(db, `userRoles/${u.uid||''}`), newRole).catch(()=>{});
-      renderApp();
-    }
-  });
-}
-
-/* ---------- Static pages ---------- */
-const pageContent = {
-  about: `<h3>About Inventory</h3>
-  <p>Inventory is a mobile-first, offline-friendly app to manage stock, products, costs (COGS) and tasks.</p>
-  <ul>
-    <li>Realtime sync per user (your data is isolated under your account)</li>
-    <li>CSV exports (Inventory, Products, COGS by month/year)</li>
-    <li>Roles: user, associate, manager, admin</li>
-    <li>Modern theming with Sky / Peach / Mint / Dark</li>
-  </ul>`,
-
-  policy: `<h3>Policy</h3>
-  <p><strong>Data:</strong> Stored under your Firebase user. We do not sell your data.</p>
-  <p><strong>Security:</strong> Uses Firebase Authentication and Realtime Database rules for row-level access.</p>
-  <p><strong>Support:</strong> Email <a href="mailto:minmaung0307@gmail.com">minmaung0307@gmail.com</a>.</p>`,
-
-  license: `<h3>License</h3>
-  <p>MIT License — free to use, modify, and distribute. Attribution appreciated.</p>`,
-
-  setup: `<h3>Setup Guide</h3>
-  <ol>
-    <li>Create a Firebase project, enable Email/Password auth.</li>
-    <li>Paste the config into <code>index.html</code> (window.__FIREBASE_CONFIG).</li>
-    <li>Deploy the <strong>Realtime Database Rules</strong>.</li>
-    <li>Deploy this <code>public/</code> folder to Firebase Hosting.</li>
-  </ol>`,
-
-  guide: `<h3>User Guide</h3>
-  <p>Use the sidebar to navigate. Click product names to open detail cards. Drag tasks between lanes. Export tables as CSV. Set theme + font size in Settings.</p>`,
-
-  contact:`<h3>Contact</h3>
-  <p>Questions? Email <a class="btn secondary" href="mailto:minmaung0307@gmail.com?subject=Hello%20from%20Inventory"><i class="ri-mail-send-line"></i> minmaung0307@gmail.com</a></p>`
-};
-function viewPage(key){ return `<div class="card"><div class="card-body">${pageContent[key]||'<p>Page</p>'}</div></div>`; }
-
-/* ---------- Modals ---------- */
-function modalsHTML(){ return `
-  <div class="modal-backdrop" id="mb-post"></div>
-  <div class="modal" id="m-post">
-    <div class="dialog">
-      <div class="head"><strong>Post</strong><button class="btn ghost" data-close="m-post">Close</button></div>
-      <div class="body grid">
-        <input id="post-id" type="hidden"/>
-        <label for="post-title">Title</label>
-        <input id="post-title" class="input" placeholder="Title"/>
-        <label for="post-body">Body</label>
-        <textarea id="post-body" class="input" placeholder="Body"></textarea>
-      </div>
-      <div class="foot"><button class="btn" id="save-post">Save</button></div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="mb-inv"></div>
-  <div class="modal" id="m-inv">
-    <div class="dialog">
-      <div class="head"><strong>Inventory Item</strong><button class="btn ghost" data-close="m-inv">Close</button></div>
-      <div class="body grid">
-        <input id="inv-id" type="hidden"/>
-        <label for="inv-name">Name</label>
-        <input id="inv-name" class="input" placeholder="Name"/>
-        <label for="inv-code">Code</label>
-        <input id="inv-code" class="input" placeholder="Code"/>
-        <label for="inv-type">Type</label>
-        <select id="inv-type" class="input"><option>Raw</option><option>Cooked</option><option>Dry</option><option>Other</option></select>
-        <label for="inv-price">Price</label>
-        <input id="inv-price" class="input" type="number" step="0.01" placeholder="Price"/>
-        <label for="inv-stock">Stock</label>
-        <input id="inv-stock" class="input" type="number" placeholder="Stock"/>
-        <label for="inv-threshold">Threshold</label>
-        <input id="inv-threshold" class="input" type="number" placeholder="Threshold"/>
-      </div>
-      <div class="foot"><button class="btn" id="save-inv">Save</button></div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="mb-prod"></div>
-  <div class="modal" id="m-prod">
-    <div class="dialog">
-      <div class="head"><strong>Product</strong><button class="btn ghost" data-close="m-prod">Close</button></div>
-      <div class="body grid">
-        <input id="prod-id" type="hidden"/>
-        <label for="prod-name">Name</label>
-        <input id="prod-name" class="input" placeholder="Name"/>
-        <label for="prod-barcode">Barcode</label>
-        <input id="prod-barcode" class="input" placeholder="Barcode"/>
-        <label for="prod-price">Price</label>
-        <input id="prod-price" class="input" type="number" step="0.01" placeholder="Price"/>
-        <label for="prod-type">Type</label>
-        <input id="prod-type" class="input" placeholder="Type"/>
-        <label for="prod-ingredients">Ingredients</label>
-        <textarea id="prod-ingredients" class="input" placeholder="Ingredients"></textarea>
-        <label for="prod-instructions">Instructions</label>
-        <textarea id="prod-instructions" class="input" placeholder="Instructions"></textarea>
-      </div>
-      <div class="foot"><button class="btn" id="save-prod">Save</button></div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="mb-cogs"></div>
-  <div class="modal" id="m-cogs">
-    <div class="dialog">
-      <div class="head"><strong>COGS Row</strong><button class="btn ghost" data-close="m-cogs">Close</button></div>
-      <div class="body grid cols-2">
-        <input id="cogs-id" type="hidden"/>
-        <div><label for="cogs-date">Date</label><input id="cogs-date" class="input" type="date"/></div>
-        <div><label for="cogs-grossIncome">G-Income</label><input id="cogs-grossIncome" class="input" type="number" step="0.01" placeholder="Gross Income"/></div>
-        <div><label for="cogs-produceCost">Produce Cost</label><input id="cogs-produceCost"  class="input" type="number" step="0.01" placeholder="Produce Cost"/></div>
-        <div><label for="cogs-itemCost">Item Cost</label><input id="cogs-itemCost"     class="input" type="number" step="0.01" placeholder="Item Cost"/></div>
-        <div><label for="cogs-freight">Freight</label><input id="cogs-freight"      class="input" type="number" step="0.01" placeholder="Freight"/></div>
-        <div><label for="cogs-other">Other</label><input id="cogs-other"        class="input" type="number" step="0.01" placeholder="Other"/></div>
-      </div>
-      <div class="foot"><button class="btn" id="save-cogs">Save</button></div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="mb-task"></div>
-  <div class="modal" id="m-task">
-    <div class="dialog">
-      <div class="head"><strong>Task</strong><button class="btn ghost" data-close="m-task">Close</button></div>
-      <div class="body grid">
-        <input id="task-id" type="hidden"/>
-        <label for="task-title">Title</label>
-        <input id="task-title" class="input" placeholder="Title"/>
-        <label for="task-status">Status</label>
-        <select id="task-status"><option value="todo">To do</option><option value="inprogress">In progress</option><option value="done">Done</option></select>
-      </div>
-      <div class="foot"><button class="btn" id="save-task">Save</button></div>
-    </div>
-  </div>
-
-  <div class="modal-backdrop" id="mb-user"></div>
-  <div class="modal" id="m-user">
-    <div class="dialog">
-      <div class="head"><strong>User</strong><button class="btn ghost" data-close="m-user">Close</button></div>
-      <div class="body grid">
-        <label for="user-name">Name</label>
-        <input id="user-name" class="input" placeholder="Name"/>
-        <label for="user-email">Email</label>
-        <input id="user-email" class="input" type="email" placeholder="Email"/>
-        <label for="user-username">Username</label>
-        <input id="user-username" class="input" placeholder="Username"/>
-        <label for="user-role">Role</label>
-        <select id="user-role"></select>
-      </div>
-      <div class="foot"><button class="btn" id="save-user">Save</button></div>
-    </div>
-  </div>
-
-  <!-- Product card modal is in viewProducts() -->
-`; }
-function ensureGlobalModals(){
-  if ($('#__modals')) return;
-  const wrap=document.createElement('div'); wrap.id='__modals'; wrap.innerHTML=modalsHTML(); document.body.appendChild(wrap);
-  // Close handlers
-  document.body.addEventListener('click', (e)=>{
-    const c=e.target.closest('[data-close]'); if(!c) return; const id=c.getAttribute('data-close');
-    $('#'+id)?.classList.remove('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.remove('active'); document.body.classList.remove('modal-open');
-  });
-}
-function openModal(id){ $('#'+id)?.classList.add('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.add('active'); document.body.classList.add('modal-open'); }
-function closeModal(id){ $('#'+id)?.classList.remove('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.remove('active'); document.body.classList.remove('modal-open'); }
-
-/* ---------- App shell ---------- */
-function renderApp(){
-  const root = $('#root'); if (!root) return;
-  if (!state.session){
-    renderLogin(); return;
+    `;
   }
-  root.innerHTML = `
-    <div class="app">
-      ${renderSidebar(state.route)}
-      <div>
-        ${renderTopbar()}
-        <div class="main" id="main">${safeView(state.route)}</div>
-      </div>
-    </div>`;
-  // wiring
-  $('#btnLogout')?.addEventListener('click', doLogout);
-  document.querySelectorAll('.sidebar .item[data-route]').forEach(el=> el.addEventListener('click', ()=> go(el.getAttribute('data-route')) ));
-  hookSidebarInteractions();
-  ensureGlobalModals();
-  wirePage(state.route);
-  wireSaves(); // <— moved here; wrapper removed
-}
-function wirePage(route){
-  hookSidebarInteractions();
-  switch(route){
-    case 'dashboard': wireDashboard(); wirePosts(); break;
-    case 'inventory': wireInventory(); break;
-    case 'products':  wireProducts(); break;
-    case 'cogs':      wireCOGS(); break;
-    case 'tasks':     wireTasks(); break;
-    case 'settings':  wireSettings(); break;
-  }
-}
 
-/* ---------- Post save ---------- */
-function wirePosts(){
-  $('#save-post')?.addEventListener('click', async ()=>{
-    const id=$('#post-id').value || ('post_'+Date.now());
-    const obj={ id, title:($('#post-title')?.value||'').trim(), body:($('#post-body')?.value||'').trim(), createdAt: Date.now() };
-    if (!obj.title) return notify('Title required');
-    const posts = state.posts.slice(); const i=posts.findIndex(x=>x.id===id);
-    if (i>=0){ if(!canEdit()) return notify('No permission'); posts[i]=obj; } else { if(!canAdd()) return notify('No permission'); posts.unshift(obj); }
-    state.posts=posts; await set(pathKV('posts'), {key:'posts', val: posts}); closeModal('m-post'); notify('Saved'); renderApp();
-  });
-}
-
-/* ---------- Inventory / Product / COGS / Task / User saves ---------- */
-function wireSaves(){
-  $('#save-inv')?.addEventListener('click', async ()=>{
-    const id=$('#inv-id').value || ('inv_'+Date.now());
-    const obj={ id, name:$('#inv-name').value.trim(), code:$('#inv-code').value.trim(), type:$('#inv-type').value.trim(), price:+($('#inv-price').value||0), stock:+($('#inv-stock').value||0), threshold:+($('#inv-threshold').value||0) };
-    if (!obj.name) return notify('Name required');
-    const items=state.inventory.slice(); const i=items.findIndex(x=>x.id===id);
-    if (i>=0){ if(!canEdit()) return notify('No permission'); items[i]=obj; } else { if(!canAdd()) return notify('No permission'); items.push(obj); }
-    state.inventory=items; await set(pathKV('inventory'), {key:'inventory', val: items}); closeModal('m-inv'); notify('Saved'); renderApp();
-  });
-
-  $('#save-prod')?.addEventListener('click', async ()=>{
-    const id=$('#prod-id').value || ('p_'+Date.now());
-    const obj={ id, name:$('#prod-name').value.trim(), barcode:$('#prod-barcode').value.trim(), price:+($('#prod-price').value||0), type:$('#prod-type').value.trim(), ingredients:$('#prod-ingredients').value.trim(), instructions:$('#prod-instructions').value.trim() };
-    if (!obj.name) return notify('Name required');
-    const items=state.products.slice(); const i=items.findIndex(x=>x.id===id);
-    if (i>=0){ if(!canEdit()) return notify('No permission'); items[i]=obj; } else { if(!canAdd()) return notify('No permission'); items.push(obj); }
-    state.products=items; await set(pathKV('products'), {key:'products', val: items}); closeModal('m-prod'); notify('Saved'); renderApp();
-  });
-
-  $('#save-cogs')?.addEventListener('click', async ()=>{
-    const id=$('#cogs-id').value || ('c_'+Date.now());
-    const row={ id, date:$('#cogs-date').value || new Date().toISOString().slice(0,10), grossIncome:+($('#cogs-grossIncome').value||0), produceCost:+($('#cogs-produceCost').value||0), itemCost:+($('#cogs-itemCost').value||0), freight:+($('#cogs-freight').value||0), other:+($('#cogs-other').value||0) };
-    const rows=state.cogs.slice(); const i=rows.findIndex(x=>x.id===id);
-    if (i>=0){ if(!canEdit()) return notify('No permission'); rows[i]=row; } else { if(!canAdd()) return notify('No permission'); rows.push(row); }
-    state.cogs=rows; await set(pathKV('cogs'), {key:'cogs', val: rows}); closeModal('m-cogs'); notify('Saved'); renderApp();
-  });
-
-  $('#save-task')?.addEventListener('click', async ()=>{
-    const id=$('#task-id').value || ('t_'+Date.now());
-    const obj={ id, title:($('#task-title')?.value||'').trim(), status:$('#task-status')?.value || 'todo' };
-    if (!obj.title) return notify('Title required');
-    const items=state.tasks.slice(); const i=items.findIndex(x=>x.id===id);
-    if (i>=0){ if(!canEdit()) return notify('No permission'); items[i]=obj; } else { if(!canAdd()) return notify('No permission'); items.push(obj); }
-    state.tasks=items; await set(pathKV('tasks'), {key:'tasks', val: items}); closeModal('m-task'); notify('Saved'); renderApp();
-  });
-
-  $('#save-user')?.addEventListener('click', async ()=>{
-    const email=($('#user-email')?.value||'').trim().toLowerCase();
-    if (!email) return notify('Email required');
-    const obj={ name:($('#user-name')?.value||email.split('@')[0]).trim(), email, username:($('#user-username')?.value||email.split('@')[0]).trim(), role:($('#user-role')?.value||'user'), contact:'' };
-    const users=state.users.slice(); const i=users.findIndex(x=> (x.email||'').toLowerCase()===email);
-    if (i>=0){ if(!canEdit()) return notify('No permission'); users[i]=obj; } else { if(!canAdd()) return notify('No permission'); users.push(obj); }
-    state.users=users; await set(pathKV('users'), {key:'users', val: users}); closeModal('m-user'); notify('Saved'); renderApp();
-  });
-}
-
-/* ---------- Login screen ---------- */
-function renderLogin(){
-  const root = $('#root');
-  root.innerHTML = `
-    <div class="login">
-      <div class="card login-card" role="dialog" aria-modal="true" aria-labelledby="login-title">
-        <div class="card-body">
-          <div class="login-logo"><div class="logo">📦</div><div id="login-title" style="font-weight:800;font-size:20px">Inventory</div></div>
-          <p class="login-note" style="color:var(--muted)">Sign in to continue</p>
-          <div class="grid">
-            <div>
-              <label for="li-email">Email</label>
-              <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username"/>
-            </div>
-            <div>
-              <label for="li-pass">Password</label>
-              <input id="li-pass"  class="input" type="password" placeholder="Password" autocomplete="current-password"/>
-            </div>
-            <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
-            <div class="link-row">
-              <a id="link-forgot" href="#" class="btn secondary"><i class="ri-key-2-line"></i> Forgot password</a>
-              <a id="link-register" href="#" class="btn ghost"><i class="ri-user-add-line"></i> Sign up</a>
-            </div>
+  function viewProducts(){
+    return `
+      <div class="card"><div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="margin:0">Products</h3>
+          <div style="display:flex;gap:8px">
+            <button class="btn ok" id="export-products"><i class="ri-download-2-line"></i> Export CSV</button>
+            ${canAdd()? `<button class="btn" id="addProd"><i class="ri-add-line"></i> Add Product</button>`:''}
           </div>
         </div>
-      </div>
-    </div>
-
-    <div class="modal-backdrop" id="mb-auth"></div>
-
-    <div class="modal" id="m-signup">
-      <div class="dialog">
-        <div class="head"><strong>Create account</strong><button class="btn ghost" id="cl-signup">Close</button></div>
-        <div class="body grid">
-          <label for="su-name">Full name</label><input id="su-name"  class="input" placeholder="Full name"/>
-          <label for="su-email">Email</label><input id="su-email" class="input" type="email" placeholder="Email"/>
-          <label for="su-pass">Password</label><input id="su-pass"  class="input" type="password" placeholder="Password"/>
-          <label for="su-pass2">Confirm password</label><input id="su-pass2" class="input" type="password" placeholder="Confirm password"/>
+        <div class="table-wrap" data-section="products">
+          <table class="table">
+            <thead><tr><th>Name</th><th>Barcode</th><th class="num">Price</th><th>Type</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${state.products.map(it=>`
+                <tr id="${it.id}">
+                  <td><button class="btn ghost" data-card="${it.id}" title="Open" style="padding:6px 10px">${it.name}</button></td>
+                  <td>${it.barcode||''}</td>
+                  <td class="num">${fmtUSD(it.price)}</td>
+                  <td>${it.type||'-'}</td>
+                  <td class="actions">
+                    ${canEdit()? `<button class="btn ghost" data-edit="${it.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
+                    ${canDelete()? `<button class="btn danger" data-del="${it.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>`:''}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
         </div>
-        <div class="foot"><button class="btn" id="btnSignupDo"><i class="ri-user-add-line"></i> Sign up</button></div>
-      </div>
-    </div>
-
-    <div class="modal" id="m-reset">
-      <div class="dialog">
-        <div class="head"><strong>Reset password</strong><button class="btn ghost" id="cl-reset">Close</button></div>
-        <div class="body grid">
-          <label for="fp-email">Your email</label>
-          <input id="fp-email" class="input" type="email" placeholder="Your email"/>
-        </div>
-        <div class="foot"><button class="btn" id="btnResetDo"><i class="ri-mail-send-line"></i> Send reset email</button></div>
-      </div>
-    </div>
-  `;
-
-  const openAuth = sel => { $('#mb-auth')?.classList.add('active'); $(sel)?.classList.add('active'); document.body.classList.add('modal-open'); };
-  const closeAuth = ()=>{ $('#mb-auth')?.classList.remove('active'); $('#m-signup')?.classList.remove('active'); $('#m-reset')?.classList.remove('active'); document.body.classList.remove('modal-open'); };
-
-  async function doSignIn(){
-    const email = ($('#li-email')?.value||'').trim().toLowerCase();
-    const pass  = $('#li-pass')?.value||'';
-    if(!email || !pass) return notify('Enter email & password');
-    try{ await signInWithEmailAndPassword(auth, email, pass); notify('Welcome'); }catch(e){ notify(e?.message||'Login failed'); }
+      </div></div>
+    `;
   }
-  async function doSignup(){
-    const name  = ($('#su-name')?.value||'').trim();
-    const email = ($('#su-email')?.value||'').trim().toLowerCase();
-    const pass  = $('#su-pass')?.value||'';
-    const pass2 = ($('#su-pass2')?.value||'');
-    if(!email || !pass) return notify('Email and password required');
-    if(pass !== pass2) return notify('Passwords do not match');
+
+  function productCard(it){
+    return `
+      <div class="grid cols-2">
+        <div class="card"><div class="card-body">
+          <div style="font-size:20px;font-weight:800;margin-bottom:6px">${it.name}</div>
+          <div><strong>Barcode:</strong> ${it.barcode||'-'}</div>
+          <div><strong>Price:</strong> ${fmtUSD(it.price)}</div>
+          <div><strong>Type:</strong> ${it.type||'-'}</div>
+        </div></div>
+        <div class="card"><div class="card-body">
+          <div><strong>Ingredients</strong></div>
+          <div>${it.ingredients||'-'}</div>
+          <div style="margin-top:10px"><strong>Instructions</strong></div>
+          <div>${it.instructions||'-'}</div>
+        </div></div>
+      </div>
+    `;
+  }
+
+  function viewCOGS(){
+    const headers = ['Date','G-Income','Produce Cost','Item Cost','Freight','Other','G-Profit'];
+    const rows = state.cogs.map(r=>{
+      const gp = (+r.grossIncome||0)-((+r.produceCost||0)+(+r.itemCost||0)+(+r.freight||0)+(+r.other||0));
+      return { ...r, gp };
+    });
+
+    // month/year selectors
+    const years = Array.from(new Set(state.cogs.map(r => (r.date||'').slice(0,4)).filter(Boolean))).sort().reverse();
+
+    return `
+      <div class="card"><div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+          <h3 style="margin:0">COGS</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="cogs-year" class="input" style="width:140px">
+              <option value="">All Years</option>
+              ${years.map(y=>`<option value="${y}">${y}</option>`).join('')}
+            </select>
+            <select id="cogs-month" class="input" style="width:140px">
+              <option value="">All Months</option>
+              ${Array.from({length:12},(_,i)=>`<option value="${i+1}">${String(i+1).padStart(2,'0')}</option>`).join('')}
+            </select>
+            <button class="btn ghost" id="filter-cogs"><i class="ri-filter-3-line"></i> Filter</button>
+            <button class="btn ok" id="export-cogs"><i class="ri-download-2-line"></i> Export CSV</button>
+            <button class="btn secondary" id="export-cogs-range"><i class="ri-download-2-line"></i> Export Range</button>
+            ${canAdd()? `<button class="btn" id="addCOGS"><i class="ri-add-line"></i> Add Row</button>`:''}
+          </div>
+        </div>
+
+        <div class="table-wrap" data-section="cogs">
+          <table class="table">
+            <thead><tr>${headers.map((h,i)=>`<th class="${i? 'num':''}">${h}</th>`).join('')}<th>Actions</th></tr></thead>
+            <tbody id="cogs-tbody">
+              ${rows.map(r=>`
+                <tr id="${r.id}">
+                  <td>${r.date}</td>
+                  <td class="num">${fmtUSD(r.grossIncome)}</td>
+                  <td class="num">${fmtUSD(r.produceCost)}</td>
+                  <td class="num">${fmtUSD(r.itemCost)}</td>
+                  <td class="num">${fmtUSD(r.freight)}</td>
+                  <td class="num">${fmtUSD(r.other)}</td>
+                  <td class="num"><strong>${fmtUSD(r.gp)}</strong></td>
+                  <td class="actions">
+                    ${canEdit()? `<button class="btn ghost" data-edit="${r.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
+                    ${canDelete()? `<button class="btn danger" data-del="${r.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>`:''}
+                  </td>
+                </tr>`).join('')}
+              ${(()=>{
+                const t=rows.reduce((a,r)=>({gi:a.gi+(+r.grossIncome||0),pc:a.pc+(+r.produceCost||0),ic:a.ic+(+r.itemCost||0),fr:a.fr+(+r.freight||0),ot:a.ot+(+r.other||0),gp:a.gp+(+r.gp||0)}),{gi:0,pc:0,ic:0,fr:0,ot:0,gp:0});
+                return `<tr class="tr-total">
+                  <th>Total</th>
+                  <th class="num">${fmtUSD(t.gi)}</th>
+                  <th class="num">${fmtUSD(t.pc)}</th>
+                  <th class="num">${fmtUSD(t.ic)}</th>
+                  <th class="num">${fmtUSD(t.fr)}</th>
+                  <th class="num">${fmtUSD(t.ot)}</th>
+                  <th class="num">${fmtUSD(t.gp)}</th>
+                  <th></th>
+                </tr>`;
+              })()}
+            </tbody>
+          </table>
+        </div>
+      </div></div>
+    `;
+  }
+
+  function viewTasks(){
+    const lane = (key,label,color) => {
+      const cards = state.tasks.filter(t=>t.status===key);
+      return `
+        <div class="card lane-row" data-lane="${key}">
+          <div class="card-body">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <h3 style="margin:0;color:${color}">${label}</h3>
+              ${key==='todo' && canAdd()? `<button class="btn" id="addTask"><i class="ri-add-line"></i> Add Task</button>`:''}
+            </div>
+            <div class="grid lane-grid" id="lane-${key}">
+              ${cards.map(t=>`
+                <div class="card task-card" id="${t.id}" draggable="true" data-task="${t.id}" style="cursor:grab">
+                  <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+                    <div>${t.title}</div>
+                    <div class="actions">
+                      ${canEdit()? `<button class="btn ghost" data-edit="${t.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
+                      ${canDelete()? `<button class="btn danger" data-del="${t.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>`:''}
+                    </div>
+                  </div>
+                </div>`).join('')}
+              ${cards.length? '' : `<div style="padding:10px;color:var(--muted)">Drop tasks here…</div>`}
+            </div>
+          </div>
+        </div>`;
+    };
+    return `<div data-section="tasks">
+      ${lane('todo','To do','#f59e0b')}
+      ${lane('inprogress','In progress','#3b82f6')}
+      ${lane('done','Done','#10b981')}
+    </div>`;
+  }
+
+  function viewSettings(){
+    const theme = state.theme;
+    return `
+      <div class="grid cols-2">
+        <div class="card"><div class="card-body">
+          <h3 style="margin-top:0">Theme</h3>
+          <div class="grid cols-2">
+            <div>
+              <label>Palette</label>
+              <select id="theme-palette" class="input">
+                ${['sunrise','sky','mint','slate','dark'].map(x=>`<option value="${x}" ${theme.palette===x?'selected':''}>${x}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label>Font size</label>
+              <select id="theme-font" class="input">
+                ${['small','medium','large'].map(x=>`<option value="${x}" ${theme.font===x?'selected':''}>${x}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:10px"><button class="btn" id="save-theme"><i class="ri-save-3-line"></i> Save Theme</button></div>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+          <h3 style="margin-top:0">Account</h3>
+          <div class="grid">
+            <div><strong>Email:</strong> ${state.user?.email||'-'}</div>
+            <div><strong>Role:</strong> ${state.role}</div>
+          </div>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+          <h3 style="margin-top:0">Users (tenant)</h3>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="color:var(--muted)">Manage a simple team list for your tenant.</div>
+            ${canAdd()? `<button class="btn" id="addUser"><i class="ri-add-line"></i> Add User</button>`:''}
+          </div>
+          <div class="table-wrap" data-section="users">
+            <table class="table">
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+              <tbody>
+                ${state.users.map(u=>`
+                  <tr id="${u.id}">
+                    <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
+                    <td class="actions">
+                      ${canEdit()? `<button class="btn ghost" data-edit="${u.id}"><i class="ri-edit-line"></i></button>`:''}
+                      ${canDelete()? `<button class="btn danger" data-del="${u.id}"><i class="ri-delete-bin-6-line"></i></button>`:''}
+                    </td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div></div>
+      </div>
+    `;
+  }
+
+  function viewLinks(){
+    return `
+      <div class="grid">
+        <div class="card"><div class="card-body">
+          <h3>About</h3>
+          <p style="color:var(--muted)">A fast, offline-friendly inventory app for SMBs — manage stock, products, costs, tasks, and export COGS, anywhere.</p>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+          <h3>Policy</h3>
+          <p style="color:var(--muted)">Your data lives in your own private Firestore tenant. You may export at any time. We do not collect analytics here.</p>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+          <h3>License</h3>
+          <p style="color:var(--muted)">MIT — use, modify, and deploy freely.</p>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+          <h3>Setup Guide</h3>
+          <ol>
+            <li>Add Firebase config in <code>index.html</code>.</li>
+            <li>Deploy Firestore rules (see below).</li>
+            <li>(Optional) Add EmailJS keys in <code>app.js</code>.</li>
+          </ol>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+          <h3>Contact</h3>
+          <div class="grid">
+            <input id="ct-name"  class="input" placeholder="Your name"/>
+            <input id="ct-email" class="input" placeholder="you@example.com"/>
+            <textarea id="ct-msg" class="input" placeholder="Your message"></textarea>
+            <div style="display:flex;gap:8px">
+              <button class="btn" id="send-email"><i class="ri-mail-send-line"></i> Send</button>
+              <a class="btn ghost" href="mailto:minmaung0307@gmail.com" target="_blank" rel="noopener">or mailto</a>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    `;
+  }
+
+  function viewSearch(){
+    const q = state.searchQ || '';
+    const res = q ? doSearch(q) : [];
+    return `
+      <div class="card"><div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <h3 style="margin:0">Search</h3>
+          <div style="color:var(--muted)">Query: <strong>${q||'(empty)'}</strong></div>
+        </div>
+        ${res.length ? `
+          <div class="grid">
+            ${res.map(r=>`
+              <div class="card"><div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+                <div><div style="font-weight:700">${r.label}</div><div style="color:var(--muted);font-size:12px">${r.section||''}</div></div>
+                <button class="btn" data-go="${r.route}" data-id="${r.id||''}">Open</button>
+              </div></div>`).join('')}
+          </div>` : `<p style="color:var(--muted)">No results.</p>`}
+      </div></div>
+    `;
+  }
+
+  function safeView(route){
+    switch(route){
+      case 'dashboard': return viewDashboard();
+      case 'inventory': return viewInventory();
+      case 'products':  return viewProducts();
+      case 'cogs':      return viewCOGS();
+      case 'tasks':     return viewTasks();
+      case 'settings':  return viewSettings();
+      case 'links':     return viewLinks();
+      case 'search':    return viewSearch();
+      default:          return viewDashboard();
+    }
+  }
+
+  /* ---------- Render ---------- */
+  function render(){
+    const root = $('#root');
+    if (!auth.currentUser){
+      root.innerHTML = viewLogin();
+      wireLogin();
+      return;
+    }
+    const html = layout( safeView(state.route) );
+    root.innerHTML = html;
+    wireShell();
+    wireRoute();
+  }
+
+  /* ---------- Wiring (shell + routes) ---------- */
+  function wireShell(){
+    // nav
+    $$('.sidebar .item[data-route]').forEach(el=>{
+      el.addEventListener('click', ()=> go(el.getAttribute('data-route')));
+    });
+    // logout
+    $('#btnLogout')?.addEventListener('click', ()=> auth.signOut());
+    // search
+    const input = $('#globalSearch'), results = $('#searchResults');
+    if (input && results){
+      let timer;
+      input.addEventListener('keydown', (e)=>{ if (e.key==='Enter'){ state.searchQ = input.value.trim(); go('search'); results.classList.remove('active'); } });
+      input.addEventListener('input', ()=>{
+        clearTimeout(timer);
+        const q = input.value.trim();
+        if (!q){ results.classList.remove('active'); results.innerHTML=''; return; }
+        timer = setTimeout(()=>{
+          const out = doSearch(q).slice(0,12);
+          results.innerHTML = out.map(r=>`<div class="row" data-route="${r.route}" data-id="${r.id||''}"><strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section}</span></div>`).join('');
+          results.classList.add('active');
+          results.querySelectorAll('.row').forEach(row=>{
+            row.onclick = ()=>{
+              const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
+              state.searchQ = q; go(r);
+              setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
+              results.classList.remove('active');
+            };
+          });
+        }, 120);
+      });
+      document.addEventListener('click', (e)=>{ if (!results.contains(e.target) && e.target !== input) results.classList.remove('active'); });
+    }
+    // modal close
+    $('#mm-close')?.addEventListener('click', ()=> closeModal('m-modal'));
+  }
+
+  function wireRoute(){
+    switch(state.route){
+      case 'dashboard': wirePosts(); break;
+      case 'inventory': wireInventory(); break;
+      case 'products':  wireProducts(); break;
+      case 'cogs':      wireCOGS(); break;
+      case 'tasks':     wireTasks(); break;
+      case 'settings':  wireSettings(); break;
+      case 'links':     wireLinks(); break;
+      case 'search':    wireSearch(); break;
+    }
+  }
+
+  /* ---------- Login ---------- */
+  function wireLogin(){
+    const setRoleByEmail = (email)=>{
+      const e = (email||'').toLowerCase();
+      state.role = ADMIN_EMAILS.includes(e) ? 'admin' : 'user';
+    };
+    const doLogin = async ()=>{
+      const email = ($('#li-email')?.value||'').trim();
+      const pass  = ($('#li-pass')?.value||'').trim();
+      if (!email || !pass) return notify('Enter email & password','warn');
+      try{
+        await auth.signInWithEmailAndPassword(email, pass);
+        setRoleByEmail(email);
+      }catch(e){
+        notify(e?.message||'Login failed','danger');
+      }
+    };
+    $('#btnLogin')?.addEventListener('click', doLogin);
+    $('#li-pass')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+    $('#link-forgot')?.addEventListener('click', async ()=>{
+      const email = ($('#li-email')?.value||'').trim();
+      if (!email) return notify('Enter your email first','warn');
+      try { await auth.sendPasswordResetEmail(email); notify('Reset email sent','ok'); } catch(e){ notify(e?.message||'Failed','danger'); }
+    });
+    $('#link-register')?.addEventListener('click', async ()=>{
+      const email = ($('#li-email')?.value||'').trim();
+      const pass  = ($('#li-pass')?.value||'').trim() || 'admin123';
+      if (!email) return notify('Enter an email in Email box, then click Sign up again.','warn');
+      try{
+        await auth.createUserWithEmailAndPassword(email, pass);
+        // promote if admin email
+        if (ADMIN_EMAILS.includes(email.toLowerCase())) state.role='admin'; else state.role='user';
+      }catch(e){ notify(e?.message||'Signup failed','danger'); }
+    });
+  }
+
+  /* ---------- Posts (dashboard) ---------- */
+  function wirePosts(){
+    $('#addPost')?.addEventListener('click', ()=>{
+      if(!canAdd()) return notify('No permission','warn');
+      $('#mm-title').textContent='Post';
+      $('#mm-body').innerHTML = `
+        <div class="grid">
+          <input id="post-title" class="input" placeholder="Title"/>
+          <textarea id="post-body" class="input" placeholder="Body"></textarea>
+        </div>`;
+      $('#mm-foot').innerHTML = `<button class="btn" id="save-post">Save</button>`;
+      openModal('m-modal');
+
+      $('#save-post').onclick = async ()=>{
+        const obj = {
+          title: ($('#post-title')?.value||'').trim(),
+          body:  ($('#post-body')?.value||'').trim(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if(!obj.title) return notify('Title required','warn');
+        await tcol('posts').add(obj);
+        closeModal('m-modal'); notify('Saved');
+      };
+    });
+
+    const sec = document.querySelector('[data-section="posts"]');
+    if (!sec || sec.__wired) return;
+    sec.__wired = true;
+    sec.addEventListener('click', async (e)=>{
+      const btn = e.target.closest('button'); if(!btn) return;
+      const id  = btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
+      if (btn.hasAttribute('data-edit')){
+        if(!canEdit()) return notify('No permission','warn');
+        const snap = await tcol('posts').doc(id).get(); if(!snap.exists) return;
+        const p = { id:snap.id, ...snap.data() };
+        $('#mm-title').textContent='Edit Post';
+        $('#mm-body').innerHTML = `
+          <div class="grid">
+            <input id="post-title" class="input" placeholder="Title" value="${p.title||''}"/>
+            <textarea id="post-body" class="input" placeholder="Body">${p.body||''}</textarea>
+          </div>`;
+        $('#mm-foot').innerHTML = `<button class="btn" id="save-post">Save</button>`;
+        openModal('m-modal');
+        $('#save-post').onclick = async ()=>{
+          await tcol('posts').doc(id).set({
+            title: ($('#post-title')?.value||'').trim(),
+            body:  ($('#post-body')?.value||'').trim(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge:true});
+          closeModal('m-modal'); notify('Saved');
+        };
+      } else {
+        if(!canDelete()) return notify('No permission','warn');
+        await tcol('posts').doc(id).delete();
+        notify('Deleted');
+      }
+    });
+  }
+
+  /* ---------- Inventory ---------- */
+  function wireInventory(){
+    $('#export-inventory')?.addEventListener('click', async ()=>{
+      const rows = state.inventory||[];
+      const headers=['id','name','code','type','price','stock','threshold'];
+      const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
+      const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+      const a=document.createElement('a'); a.href=url; a.download='inventory.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
+    });
+
+    $('#addInv')?.addEventListener('click', ()=>{
+      if(!canAdd()) return notify('No permission','warn');
+      $('#mm-title').textContent='Inventory Item';
+      $('#mm-body').innerHTML = `
+        <div class="grid cols-3">
+          <input id="inv-name" class="input" placeholder="Name"/>
+          <input id="inv-code" class="input" placeholder="Code"/>
+          <select id="inv-type" class="input"><option>Raw</option><option>Cooked</option><option>Dry</option><option>Other</option></select>
+          <input id="inv-price" class="input" type="number" step="0.01" placeholder="Price"/>
+          <input id="inv-stock" class="input" type="number" placeholder="Stock"/>
+          <input id="inv-threshold" class="input" type="number" placeholder="Threshold"/>
+        </div>`;
+      $('#mm-foot').innerHTML = `<button class="btn" id="save-inv">Save</button>`;
+      openModal('m-modal');
+
+      $('#save-inv').onclick = async ()=>{
+        const obj = {
+          name: ($('#inv-name')?.value||'').trim(),
+          code: ($('#inv-code')?.value||'').trim(),
+          type: ($('#inv-type')?.value||'').trim(),
+          price: parseFloat($('#inv-price')?.value||'0'),
+          stock: parseInt($('#inv-stock')?.value||'0',10),
+          threshold: parseInt($('#inv-threshold')?.value||'0',10),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if(!obj.name) return notify('Name required','warn');
+        await tcol('inventory').add(obj);
+        closeModal('m-modal'); notify('Saved');
+      };
+    });
+
+    const sec=document.querySelector('[data-section="inventory"]'); if(!sec||sec.__wired) return; sec.__wired=true;
+    sec.addEventListener('click', async (e)=>{
+      const btn = e.target.closest('button'); if(!btn) return;
+      const id  = btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
+      if (btn.hasAttribute('data-edit')){
+        if(!canEdit()) return notify('No permission','warn');
+        const snap = await tcol('inventory').doc(id).get(); if(!snap.exists) return;
+        const it = { id:snap.id, ...snap.data() };
+        $('#mm-title').textContent='Edit Item';
+        $('#mm-body').innerHTML = `
+          <div class="grid cols-3">
+            <input id="inv-name" class="input" placeholder="Name" value="${it.name||''}"/>
+            <input id="inv-code" class="input" placeholder="Code" value="${it.code||''}"/>
+            <select id="inv-type" class="input">
+              ${['Raw','Cooked','Dry','Other'].map(x=>`<option ${it.type===x?'selected':''}>${x}</option>`).join('')}
+            </select>
+            <input id="inv-price" class="input" type="number" step="0.01" placeholder="Price" value="${it.price||0}"/>
+            <input id="inv-stock" class="input" type="number" placeholder="Stock" value="${it.stock||0}"/>
+            <input id="inv-threshold" class="input" type="number" placeholder="Threshold" value="${it.threshold||0}"/>
+          </div>`;
+        $('#mm-foot').innerHTML = `<button class="btn" id="save-inv">Save</button>`;
+        openModal('m-modal');
+        $('#save-inv').onclick = async ()=>{
+          await tcol('inventory').doc(id).set({
+            name: ($('#inv-name')?.value||'').trim(),
+            code: ($('#inv-code')?.value||'').trim(),
+            type: ($('#inv-type')?.value||'').trim(),
+            price: parseFloat($('#inv-price')?.value||'0'),
+            stock: parseInt($('#inv-stock')?.value||'0',10),
+            threshold: parseInt($('#inv-threshold')?.value||'0',10),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge:true});
+          closeModal('m-modal'); notify('Saved');
+        };
+      } else {
+        if(!canDelete()) return notify('No permission','warn');
+        await tcol('inventory').doc(id).delete();
+        notify('Deleted');
+      }
+    });
+  }
+
+  /* ---------- Products ---------- */
+  function wireProducts(){
+    $('#export-products')?.addEventListener('click', ()=>{
+      const rows = state.products||[];
+      const headers=['id','name','barcode','price','type','ingredients','instructions'];
+      const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
+      const a=document.createElement('a'), url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+      a.href=url; a.download='products.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
+    });
+
+    $('#addProd')?.addEventListener('click', ()=>{
+      if(!canAdd()) return notify('No permission','warn');
+      $('#mm-title').textContent='Product';
+      $('#mm-body').innerHTML = `
+        <div class="grid cols-2">
+          <input id="prod-name" class="input" placeholder="Name"/>
+          <input id="prod-barcode" class="input" placeholder="Barcode"/>
+          <input id="prod-price" class="input" type="number" step="0.01" placeholder="Price"/>
+          <input id="prod-type" class="input" placeholder="Type"/>
+          <textarea id="prod-ingredients" class="input" placeholder="Ingredients"></textarea>
+          <textarea id="prod-instructions" class="input" placeholder="Instructions"></textarea>
+        </div>`;
+      $('#mm-foot').innerHTML = `<button class="btn" id="save-prod">Save</button>`;
+      openModal('m-modal');
+
+      $('#save-prod').onclick = async ()=>{
+        const obj = {
+          name: ($('#prod-name')?.value||'').trim(),
+          barcode: ($('#prod-barcode')?.value||'').trim(),
+          price: parseFloat($('#prod-price')?.value||'0'),
+          type: ($('#prod-type')?.value||'').trim(),
+          ingredients: ($('#prod-ingredients')?.value||'').trim(),
+          instructions: ($('#prod-instructions')?.value||'').trim(),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if(!obj.name) return notify('Name required','warn');
+        await tcol('products').add(obj);
+        closeModal('m-modal'); notify('Saved');
+      };
+    });
+
+    const sec=document.querySelector('[data-section="products"]'); if(!sec||sec.__wired) return; sec.__wired=true;
+    sec.addEventListener('click', async (e)=>{
+      const card = e.target.closest('button[data-card]');
+      if (card){
+        const id = card.getAttribute('data-card');
+        const snap = await tcol('products').doc(id).get(); if(!snap.exists) return;
+        const it = {id:snap.id, ...snap.data()};
+        $('#mm-title').textContent = it.name || 'Product';
+        $('#mm-body').innerHTML = productCard(it);
+        $('#mm-foot').innerHTML = `<button class="btn ghost" id="pc-close">Close</button>`;
+        openModal('m-modal');
+        $('#pc-close').onclick=()=> closeModal('m-modal');
+        return;
+      }
+      const btn = e.target.closest('button'); if(!btn) return;
+      const id  = btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
+      if (btn.hasAttribute('data-edit')){
+        if(!canEdit()) return notify('No permission','warn');
+        const snap = await tcol('products').doc(id).get(); if(!snap.exists) return;
+        const it = {id:snap.id, ...snap.data()};
+        $('#mm-title').textContent='Edit Product';
+        $('#mm-body').innerHTML = `
+          <div class="grid cols-2">
+            <input id="prod-name" class="input" placeholder="Name" value="${it.name||''}"/>
+            <input id="prod-barcode" class="input" placeholder="Barcode" value="${it.barcode||''}"/>
+            <input id="prod-price" class="input" type="number" step="0.01" placeholder="Price" value="${it.price||0}"/>
+            <input id="prod-type" class="input" placeholder="Type" value="${it.type||''}"/>
+            <textarea id="prod-ingredients" class="input" placeholder="Ingredients">${it.ingredients||''}</textarea>
+            <textarea id="prod-instructions" class="input" placeholder="Instructions">${it.instructions||''}</textarea>
+          </div>`;
+        $('#mm-foot').innerHTML = `<button class="btn" id="save-prod">Save</button>`;
+        openModal('m-modal');
+        $('#save-prod').onclick = async ()=>{
+          await tcol('products').doc(id).set({
+            name: ($('#prod-name')?.value||'').trim(),
+            barcode: ($('#prod-barcode')?.value||'').trim(),
+            price: parseFloat($('#prod-price')?.value||'0'),
+            type: ($('#prod-type')?.value||'').trim(),
+            ingredients: ($('#prod-ingredients')?.value||'').trim(),
+            instructions: ($('#prod-instructions')?.value||'').trim(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge:true});
+          closeModal('m-modal'); notify('Saved');
+        };
+      } else {
+        if(!canDelete()) return notify('No permission','warn');
+        await tcol('products').doc(id).delete();
+        notify('Deleted');
+      }
+    });
+  }
+
+  /* ---------- COGS ---------- */
+  function wireCOGS(){
+    $('#export-cogs')?.addEventListener('click', ()=>{
+      const rows=state.cogs||[]; const headers=['id','date','grossIncome','produceCost','itemCost','freight','other'];
+      const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
+      const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='cogs.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
+    });
+
+    $('#export-cogs-range')?.addEventListener('click', ()=>{
+      const y = +($('#cogs-year')?.value || 0), m = +($('#cogs-month')?.value || 0);
+      const rows = (state.cogs||[]).filter(r=>{
+        const d = r.date || ''; const Y = +d.slice(0,4), M = +d.slice(5,7);
+        if (y && m) return Y===y && M===m;
+        if (y && !m) return Y===y;
+        return true;
+      });
+      const headers=['id','date','grossIncome','produceCost','itemCost','freight','other'];
+      const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
+      const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download = y ? (m?`cogs_${y}-${String(m).padStart(2,'0')}.csv`:`cogs_${y}.csv`) : 'cogs_range.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
+    });
+
+    $('#addCOGS')?.addEventListener('click', ()=>{
+      if(!canAdd()) return notify('No permission','warn');
+      $('#mm-title').textContent='COGS Row';
+      $('#mm-body').innerHTML = `
+        <div class="grid cols-3">
+          <input id="cogs-date" class="input" type="date" value="${new Date().toISOString().slice(0,10)}"/>
+          <input id="cogs-grossIncome" class="input" type="number" step="0.01" placeholder="G-Income"/>
+          <input id="cogs-produceCost" class="input" type="number" step="0.01" placeholder="Produce Cost"/>
+          <input id="cogs-itemCost" class="input" type="number" step="0.01" placeholder="Item Cost"/>
+          <input id="cogs-freight" class="input" type="number" step="0.01" placeholder="Freight"/>
+          <input id="cogs-other" class="input" type="number" step="0.01" placeholder="Other"/>
+        </div>`;
+      $('#mm-foot').innerHTML = `<button class="btn" id="save-cogs">Save</button>`;
+      openModal('m-modal');
+
+      $('#save-cogs').onclick = async ()=>{
+        const row = {
+          date: $('#cogs-date')?.value || new Date().toISOString().slice(0,10),
+          grossIncome:+($('#cogs-grossIncome')?.value||0),
+          produceCost:+($('#cogs-produceCost')?.value||0),
+          itemCost:+($('#cogs-itemCost')?.value||0),
+          freight:+($('#cogs-freight')?.value||0),
+          other:+($('#cogs-other')?.value||0),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await tcol('cogs').add(row);
+        closeModal('m-modal'); notify('Saved');
+      };
+    });
+
+    const sec=document.querySelector('[data-section="cogs"]'); if(!sec||sec.__wired) return; sec.__wired=true;
+    sec.addEventListener('click', async (e)=>{
+      const btn=e.target.closest('button'); if(!btn) return;
+      const id=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
+      if (btn.hasAttribute('data-edit')){
+        if(!canEdit()) return notify('No permission','warn');
+        const snap = await tcol('cogs').doc(id).get(); if(!snap.exists) return;
+        const r = { id:snap.id, ...snap.data() };
+        $('#mm-title').textContent='Edit COGS';
+        $('#mm-body').innerHTML = `
+          <div class="grid cols-3">
+            <input id="cogs-date" class="input" type="date" value="${r.date||new Date().toISOString().slice(0,10)}"/>
+            <input id="cogs-grossIncome" class="input" type="number" step="0.01" placeholder="G-Income" value="${r.grossIncome||0}"/>
+            <input id="cogs-produceCost" class="input" type="number" step="0.01" placeholder="Produce Cost" value="${r.produceCost||0}"/>
+            <input id="cogs-itemCost" class="input" type="number" step="0.01" placeholder="Item Cost" value="${r.itemCost||0}"/>
+            <input id="cogs-freight" class="input" type="number" step="0.01" placeholder="Freight" value="${r.freight||0}"/>
+            <input id="cogs-other" class="input" type="number" step="0.01" placeholder="Other" value="${r.other||0}"/>
+          </div>`;
+        $('#mm-foot').innerHTML = `<button class="btn" id="save-cogs">Save</button>`;
+        openModal('m-modal');
+        $('#save-cogs').onclick = async ()=>{
+          await tcol('cogs').doc(id).set({
+            date: $('#cogs-date')?.value || new Date().toISOString().slice(0,10),
+            grossIncome:+($('#cogs-grossIncome')?.value||0),
+            produceCost:+($('#cogs-produceCost')?.value||0),
+            itemCost:+($('#cogs-itemCost')?.value||0),
+            freight:+($('#cogs-freight')?.value||0),
+            other:+($('#cogs-other')?.value||0),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge:true});
+          closeModal('m-modal'); notify('Saved');
+        };
+      } else {
+        if(!canDelete()) return notify('No permission','warn');
+        await tcol('cogs').doc(id).delete();
+        notify('Deleted');
+      }
+    });
+  }
+
+  /* ---------- Tasks ---------- */
+  function wireTasks(){
+    $('#addTask')?.addEventListener('click', ()=>{
+      if(!canAdd()) return notify('No permission','warn');
+      $('#mm-title').textContent='Task';
+      $('#mm-body').innerHTML = `
+        <div class="grid">
+          <input id="task-title" class="input" placeholder="Title"/>
+          <select id="task-status" class="input"><option value="todo">To do</option><option value="inprogress">In progress</option><option value="done">Done</option></select>
+        </div>`;
+      $('#mm-foot').innerHTML = `<button class="btn" id="save-task">Save</button>`;
+      openModal('m-modal');
+
+      $('#save-task').onclick = async ()=>{
+        const t = { title: ($('#task-title')?.value||'').trim(), status: ($('#task-status')?.value||'todo'), createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+        if(!t.title) return notify('Title required','warn');
+        await tcol('tasks').add(t); closeModal('m-modal'); notify('Saved');
+      };
+    });
+
+    const root=document.querySelector('[data-section="tasks"]'); if(!root) return;
+
+    // drag + drop
+    root.querySelectorAll('.task-card').forEach(card=>{
+      card.setAttribute('draggable','true'); card.style.cursor='grab';
+      card.addEventListener('dragstart',(e)=>{ const id=card.getAttribute('data-task'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', id); card.classList.add('dragging'); });
+      card.addEventListener('dragend',()=> card.classList.remove('dragging'));
+    });
+    root.querySelectorAll('.lane-grid').forEach(grid=>{
+      const row=grid.closest('.lane-row'); const lane=row?.getAttribute('data-lane');
+      const show=(e)=>{ e.preventDefault(); try{ e.dataTransfer.dropEffect='move'; }catch{} row?.classList.add('drop'); };
+      const hide=()=> row?.classList.remove('drop');
+      grid.addEventListener('dragenter', show);
+      grid.addEventListener('dragover',  show);
+      grid.addEventListener('dragleave', hide);
+      grid.addEventListener('drop',async (e)=>{
+        e.preventDefault(); hide(); if(!lane) return;
+        if (!canAdd()) return notify('No permission','warn');
+        const id=e.dataTransfer.getData('text/plain'); if(!id) return;
+        await tcol('tasks').doc(id).set({ status: lane, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+        notify('Task moved');
+      });
+    });
+
+    // edit/delete
+    root.addEventListener('click',(e)=>{
+      const btn=e.target.closest('button'); if(!btn) return;
+      const id=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
+      if(btn.hasAttribute('data-edit')){
+        if(!canEdit()) return notify('No permission','warn');
+        const t = state.tasks.find(x=>x.id===id); if(!t) return;
+        $('#mm-title').textContent='Edit Task';
+        $('#mm-body').innerHTML = `
+          <div class="grid">
+            <input id="task-title" class="input" placeholder="Title" value="${t.title||''}"/>
+            <select id="task-status" class="input">
+              ${['todo','inprogress','done'].map(x=>`<option value="${x}" ${t.status===x?'selected':''}>${x}</option>`).join('')}
+            </select>
+          </div>`;
+        $('#mm-foot').innerHTML = `<button class="btn" id="save-task">Save</button>`;
+        openModal('m-modal');
+        $('#save-task').onclick = async ()=>{
+          await tcol('tasks').doc(id).set({
+            title: ($('#task-title')?.value||'').trim(),
+            status: ($('#task-status')?.value||'todo'),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge:true});
+          closeModal('m-modal'); notify('Saved');
+        };
+      } else {
+        if(!canDelete()) return notify('No permission','warn');
+        tcol('tasks').doc(id).delete().then(()=> notify('Deleted'));
+      }
+    });
+
+    // tap to advance (mobile)
+    const isTouch='ontouchstart' in window || navigator.maxTouchPoints>0;
+    if (isTouch){
+      $$('.task-card').forEach(card=>{
+        card.addEventListener('click', async (e)=>{
+          if (e.target.closest('button')) return;
+          if (!canAdd()) return notify('No permission','warn');
+          const id=card.getAttribute('data-task'); const t=state.tasks.find(x=>x.id===id); if(!t) return;
+          const next=t.status==='todo'?'inprogress':(t.status==='inprogress'?'done':'todo');
+          await tcol('tasks').doc(id).set({ status: next, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+        });
+      });
+    }
+  }
+
+  /* ---------- Settings ---------- */
+  function wireSettings(){
+    $('#theme-palette')?.addEventListener('change', (e)=>{ setTheme(e.target.value, null); });
+    $('#theme-font')?.addEventListener('change', (e)=>{ setTheme(null, e.target.value); });
+    $('#save-theme')?.addEventListener('click', saveKVTheme);
+
+    const table=document.querySelector('[data-section="users"]');
+    $('#addUser')?.addEventListener('click', ()=>{
+      if(!canAdd()) return notify('No permission','warn');
+      $('#mm-title').textContent='Tenant User';
+      $('#mm-body').innerHTML = `
+        <div class="grid cols-3">
+          <input id="user-name" class="input" placeholder="Name"/>
+          <input id="user-email" class="input" placeholder="Email"/>
+          <select id="user-role" class="input">
+            ${['user','associate','manager','admin'].map(x=>`<option value="${x}">${x}</option>`).join('')}
+          </select>
+        </div>`;
+      $('#mm-foot').innerHTML = `<button class="btn" id="save-user">Save</button>`;
+      openModal('m-modal');
+
+      $('#save-user').onclick = async ()=>{
+        const u={
+          name:($('#user-name')?.value||'').trim(),
+          email:($('#user-email')?.value||'').trim(),
+          role: ($('#user-role')?.value||'user'),
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if(!u.email) return notify('Email required','warn');
+        await tcol('users').add(u);
+        closeModal('m-modal'); notify('Saved');
+      };
+    });
+    table?.addEventListener('click', async (e)=>{
+      const btn=e.target.closest('button'); if(!btn) return;
+      const id=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
+      if(btn.hasAttribute('data-edit')){
+        if(!canEdit()) return notify('No permission','warn');
+        const snap=await tcol('users').doc(id).get(); if(!snap.exists) return;
+        const u={id:snap.id, ...snap.data()};
+        $('#mm-title').textContent='Edit Tenant User';
+        $('#mm-body').innerHTML = `
+          <div class="grid cols-3">
+            <input id="user-name" class="input" placeholder="Name" value="${u.name||''}"/>
+            <input id="user-email" class="input" placeholder="Email" value="${u.email||''}"/>
+            <select id="user-role" class="input">
+              ${['user','associate','manager','admin'].map(x=>`<option value="${x}" ${u.role===x?'selected':''}>${x}</option>`).join('')}
+            </select>
+          </div>`;
+        $('#mm-foot').innerHTML = `<button class="btn" id="save-user">Save</button>`;
+        openModal('m-modal');
+        $('#save-user').onclick = async ()=>{
+          await tcol('users').doc(id).set({
+            name:($('#user-name')?.value||'').trim(),
+            email:($('#user-email')?.value||'').trim(),
+            role: ($('#user-role')?.value||'user'),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge:true});
+          closeModal('m-modal'); notify('Saved');
+        };
+      } else {
+        if(!canDelete()) return notify('No permission','warn');
+        await tcol('users').doc(id).delete(); notify('Deleted');
+      }
+    });
+  }
+
+  /* ---------- Links (EmailJS) ---------- */
+  function wireLinks(){
+    if (window.emailjs && EMAILJS_PUBLIC_KEY) {
+      try { window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY }); } catch {}
+    }
+    $('#send-email')?.addEventListener('click', async ()=>{
+      const name=($('#ct-name')?.value||'').trim(), email=($('#ct-email')?.value||'').trim(), msg=($('#ct-msg')?.value||'').trim();
+      if (!name || !email || !msg) return notify('Fill all fields','warn');
+      if (window.emailjs && EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID){
+        try{
+          await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, { from_name:name, reply_to:email, message:msg, to_email:'minmaung0307@gmail.com' });
+          notify('Email sent!'); $('#ct-name').value=''; $('#ct-email').value=''; $('#ct-msg').value='';
+        }catch(e){ notify('EmailJS failed; using mail app…','warn'); window.open(`mailto:minmaung0307@gmail.com?subject=Hello&body=${encodeURIComponent(msg)}`,'_blank'); }
+      } else {
+        window.open(`mailto:minmaung0307@gmail.com?subject=Hello&body=${encodeURIComponent(msg)}`,'_blank');
+      }
+    });
+  }
+
+  function wireSearch(){
+    // buttons already wired in shell
+    document.querySelectorAll('[data-go]').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        const r=el.getAttribute('data-go'); const id=el.getAttribute('data-id'); go(r); if (id) setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}),80);
+      });
+    });
+  }
+
+  /* ---------- Auth listener ---------- */
+  auth.onAuthStateChanged(async (user)=>{
+    state.user = user || null;
+    if (!user){
+      clearSnapshots();
+      render();
+      return;
+    }
+    // role by email map
+    state.role = ADMIN_EMAILS.includes((user.email||'').toLowerCase()) ? 'admin' : 'user';
+    // seed kv theme doc if absent
     try{
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      await updateProfile(cred.user, { displayName: name || email.split('@')[0] });
-      notify('Account created — signed in');
-      closeAuth();
-    }catch(e){ notify(e?.message||'Signup failed'); }
-  }
-  async function doReset(){
-    const email = ($('#fp-email')?.value||'').trim().toLowerCase();
-    if(!email) return notify('Enter your email');
-    try{ await sendPasswordResetEmail(auth, email); notify('Reset email sent'); closeAuth(); }catch(e){ notify(e?.message||'Failed to send'); }
-  }
+      const kv = await tdoc('_theme').get();
+      if (!kv.exists){
+        await tdoc('_theme').set({
+          palette: state.theme.palette, font: state.theme.font, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } else {
+        const data = kv.data() || {};
+        setTheme(data.palette||state.theme.palette, data.font||state.theme.font);
+      }
+    }catch{}
+    syncTenant();
+    idle.hook();
+    render();
+  });
 
-  $('#btnLogin')?.addEventListener('click', doSignIn);
-  $('#li-pass')?.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSignIn(); });
-  $('#link-register')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuth('#m-signup'); $('#su-email').value=$('#li-email')?.value||''; });
-  $('#link-forgot')?.addEventListener('click', (e)=>{ e.preventDefault(); openAuth('#m-reset'); $('#fp-email').value=$('#li-email')?.value||''; });
-  $('#cl-signup')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuth(); });
-  $('#cl-reset')?.addEventListener('click', (e)=>{ e.preventDefault(); closeAuth(); });
-  $('#btnSignupDo')?.addEventListener('click', doSignup);
-  $('#btnResetDo')?.addEventListener('click', doReset);
-}
-
-/* ---------- Auth ---------- */
-onAuthStateChanged(auth, async (user)=>{
-  if (!user){
-    stopLiveSync();
-    state.session = null;
-    renderApp();
-    return;
-  }
-  try{ await set(ref(db, `registry/users/${user.uid}`), { email:(user.email||'').toLowerCase(), name: user.displayName||user.email?.split('@')[0]||'User' }); }catch{}
-  await ensureRoleOnFirstLogin();
-  const role = await fetchRole();
-  state.session = { uid:user.uid, email:(user.email||'').toLowerCase(), displayName:user.displayName||'', role };
-  startLiveSync();
-  renderApp();
-});
-async function doLogout(){ try{ await signOut(auth); }catch{} stopLiveSync(); state.session=null; renderApp(); }
+  /* ---------- Boot ---------- */
+  setTheme('sunrise','medium'); // default
+  render();
+})();
