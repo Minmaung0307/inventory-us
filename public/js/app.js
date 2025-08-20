@@ -5,7 +5,7 @@ import {
   updateProfile, sendPasswordResetEmail, signOut
 } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js';
 import {
-  getDatabase, ref, get, set, onValue, off, serverTimestamp
+  getDatabase, ref, get, set, onValue, off
 } from 'https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js';
 
 /* ---------- Helpers ---------- */
@@ -494,23 +494,56 @@ function viewCOGS(){
     </div>`;
 }
 function wireCOGS(){
-  $('#export-cogs')?.addEventListener('click', ()=>{
-    const rows=state.cogs||[]; const headers=['id','date','grossIncome','produceCost','itemCost','freight','other'];
-    const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='cogs.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
+  // 1) Full COGS export
+$('#export-cogs')?.addEventListener('click', ()=>{
+  const rows = state.cogs || [];
+  const headers = ['id','date','grossIncome','produceCost','itemCost','freight','other'];
+  const csv = [headers.join(',')]
+    .concat(
+      rows.map(r =>
+        headers
+          .map(h => String(r[h] ?? '').replace(/"/g, '""'))  // <-- fixed here
+          .map(s => /[",\n]/.test(s) ? `"${s}"` : s)
+          .join(',')
+      )
+    )
+    .join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'cogs.csv'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),0);
+});
+
+  // 2) Year/Month range export
+$('#export-cogs-range')?.addEventListener('click', ()=>{
+  const y = +($('#cogs-year')?.value || 0), m = +($('#cogs-month')?.value || 0);
+  const rows = (state.cogs || []).filter(r=>{
+    const d = r.date || ''; const Y = +d.slice(0,4), M = +d.slice(5,7);
+    if (y && m) return Y===y && M===m;
+    if (y && !m) return Y===y;
+    return true;
   });
-  $('#export-cogs-range')?.addEventListener('click', ()=>{
-    const y=+($('#cogs-year')?.value||0), m=+($('#cogs-month')?.value||0);
-    const rows=(state.cogs||[]).filter(r=>{
-      const d=r.date||''; const Y=+d.slice(0,4), M=+d.slice(5,7);
-      if (y && m) return Y===y && M===m;
-      if (y && !m) return Y===y;
-      return true;
-    });
-    const headers=['id','date','grossIncome','produceCost','itemCost','freight','other'];
-    const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=y? (m?`cogs_${y}-${String(m).padStart(2,'0')}.csv`:`cogs_${y}.csv`):'cogs_range.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
-  });
+  const headers = ['id','date','grossIncome','produceCost','itemCost','freight','other'];
+  const csv = [headers.join(',')]
+    .concat(
+      rows.map(r =>
+        headers
+          .map(h => String(r[h] ?? '').replace(/"/g, '""'))  // <-- fixed here too
+          .map(s => /[",\n]/.test(s) ? `"${s}"` : s)
+          .join(',')
+      )
+    )
+    .join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = y ? (m ? `cogs_${y}-${String(m).padStart(2,'0')}.csv` : `cogs_${y}.csv`) : 'cogs_range.csv';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),0);
+});
+
   $('#addCOGS')?.addEventListener('click', ()=>{
     if(!canAdd()) return notify('No permission');
     openModal('m-cogs'); $('#cogs-id').value=''; $('#cogs-date').value=new Date().toISOString().slice(0,10);
@@ -534,7 +567,7 @@ function wireCOGS(){
 }
 
 function viewTasks(){
-  const items=state.tasks||[];
+  const items=state.tasks||=[];
   const lane=(key,label,color)=>`
     <div class="card lane-row" data-lane="${key}">
       <div class="head"><h3 style="margin:0;color:${color};font-size:16px">${label}</h3></div>
@@ -687,9 +720,7 @@ function wireSettings(){
       if (state.session?.role!=='admin') return notify('Admins only');
       const u=users.find(x=>x.email===email); if(!u) return;
       const newRole = prompt('Set role (user, associate, manager, admin):', u.role||'user'); if(!/^(user|associate|manager|admin)$/.test(newRole||'')) return;
-      // update in local list for convenience
       u.role = newRole; state.users = users; set(pathKV('users'), {key:'users', val: users});
-      // and write authority role
       set(ref(db, `userRoles/${u.uid||''}`), newRole).catch(()=>{});
       renderApp();
     }
@@ -719,8 +750,8 @@ const pageContent = {
   <ol>
     <li>Create a Firebase project, enable Email/Password auth.</li>
     <li>Paste the config into <code>index.html</code> (window.__FIREBASE_CONFIG).</li>
-    <li>Deploy the <strong>Realtime Database Rules</strong> above.</li>
-    <li>Upload this <code>public/</code> folder to Firebase Hosting.</li>
+    <li>Deploy the <strong>Realtime Database Rules</strong>.</li>
+    <li>Deploy this <code>public/</code> folder to Firebase Hosting.</li>
   </ol>`,
 
   guide: `<h3>User Guide</h3>
@@ -846,7 +877,6 @@ function modalsHTML(){ return `
 
   <!-- Product card modal is in viewProducts() -->
 `; }
-
 function ensureGlobalModals(){
   if ($('#__modals')) return;
   const wrap=document.createElement('div'); wrap.id='__modals'; wrap.innerHTML=modalsHTML(); document.body.appendChild(wrap);
@@ -879,6 +909,7 @@ function renderApp(){
   hookSidebarInteractions();
   ensureGlobalModals();
   wirePage(state.route);
+  wireSaves(); // <— moved here; wrapper removed
 }
 function wirePage(route){
   hookSidebarInteractions();
@@ -1053,7 +1084,6 @@ onAuthStateChanged(auth, async (user)=>{
     renderApp();
     return;
   }
-  // Registry card
   try{ await set(ref(db, `registry/users/${user.uid}`), { email:(user.email||'').toLowerCase(), name: user.displayName||user.email?.split('@')[0]||'User' }); }catch{}
   await ensureRoleOnFirstLogin();
   const role = await fetchRole();
@@ -1062,30 +1092,3 @@ onAuthStateChanged(auth, async (user)=>{
   renderApp();
 });
 async function doLogout(){ try{ await signOut(auth); }catch{} stopLiveSync(); state.session=null; renderApp(); }
-
-/* ---------- Wire form save handlers after each render ---------- */
-document.addEventListener('click',(e)=>{
-  if (e.target?.matches?.('[data-close]')) return; // handled in ensureGlobalModals
-});
-function wireCommon(){
-  wireSaves();
-}
-
-/* ---------- Final boot ---------- */
-function openModal(id){ $('#'+id)?.classList.add('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.add('active'); document.body.classList.add('modal-open'); }
-function renderShell(){ renderApp(); }
-function wireRoute(route){}
-
-function wireAll(){ wireCommon(); }
-function afterRender(){ wireAll(); }
-function wirePageSwitch(){}
-
-/* Hook wiring after each render */
-const _origRender = renderApp;
-renderApp = function(){
-  _origRender();
-  // wire routes
-  const route = state.route;
-  // route-specific wires already called in wirePage()
-  wireSaves();
-};
