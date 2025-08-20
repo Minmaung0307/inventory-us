@@ -1,5 +1,4 @@
 *{ box-sizing: border-box; }
-
 :root{
   --font-scale: 100%;
   --radius: 14px;
@@ -11,13 +10,12 @@
   --card-border: #1f2937;
   --text: #e5f0ff;
   --muted: #95a3c2;
-  --accent: #38bdf8; /* sky */
-  --accent-2: #60a5fa; /* blue */
+  --accent: #38bdf8;  /* sky */
+  --accent-2: #60a5fa;/* blue */
   --ok: #34d399;
   --warn: #f59e0b;
   --danger:#ef4444;
 }
-
 html[data-theme="peach"]{
   --bg:#1a1412; --panel:#241a18; --card:#2a1f1c; --card-border:#3a2b27;
   --text:#ffece7; --muted:#e2c7bf; --accent:#ff9e7c; --accent-2:#ffb48f;
@@ -71,7 +69,8 @@ body{
 .card .head, .card .foot{ padding:12px 14px; border-bottom:1px solid var(--card-border); }
 .card .foot{ border-top:1px solid var(--card-border); border-bottom:none; }
 
-/* Inputs */
+/* Inputs + labels (a11y) */
+label{ font-size:12px; color:var(--muted); margin-bottom:6px; display:block; }
 .input, select, textarea{ background:#0c1322; border:1px solid #1f2a44; color:var(--text); padding:12px 14px; border-radius:12px; width:100%; outline:none; }
 .input::placeholder, textarea::placeholder{ color:var(--muted); opacity:.95; }
 .input:focus, select:focus, textarea:focus{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(56,189,248,.15); }
@@ -97,7 +96,7 @@ body{
 /* Search */
 .search-wrap{ margin:10px 0 6px; position:relative; }
 #globalSearch{ width:100%; }
-.search-results{ position:absolute; inset-inline:0; top:48px; background:var(--card); border:1px solid var(--card-border); border-radius:12px; display:none; z-index:5; }
+.search-results{ position:absolute; inset-inline:0; top:70px; background:var(--card); border:1px solid var(--card-border); border-radius:12px; display:none; z-index:5; }
 .search-results.active{ display:block; }
 .search-results .result{ padding:10px 12px; cursor:pointer; }
 .search-results .result:hover{ background: rgba(255,255,255,.05); }
@@ -107,7 +106,7 @@ body{
 table{ width:100%; border-collapse:collapse; }
 th, td{ padding:10px 12px; border-bottom:1px solid var(--card-border); vertical-align:middle; }
 thead th{ text-align:left; color:var(--muted); font-weight:600; }
-td .num, th.num{ text-align:right; }
+th.num, td.num{ text-align:right; }
 tr.tr-total th{ border-top:2px solid var(--card-border); }
 
 /* Notification */
@@ -124,7 +123,7 @@ tr.tr-total th{ border-top:2px solid var(--card-border); }
 .modal .body{ padding:14px; }
 .modal .foot{ padding:12px 14px; border-top:1px solid var(--card-border); }
 
-/* Login (centered, with proper placeholders) */
+/* Login (centered) */
 .login{ min-height:100vh; display:grid; place-items:center; padding:16px; }
 .login-card{ width:min(520px, 96vw); border-radius:18px; }
 .login-card .card-body{ padding:18px; }
@@ -134,17 +133,8 @@ tr.tr-total th{ border-top:2px solid var(--card-border); }
 .login .grid .btn{ width:100%; }
 .login .link-row{ display:flex; gap:10px; justify-content:space-between; padding-top:10px; }
 
-/* Links */
+/* Links / Product “click to open” */
 a{ color: var(--accent); text-decoration: none; }
 a:hover{ text-decoration: underline; }
-
-/* Chips + badges */
-.badge{ display:inline-block; padding:2px 8px; border-radius:999px; background:rgba(56,189,248,.14); border:1px solid rgba(56,189,248,.25); color:var(--accent); font-size:12px; }
-
-/* Helpers */
-.flex{ display:flex; gap:8px; align-items:center; }
-.space-between{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
-
-/* Product name (card trigger) */
-.clicky{ cursor:pointer; font-weight:700; }
+.clicky{ cursor:pointer; font-weight:700; color:var(--text); }
 .clicky:hover{ color:var(--accent); text-decoration: underline; }
