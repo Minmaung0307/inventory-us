@@ -1,6 +1,6 @@
-/* Inventory SPA — Firestore + EmailJS
+/* Inventory SPA — Firestore + EmailJS (v1.0.1)
    -----------------------------------------------------
-   Fill your Firebase config in index.html (window.__FIREBASE_CONFIG)
+   Fill Firebase config in index.html (window.__FIREBASE_CONFIG)
    Fill EmailJS IDs below to enable sending from Contact page.
    ----------------------------------------------------- */
 
@@ -27,15 +27,15 @@
     role: 'user',           // user | associate | manager | admin
     route: 'dashboard',
     searchQ: '',
-    // Firestore-synced collections (per-tenant)
     inventory: [],
     products: [],
     cogs: [],
     tasks: [],
     posts: [],
-    users: [],              // optional tenant-local “staff list”
+    links: [],              // << new: Link Pages collection
+    users: [],
     theme: { palette:'sunrise', font:'medium' },
-    unsub: []               // snapshot unsubscribers
+    unsub: []
   };
 
   /* ---------- Utilities ---------- */
@@ -71,7 +71,7 @@
 
   const idle = {
     timer:null,
-    MAX: 20*60*1000, // 20 minutes
+    MAX: 20*60*1000,
     arm(){
       this.disarm();
       this.timer = setTimeout(()=> auth.signOut().catch(()=>{}), this.MAX);
@@ -110,18 +110,19 @@
       setTheme(palette, font);
     }));
 
-    const attach = (name, targetKey) => {
-      state.unsub.push(tcol(name).orderBy('createdAt','desc').onSnapshot(s=>{
+    const attach = (name, targetKey, order='desc') => {
+      state.unsub.push(tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
         state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
         if (['dashboard',name].includes(state.route)) render();
       }));
     };
-    attach('inventory','inventory');
-    attach('products','products');
-    attach('cogs','cogs');
-    attach('tasks','tasks');
-    attach('posts','posts');
-    attach('users','users');
+    attach('inventory','inventory');   // items
+    attach('products','products');     // products
+    attach('cogs','cogs');             // cogs rows
+    attach('tasks','tasks');           // kanban
+    attach('posts','posts');           // dashboard posts
+    attach('users','users');           // tenant user list
+    attach('links','links');           // NEW: link pages data
   }
 
   async function saveKVTheme(){
@@ -144,7 +145,8 @@
     state.products.forEach(p=> ix.push({label:p.name, section:'Products', route:'products', id:p.id, text:`${p.name} ${p.barcode} ${p.type}`}));
     state.cogs.forEach(r=> ix.push({label:r.date, section:'COGS', route:'cogs', id:r.id, text:`${r.date} ${r.grossIncome} ${r.produceCost} ${r.itemCost} ${r.freight} ${r.other}`}));
     state.tasks.forEach(t=> ix.push({label:t.title, section:'Tasks', route:'tasks', id:t.id, text:`${t.title} ${t.status}`}));
-    state.posts.forEach(p=> ix.push({label:p.title, section:'Links', route:'links', id:p.id, text:`${p.title} ${p.body}`}));
+    state.posts.forEach(p=> ix.push({label:p.title, section:'Posts', route:'dashboard', id:p.id, text:`${p.title} ${p.body}`}));
+    state.links.forEach(l=> ix.push({label:l.title, section:'Links', route:'links', id:l.id, text:`${l.title} ${l.url||''}`}));
     state.users.forEach(u=> ix.push({label:u.name, section:'Users', route:'settings', id:u.id, text:`${u.name} ${u.email} ${u.role}`}));
     return ix;
   }
@@ -172,7 +174,7 @@
             <div class="logo">📦</div>
             <div class="title">Inventory</div>
           </div>
-          <div class="nav">
+          <div class="nav" id="side-nav">
             ${[
               ['dashboard','Dashboard','ri-dashboard-line'],
               ['inventory','Inventory','ri-archive-2-line'],
@@ -182,7 +184,7 @@
               ['links','Link Pages','ri-links-line'],
               ['settings','Settings','ri-settings-3-line']
             ].map(([r,label,icon])=>`
-              <div class="item ${state.route===r?'active':''}" data-route="${r}">
+              <div class="item ${state.route===r?'active':''}" data-route="${r}" role="button" tabindex="0">
                 <i class="${icon}"></i><span>${label}</span>
               </div>`).join('')}
           </div>
@@ -198,7 +200,7 @@
         <div>
           <div class="topbar">
             <div class="badge"><i class="ri-shield-user-line"></i> ${state.role.toUpperCase()}</div>
-            <div class="search" style="position:relative">
+            <div class="search">
               <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
               <div id="searchResults" class="search-results"></div>
             </div>
@@ -246,6 +248,16 @@
       </div>`;
   }
 
+  function dashCard(label, value, route, badgeClass=''){
+    return `<div class="card clickable" data-go="${route}">
+      <div class="card-body">
+        <div>${label}</div>
+        <h2>${value}</h2>
+        ${badgeClass ? `<div class="badge ${badgeClass}" style="margin-top:6px">${label}</div>`:''}
+      </div>
+    </div>`;
+  }
+
   function viewDashboard(){
     const lowCt  = state.inventory.filter(i => i.stock <= i.threshold && i.stock > Math.max(1, Math.floor(i.threshold*0.6))).length;
     const critCt = state.inventory.filter(i => i.stock <= Math.max(1, Math.floor(i.threshold*0.6))).length;
@@ -260,16 +272,16 @@
 
     return `
       <div class="grid cols-4">
-        <div class="card"><div class="card-body"><div>Inventory</div><h2>${state.inventory.length}</h2></div></div>
-        <div class="card"><div class="card-body"><div>Products</div><h2>${state.products.length}</h2></div></div>
-        <div class="card"><div class="card-body"><div>Tasks</div><h2>${state.tasks.length}</h2></div></div>
-        <div class="card"><div class="card-body"><div>Users</div><h2>${state.users.length}</h2></div></div>
+        ${dashCard('Inventory', state.inventory.length, 'inventory')}
+        ${dashCard('Products', state.products.length, 'products')}
+        ${dashCard('Tasks', state.tasks.length, 'tasks')}
+        ${dashCard('Users', state.users.length, 'settings')}
       </div>
 
       <div class="grid cols-3">
-        <div class="card"><div class="card-body"><strong>Low stock</strong><div style="color:var(--muted)">${lowCt}</div></div></div>
-        <div class="card"><div class="card-body"><strong>Critical</strong><div style="color:var(--muted)">${critCt}</div></div></div>
-        <div class="card"><div class="card-body"><strong>G-Profit (YTD)</strong><div style="color:var(--muted)">${fmtUSD(gProfit)}</div></div></div>
+        <div class="card clickable" data-go="inventory"><div class="card-body"><strong>Low stock</strong><div class="badge warn" style="margin-top:8px">${lowCt}</div></div></div>
+        <div class="card clickable" data-go="inventory"><div class="card-body"><strong>Critical</strong><div class="badge danger" style="margin-top:8px">${critCt}</div></div></div>
+        <div class="card clickable" data-go="cogs"><div class="card-body"><strong>G-Profit (YTD)</strong><div style="color:var(--muted)">${fmtUSD(gProfit)}</div></div></div>
       </div>
 
       <div class="card"><div class="card-body">
@@ -306,23 +318,41 @@
         </div>
         <div class="table-wrap" data-section="inventory">
           <table class="table">
-            <thead><tr><th>Name</th><th>Code</th><th>Type</th><th class="num">Price</th><th class="num">Stock</th><th class="num">Threshold</th><th>Actions</th></tr></thead>
+            <thead><tr>
+              <th>Name</th><th>Code</th><th>Type</th><th class="num">Price</th>
+              <th class="num">Stock</th><th class="num">Threshold</th><th>Actions</th>
+            </tr></thead>
             <tbody>
-              ${state.inventory.map(it=>`
-                <tr id="${it.id}">
-                  <td>${it.name}</td>
-                  <td>${it.code}</td>
-                  <td>${it.type||'-'}</td>
-                  <td class="num">${fmtUSD(it.price)}</td>
-                  <td class="num">${it.stock}</td>
-                  <td class="num">${it.threshold}</td>
-                  <td class="actions">
-                    ${canEdit()? `<button class="btn ghost" data-edit="${it.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
-                    ${canDelete()? `<button class="btn danger" data-del="${it.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>`:''}
-                  </td>
-                </tr>`).join('')}
+              ${state.inventory.map(it=>{
+                const critical = it.stock <= Math.max(1, Math.floor(it.threshold*0.6));
+                const low = !critical && it.stock <= it.threshold;
+                const rowClass = critical? 'critical' : (low? 'low' : '');
+                return `
+                  <tr id="${it.id}" class="${rowClass}">
+                    <td>${it.name}</td>
+                    <td>${it.code}</td>
+                    <td>${it.type||'-'}</td>
+                    <td class="num">${fmtUSD(it.price)}</td>
+                    <td class="num">
+                      ${it.stock}
+                      ${canEdit()? `
+                        <span class="actions" style="float:right">
+                          <button class="btn ghost" data-inc="${it.id}" title="Increase"><i class="ri-add-line"></i></button>
+                          <button class="btn ghost" data-dec="${it.id}" title="Decrease"><i class="ri-subtract-line"></i></button>
+                        </span>`:''}
+                    </td>
+                    <td class="num">${it.threshold}</td>
+                    <td class="actions">
+                      ${canEdit()? `<button class="btn ghost" data-edit="${it.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
+                      ${canDelete()? `<button class="btn danger" data-del="${it.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>`:''}
+                    </td>
+                  </tr>`;
+              }).join('')}
             </tbody>
           </table>
+          <div style="color:var(--muted);margin-top:8px">
+            Tip: Use <strong>+</strong>/<strong>−</strong> to adjust stock. Set <em>Threshold</em> in Add/Edit.
+          </div>
         </div>
       </div></div>
     `;
@@ -385,8 +415,6 @@
       const gp = (+r.grossIncome||0)-((+r.produceCost||0)+(+r.itemCost||0)+(+r.freight||0)+(+r.other||0));
       return { ...r, gp };
     });
-
-    // month/year selectors
     const years = Array.from(new Set(state.cogs.map(r => (r.date||'').slice(0,4)).filter(Boolean))).sort().reverse();
 
     return `
@@ -512,7 +540,7 @@
         </div></div>
 
         <div class="card"><div class="card-body">
-          <h3 style="margin-top:0">Users (tenant)</h3>
+          <h3 id="users-table" style="margin-top:0">Users (tenant)</h3>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <div style="color:var(--muted)">Manage a simple team list for your tenant.</div>
             ${canAdd()? `<button class="btn" id="addUser"><i class="ri-add-line"></i> Add User</button>`:''}
@@ -541,27 +569,27 @@
     return `
       <div class="grid">
         <div class="card"><div class="card-body">
-          <h3>About</h3>
-          <p style="color:var(--muted)">A fast, offline-friendly inventory app for SMBs — manage stock, products, costs, tasks, and export COGS, anywhere.</p>
-        </div></div>
-
-        <div class="card"><div class="card-body">
-          <h3>Policy</h3>
-          <p style="color:var(--muted)">Your data lives in your own private Firestore tenant. You may export at any time. We do not collect analytics here.</p>
-        </div></div>
-
-        <div class="card"><div class="card-body">
-          <h3>License</h3>
-          <p style="color:var(--muted)">MIT — use, modify, and deploy freely.</p>
-        </div></div>
-
-        <div class="card"><div class="card-body">
-          <h3>Setup Guide</h3>
-          <ol>
-            <li>Add Firebase config in <code>index.html</code>.</li>
-            <li>Deploy Firestore rules (see below).</li>
-            <li>(Optional) Add EmailJS keys in <code>app.js</code>.</li>
-          </ol>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <h3 style="margin:0">My Links</h3>
+            ${canAdd()? `<button class="btn" id="addLink"><i class="ri-add-line"></i> Add Link</button>`:''}
+          </div>
+          <div class="grid cols-2" data-section="links">
+            ${(state.links||[]).map(l=>`
+              <div class="card">
+                <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+                  <div>
+                    <div style="font-weight:700">${l.title||'(untitled)'}</div>
+                    <div style="color:var(--muted);font-size:12px">${l.url||''}</div>
+                  </div>
+                  <div class="actions">
+                    <button class="btn" data-open="${l.id}" title="Open"><i class="ri-external-link-line"></i></button>
+                    ${canEdit()? `<button class="btn ghost" data-edit="${l.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
+                    ${canDelete()? `<button class="btn danger" data-del="${l.id}" title="Delete"><i class="ri-delete-bin-6-line"></i></button>`:''}
+                  </div>
+                </div>
+              </div>`).join('')}
+            ${!state.links.length ? `<div style="color:var(--muted);padding:10px">No links yet.</div>`:''}
+          </div>
         </div></div>
 
         <div class="card"><div class="card-body">
@@ -575,6 +603,11 @@
               <a class="btn ghost" href="mailto:minmaung0307@gmail.com" target="_blank" rel="noopener">or mailto</a>
             </div>
           </div>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+          <h3>About</h3>
+          <p style="color:var(--muted)">A fast, offline-friendly inventory app for SMBs — manage stock, products, costs, tasks, and export COGS, anywhere.</p>
         </div></div>
       </div>
     `;
@@ -631,12 +664,27 @@
 
   /* ---------- Wiring (shell + routes) ---------- */
   function wireShell(){
-    // nav
-    $$('.sidebar .item[data-route]').forEach(el=>{
-      el.addEventListener('click', ()=> go(el.getAttribute('data-route')));
+    // NAV — event delegation (fixes mobile taps)
+    const nav = $('#side-nav');
+    nav?.addEventListener('click', (e)=>{
+      const it = e.target.closest('.item[data-route]');
+      if (it){ go(it.getAttribute('data-route')); }
     });
+    nav?.addEventListener('keydown', (e)=>{
+      if (e.key==='Enter' || e.key===' '){
+        const it = e.target.closest('.item[data-route]'); if (it){ e.preventDefault(); go(it.getAttribute('data-route')); }
+      }
+    });
+
+    // DASHBOARD quick nav (cards + low/critical)
+    $('#main')?.addEventListener('click', (e)=>{
+      const card = e.target.closest('.card.clickable[data-go]');
+      if (card){ go(card.getAttribute('data-go')); }
+    });
+
     // logout
     $('#btnLogout')?.addEventListener('click', ()=> auth.signOut());
+
     // search
     const input = $('#globalSearch'), results = $('#searchResults');
     if (input && results){
@@ -709,7 +757,6 @@
       if (!email) return notify('Enter an email in Email box, then click Sign up again.','warn');
       try{
         await auth.createUserWithEmailAndPassword(email, pass);
-        // promote if admin email
         if (ADMIN_EMAILS.includes(email.toLowerCase())) state.role='admin'; else state.role='user';
       }catch(e){ notify(e?.message||'Signup failed','danger'); }
     });
@@ -816,6 +863,20 @@
     });
 
     const sec=document.querySelector('[data-section="inventory"]'); if(!sec||sec.__wired) return; sec.__wired=true;
+
+    // inc/dec stock fast
+    sec.addEventListener('click', async (e)=>{
+      const incBtn = e.target.closest('button[data-inc]'); const decBtn = e.target.closest('button[data-dec]');
+      if (incBtn || decBtn){
+        if(!canEdit()) return notify('No permission','warn');
+        const id = (incBtn||decBtn).getAttribute('data-inc') || (incBtn||decBtn).getAttribute('data-dec');
+        const delta = incBtn ? 1 : -1;
+        await tcol('inventory').doc(id).set({ stock: firebase.firestore.FieldValue.increment(delta), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+        return;
+      }
+    });
+
+    // edit/delete
     sec.addEventListener('click', async (e)=>{
       const btn = e.target.closest('button'); if(!btn) return;
       const id  = btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
@@ -849,7 +910,7 @@
           }, {merge:true});
           closeModal('m-modal'); notify('Saved');
         };
-      } else {
+      } else if (btn.hasAttribute('data-del')) {
         if(!canDelete()) return notify('No permission','warn');
         await tcol('inventory').doc(id).delete();
         notify('Deleted');
@@ -907,7 +968,7 @@
         const it = {id:snap.id, ...snap.data()};
         $('#mm-title').textContent = it.name || 'Product';
         $('#mm-body').innerHTML = productCard(it);
-        $('#mm-foot').innerHTML = `<button class="btn ghost" id="pc-close">Close</button>`;
+        $('#mm-foot').innerHTML = `<button class="btn ghost" id="pc-close">Back</button>`;
         openModal('m-modal');
         $('#pc-close').onclick=()=> closeModal('m-modal');
         return;
@@ -1198,7 +1259,7 @@
     });
   }
 
-  /* ---------- Links (EmailJS) ---------- */
+  /* ---------- Links (EmailJS + Link viewer) ---------- */
   function wireLinks(){
     if (window.emailjs && EMAILJS_PUBLIC_KEY) {
       try { window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY }); } catch {}
@@ -1215,10 +1276,79 @@
         window.open(`mailto:minmaung0307@gmail.com?subject=Hello&body=${encodeURIComponent(msg)}`,'_blank');
       }
     });
+
+    const sec=document.querySelector('[data-section="links"]'); if(!sec||sec.__wired) return; sec.__wired=true;
+
+    // open link in in-app viewer (iframe with fallback)
+    sec.addEventListener('click', async (e)=>{
+      const openBtn = e.target.closest('button[data-open]');
+      const editBtn = e.target.closest('button[data-edit]');
+      const delBtn  = e.target.closest('button[data-del]');
+      if (openBtn){
+        const id=openBtn.getAttribute('data-open'); const snap=await tcol('links').doc(id).get(); if(!snap.exists) return;
+        const l = {id:snap.id, ...snap.data()};
+        $('#mm-title').textContent=l.title||'Link';
+        $('#mm-body').innerHTML = `
+          <div style="height:min(70vh,600px);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+            <iframe id="ifv" src="${(l.url||'').replace(/"/g,'&quot;')}" style="width:100%;height:100%;border:0"></iframe>
+          </div>
+          <div style="color:var(--muted);font-size:12px;margin-top:6px">If the site blocks embedding, use “Open in new tab”.</div>`;
+        $('#mm-foot').innerHTML = `
+          <a class="btn secondary" href="${l.url||'#'}" target="_blank" rel="noopener"><i class="ri-external-link-line"></i> Open in new tab</a>
+          <span></span>
+          <button class="btn ghost" id="back-links">Back</button>`;
+        openModal('m-modal');
+        $('#back-links').onclick=()=> closeModal('m-modal');
+        return;
+      }
+      if (editBtn){
+        if(!canEdit()) return notify('No permission','warn');
+        const id=editBtn.getAttribute('data-edit'); const snap=await tcol('links').doc(id).get(); if(!snap.exists) return;
+        const l={id:snap.id, ...snap.data()};
+        $('#mm-title').textContent='Edit Link';
+        $('#mm-body').innerHTML = `
+          <div class="grid">
+            <input id="lk-title" class="input" placeholder="Title" value="${l.title||''}"/>
+            <input id="lk-url" class="input" placeholder="https://example.com" value="${l.url||''}"/>
+          </div>`;
+        $('#mm-foot').innerHTML = `<button class="btn" id="save-link">Save</button>`;
+        openModal('m-modal');
+        $('#save-link').onclick=async ()=>{
+          await tcol('links').doc(id).set({
+            title: ($('#lk-title')?.value||'').trim(),
+            url:   ($('#lk-url')?.value||'').trim(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge:true});
+          closeModal('m-modal'); notify('Saved');
+        };
+        return;
+      }
+      if (delBtn){
+        if(!canDelete()) return notify('No permission','warn');
+        const id=delBtn.getAttribute('data-del'); await tcol('links').doc(id).delete(); notify('Deleted'); return;
+      }
+    });
+
+    // add link
+    $('#addLink')?.addEventListener('click', ()=>{
+      if(!canAdd()) return notify('No permission','warn');
+      $('#mm-title').textContent='Add Link';
+      $('#mm-body').innerHTML = `
+        <div class="grid">
+          <input id="lk-title" class="input" placeholder="Title"/>
+          <input id="lk-url" class="input" placeholder="https://example.com"/>
+        </div>`;
+      $('#mm-foot').innerHTML = `<button class="btn" id="save-link">Save</button>`;
+      openModal('m-modal');
+      $('#save-link').onclick=async ()=>{
+        const l={ title:($('#lk-title')?.value||'').trim(), url:($('#lk-url')?.value||'').trim(), createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+        if(!l.title || !l.url) return notify('Fill title and URL','warn');
+        await tcol('links').add(l); closeModal('m-modal'); notify('Saved');
+      };
+    });
   }
 
   function wireSearch(){
-    // buttons already wired in shell
     document.querySelectorAll('[data-go]').forEach(el=>{
       el.addEventListener('click', ()=>{
         const r=el.getAttribute('data-go'); const id=el.getAttribute('data-id'); go(r); if (id) setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}),80);
@@ -1254,6 +1384,15 @@
   });
 
   /* ---------- Boot ---------- */
-  setTheme('sunrise','medium'); // default
+  setTheme('sunrise','medium');
   render();
+
+  // Dashboard “Users” card scroll to users table
+  document.addEventListener('click', (e)=>{
+    const card = e.target.closest('.card.clickable[data-go="settings"]');
+    if (card){
+      setTimeout(()=> $('#users-table')?.scrollIntoView({behavior:'smooth', block:'start'}), 120);
+    }
+  });
+
 })();

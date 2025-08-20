@@ -16,7 +16,6 @@ self.addEventListener('activate', e=>{
 });
 self.addEventListener('fetch', e=>{
   const url = new URL(e.request.url);
-  // Bypass for Firebase/EmailJS
   if (/gstatic|firebaseio|firebase|emailjs\.com/.test(url.hostname)) return;
   e.respondWith(
     caches.match(e.request).then(cached=>{
