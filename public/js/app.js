@@ -451,6 +451,45 @@ function safeView(route){
     default: return viewDashboard();
   }
 }
+
+/* ========= Modal system safety shims (place before renderApp is ever called) ========= */
+(function () {
+  // Create a minimal modals root so calls don't explode even if you don't use modals anymore
+  if (typeof window.ensureGlobalModals !== 'function') {
+    window.ensureGlobalModals = function () {
+      if (document.getElementById('__modals')) return;
+      const wrap = document.createElement('div');
+      wrap.id = '__modals';
+      // Keep it empty; pages that actually need modals can append into this later.
+      // Having the node present prevents null refs.
+      wrap.style.display = 'contents';
+      document.body.appendChild(wrap);
+    };
+  }
+
+  // Defensive fallbacks so existing code paths won't throw
+  if (typeof window.openModal !== 'function') {
+    window.openModal = function (id) {
+      const m = document.getElementById(id);
+      if (!m) return;
+      m.classList.add('active');
+      const bd = document.getElementById('mb-' + (id.split('-')[1] || ''));
+      if (bd) bd.classList.add('active');
+      document.body.classList.add('modal-open');
+    };
+  }
+
+  if (typeof window.closeModal !== 'function') {
+    window.closeModal = function (id) {
+      const m = document.getElementById(id);
+      if (m) m.classList.remove('active');
+      const bd = document.getElementById('mb-' + (id.split('-')[1] || ''));
+      if (bd) bd.classList.remove('active');
+      document.body.classList.remove('modal-open');
+    };
+  }
+})();
+
 function renderApp(){
   const root=$('#root'); if(!root) return;
   if(!auth.currentUser){ renderLogin(); return; }
