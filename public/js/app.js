@@ -334,13 +334,12 @@
                     <td>${it.type||'-'}</td>
                     <td class="num">${fmtUSD(it.price)}</td>
                     <td class="num">
-                      ${it.stock}
-                      ${canEdit()? `
-                        <span class="actions" style="float:right">
-                          <button class="btn ghost" data-inc="${it.id}" title="Increase"><i class="ri-add-line"></i></button>
-                          <button class="btn ghost" data-dec="${it.id}" title="Decrease"><i class="ri-subtract-line"></i></button>
-                        </span>`:''}
-                    </td>
+  <div class="qty">
+    ${canEdit()? `<button class="btn ghost" data-dec="${it.id}" title="Decrease"><i class="ri-subtract-line"></i></button>`:''}
+    <span class="qty-num">${it.stock}</span>
+    ${canEdit()? `<button class="btn ghost" data-inc="${it.id}" title="Increase"><i class="ri-add-line"></i></button>`:''}
+  </div>
+</td>
                     <td class="num">${it.threshold}</td>
                     <td class="actions">
                       ${canEdit()? `<button class="btn ghost" data-edit="${it.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
@@ -667,9 +666,15 @@
     // NAV — event delegation (fixes mobile taps)
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
-      const it = e.target.closest('.item[data-route]');
-      if (it){ go(it.getAttribute('data-route')); }
-    });
+  const it = e.target.closest('.item[data-route]');
+  if (it){
+    go(it.getAttribute('data-route'));
+    // NEW: ensure main content is visible on phones
+    if (window.matchMedia('(max-width: 920px)').matches) {
+      setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
+    }
+  }
+});
     nav?.addEventListener('keydown', (e)=>{
       if (e.key==='Enter' || e.key===' '){
         const it = e.target.closest('.item[data-route]'); if (it){ e.preventDefault(); go(it.getAttribute('data-route')); }
@@ -689,7 +694,16 @@
     const input = $('#globalSearch'), results = $('#searchResults');
     if (input && results){
       let timer;
-      input.addEventListener('keydown', (e)=>{ if (e.key==='Enter'){ state.searchQ = input.value.trim(); go('search'); results.classList.remove('active'); } });
+      input.addEventListener('keydown', (e)=>{ if (e.key==='Enter' || e.key===' '){
+  const it = e.target.closest('.item[data-route]');
+  if (it){
+    e.preventDefault();
+    go(it.getAttribute('data-route'));
+    if (window.matchMedia('(max-width: 920px)').matches) {
+      setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
+    }
+  }
+} });
       input.addEventListener('input', ()=>{
         clearTimeout(timer);
         const q = input.value.trim();
