@@ -1,4 +1,3 @@
-/* =============== Root & Themes =============== */
 :root{
   --radius: 14px;
   --shadow: 0 6px 24px rgba(0,0,0,.08);
@@ -6,7 +5,6 @@
   --font-scale: 100%;
   --font-ui: "Inter","Public Sans", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 
-  /* default palette (overridden by [data-theme]) */
   --bg: #0b0f12;
   --panel: #10161a;
   --panel-2:#0e1418;
@@ -14,8 +12,8 @@
   --card-border: #1d2933;
   --text: #e8f0f7;
   --muted:#98a7b5;
-  --accent:#0ea5a0; /* teal */
-  --accent-2:#34d399;/* green */
+  --accent:#0ea5a0;
+  --accent-2:#34d399;
   --warn:#f59e0b;
   --ok:#10b981;
   --danger:#ef4444;
@@ -28,45 +26,28 @@ body{
   -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
 }
 
-/* =============== Theme Modes (no purple) =============== */
-/* sunset: soft oranges */
+/* Themes (no purple) */
 html[data-theme="sunset"]{
   --bg:#0e0f12; --panel:#14151a; --panel-2:#13161a; --card:#161a20; --card-border:#242c34;
-  --text:#f6f6f7; --muted:#9aa7b2;
-  --accent:#fb923c; /* soft orange */
-  --accent-2:#f59e0b;
-  --link:#fbbf24;
+  --text:#f6f6f7; --muted:#9aa7b2; --accent:#fb923c; --accent-2:#f59e0b; --link:#fbbf24;
 }
-/* sky: sky blues */
 html[data-theme="sky"]{
   --bg:#0b1116; --panel:#0f1520; --panel-2:#0f1620; --card:#121c26; --card-border:#1d2b39;
-  --text:#e6f1f9; --muted:#9db1c3;
-  --accent:#38bdf8; --accent-2:#22d3ee;
-  --link:#60a5fa;
+  --text:#e6f1f9; --muted:#9db1c3; --accent:#38bdf8; --accent-2:#22d3ee; --link:#60a5fa;
 }
-/* mint: soft greens */
 html[data-theme="mint"]{
   --bg:#0a1210; --panel:#0d1715; --panel-2:#0c1714; --card:#12201c; --card-border:#1b2a26;
-  --text:#e8f6f1; --muted:#9bb4ab;
-  --accent:#34d399; --accent-2:#10b981;
-  --link:#5eead4;
+  --text:#e8f6f1; --muted:#9bb4ab; --accent:#34d399; --accent-2:#10b981; --link:#5eead4;
 }
-/* light */
 html[data-theme="light"]{
   --bg:#f7fafc; --panel:#ffffff; --panel-2:#f7fafc; --card:#ffffff; --card-border:#e6eaf0;
-  --text:#1f2937; --muted:#6b7280;
-  --accent:#fb923c; --accent-2:#22c55e;
-  --link:#2563eb;
+  --text:#1f2937; --muted:#6b7280; --accent:#fb923c; --accent-2:#22c55e; --link:#2563eb;
 }
-/* dark (still soft) */
 html[data-theme="dark"]{
   --bg:#0b0f12; --panel:#10161a; --panel-2:#0e1418; --card:#121a20; --card-border:#1d2933;
-  --text:#e8f0f7; --muted:#98a7b5;
-  --accent:#0ea5a0; --accent-2:#34d399;
-  --link:#38bdf8;
+  --text:#e8f0f7; --muted:#98a7b5; --accent:#0ea5a0; --accent-2:#34d399; --link:#38bdf8;
 }
 
-/* =============== Layout =============== */
 .app{ display:grid; grid-template-columns: 260px 1fr; min-height:100vh; }
 .sidebar{
   background:var(--panel); border-right:var(--border); padding:14px; position:sticky; top:0; height:100vh; overflow:auto;
@@ -103,7 +84,7 @@ html[data-theme="dark"]{
 .card{ background:var(--card); border:var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
 .card-body{ padding:14px; }
 
-/* =============== Controls =============== */
+/* Controls */
 .btn{
   appearance:none; border:var(--border); background:var(--panel-2); color:var(--text);
   border-radius:10px; padding:.55rem .8rem; cursor:pointer; font-weight:600;
@@ -119,12 +100,11 @@ html[data-theme="dark"]{
 }
 textarea{ min-height:92px; resize:vertical; }
 
-/* =============== Grid & Table =============== */
+/* Grid & Table */
 .grid{ display:grid; gap:12px; }
 .grid.cols-2{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .grid.cols-3{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid.cols-4{ grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.grid.auto{ grid-auto-flow: column; }
 
 .table-wrap{ width:100%; overflow:auto; }
 .table{ width:100%; border-collapse:separate; border-spacing:0; }
@@ -135,7 +115,7 @@ textarea{ min-height:92px; resize:vertical; }
 .table .tr-total th, .table .tr-total td{ background:rgba(255,255,255,.03); font-weight:800; }
 .table .num, .table td.num{ text-align:right; }
 
-/* =============== Modals =============== */
+/* Modals */
 .modal-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; z-index:50; }
 .modal-backdrop.active{ display:block; }
 .modal{ position:fixed; inset:0; display:none; place-items:center; z-index:60; }
@@ -145,19 +125,19 @@ textarea{ min-height:92px; resize:vertical; }
 .modal .body{ padding:14px; }
 .modal .foot{ padding:12px 14px; border-top:var(--border); display:flex; justify-content:flex-end; gap:8px; }
 
-/* =============== DnD Tasks =============== */
+/* DnD Tasks */
 .lane-row{ min-height:180px; }
 .lane-grid{ min-height:120px; border:var(--border); border-radius:12px; padding:8px; display:grid; grid-template-columns:1fr; gap:8px; background:var(--panel-2); }
 .lane-row.drop .lane-grid{ outline:2px dashed var(--accent); }
 
-/* =============== Notifications =============== */
+/* Notifications */
 .notification{ position:fixed; bottom:14px; right:14px; padding:.6rem .8rem; background:var(--panel); border:var(--border); border-radius:10px; box-shadow:var(--shadow); opacity:0; transform:translateY(10px); transition:.25s; }
 .notification.show{ opacity:1; transform:none; }
 .notification.ok{ border-color:rgba(16,185,129,.6); }
 .notification.warn{ border-color:rgba(245,158,11,.6); }
 .notification.danger{ border-color:rgba(239,68,68,.7); }
 
-/* =============== Links & Socials =============== */
+/* Links & Socials */
 a{ color:var(--link); text-decoration:none; }
 a:hover{ text-decoration:underline; }
 .socials-row{ display:flex; gap:10px; align-items:center; }
@@ -167,7 +147,12 @@ a:hover{ text-decoration:underline; }
 }
 .socials-row a:hover{ background:rgba(255,255,255,.06); }
 
-/* =============== Responsive =============== */
+/* Login */
+.login-note{ margin-top:6px; }
+.login .actions{ display:flex; gap:8px; align-items:center; justify-content:space-between; }
+.login .actions .btn{ flex:1; }
+
+/* Responsive */
 @media (max-width: 960px){
   .app{ grid-template-columns: 1fr; }
   .sidebar{ position:fixed; left:0; top:0; height:100vh; width:86vw; transform:translateX(-100%); transition:.25s; z-index:70; }
