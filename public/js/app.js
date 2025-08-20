@@ -63,14 +63,28 @@ function subscribeKV(key){ tenantRef(key).on('value', snap=>{ const d=snap.val()
 
 /* ---------- Roles & Registry ---------- */
 async function ensureRoleRecord(){
-  const uid=auth.currentUser?.uid; if(!uid) return;
-  const r=await db.ref(`userRoles/${uid}`).get();
-  if(!r.exists()){ await db.ref(`userRoles/${uid}`).set('user'); }
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  try {
+    const snap = await db.ref(`userRoles/${uid}`).get();
+    if (!snap.exists()) {
+      // First-time self-claim — allowed by rules only if value === "user"
+      await db.ref(`userRoles/${uid}`).set('user');
+    }
+  } catch (e) {
+    // Never block sign-in if rules are still propagating; fetchRole() will default
+    console.warn('[ensureRoleRecord] skipped:', e?.message || e);
+  }
 }
 async function fetchRole(){
-  const uid=auth.currentUser?.uid; if(!uid) return;
-  const s=await db.ref(`userRoles/${uid}`).get();
-  session.role = s.exists()? s.val() : 'user';
+  const uid = auth.currentUser?.uid;
+  if (!uid) { session.role = 'user'; return; }
+  try{
+    const s = await db.ref(`userRoles/${uid}`).get();
+    session.role = s.exists() ? s.val() : 'user';
+  }catch{
+    session.role = 'user';
+  }
 }
 function subscribeRegistry(){
   db.ref('registry/users').on('value', snap=>{ state.registry = snap.val()||{}; if($('#root')) renderApp(); });
@@ -82,20 +96,23 @@ function subscribeAllRoles(){
 /* ---------- Auth ---------- */
 auth.onAuthStateChanged(async (user)=>{
   if (!user){ session=null; renderLogin(); return; }
+
   session = { uid:user.uid, email:(user.email||'').toLowerCase(), role:'user' };
-  await ensureRoleRecord();
+
+  try { await ensureRoleRecord(); } catch {}
   await fetchRole();
 
-  // Per-user KV
-  KEYS.forEach(subscribeKV);
+  // Subscribe to tenant KV
+  ['inventory','products','posts','tasks','cogs','users','_theme2'].forEach(subscribeKV);
 
-  // Everyone can see registry (allowed by rules below)
+  // Everyone can see registry; admins also see all roles
   subscribeRegistry();
-  if (session.role==='admin') subscribeAllRoles();
+  if (session.role === 'admin') subscribeAllRoles();
 
-  if (canAdd()){
+  // Seed initial data into the user's own KV if empty (only needs add permission)
+  if (['associate','manager','admin'].includes(session.role)) {
     const initIfEmpty = async (key, fallback)=> {
-      const snap = await tenantRef(key).get();
+      const snap = await db.ref(`tenants/${user.uid}/kv/${key}`).get();
       if (!snap.exists() || !('val' in (snap.val()||{}))) await saveKV(key, fallback);
     };
     await initIfEmpty('posts',     []);
