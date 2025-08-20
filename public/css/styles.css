@@ -186,3 +186,38 @@ a:hover { text-decoration: underline; }
 /* Task lane drop highlight */
 .lane-row.drop { outline: 2px dashed color-mix(in srgb, var(--brand) 55%, transparent); border-radius: 12px; }
 .lane-row.drop .lane-grid { background: rgba(255,255,255,.03); border-radius: 12px; }
+
+/* === Mobile drawer for sidebar + edge opener + mobile search === */
+@media (max-width: 920px){
+  .sidebar{
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform .28s ease, box-shadow .28s ease;
+    z-index: 1100;
+    box-shadow: 0 12px 30px rgba(0,0,0,.18);
+    background: var(--panel-1);
+  }
+  body.sidebar-open .sidebar{ transform: translateX(0); }
+
+  /* Backdrop already exists; just animate it on mobile */
+  .backdrop{ opacity: 0; pointer-events: none; transition: opacity .25s ease; }
+  .backdrop.active{ opacity: .6; pointer-events: auto; }
+
+  /* Invisible left-edge “hot zone” that re-opens the drawer */
+  #sidebarEdge{
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    width: 12px;
+    z-index: 1099;
+  }
+
+  /* Use the sidebar search on mobile; hide any topbar inline search if present */
+  .topbar .search-inline{ display: none !important; }
+  .sidebar .search-wrap{ display: block !important; }
+}
+
+@media (min-width: 921px){
+  #sidebarEdge{ display: none; }
+}
