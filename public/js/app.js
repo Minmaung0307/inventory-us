@@ -1,8 +1,13 @@
 /* =========================
-   Inventory — Firebase-first SPA (no images / no video)
+   Inventory — Firebase-first SPA
+   (Admins allowlisted + modern login + deduped listeners)
    ========================= */
 
-/* ---------- Modal safety shims (prevent crashes) ---------- */
+/* ---------- Global error guard to avoid "hidden error" spam ---------- */
+window.addEventListener('unhandledrejection', e => { console.warn('[Unhandled]', e.reason); });
+window.addEventListener('error', e => { /* swallow noisy third-party errors but keep console clean */ });
+
+/* ---------- Modal safety shims ---------- */
 (function () {
   if (typeof window.ensureGlobalModals !== 'function') {
     window.ensureGlobalModals = function () {
@@ -36,7 +41,8 @@
 const $  = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 const USD = (x)=> `$${Number(x||0).toFixed(2)}`;
-function notify(msg,type='show'){ const n=$('#notification'); if(!n) return; n.textContent=msg; n.className=`notification show`; setTimeout(()=>{ n.className='notification'; },2200); }
+const ADMIN_EMAILS = ['admin@inventory.com','minmaung0307@gmail.com']; // <- allowlist
+function notify(msg){ const n=$('#notification'); if(!n) return; n.textContent=msg; n.className=`notification show`; setTimeout(()=>{ n.className='notification'; },2200); }
 
 /* ---------- Theme ---------- */
 const THEME_MODES = [
@@ -50,7 +56,6 @@ const THEME_SIZES = [
   { key:'medium', pct: 100, label:'Medium' },
   { key:'large',  pct: 112, label:'Large' },
 ];
-
 function applyTheme(t){
   const theme = t || loadKV('_theme', { mode:'sky', size:'medium' });
   const sizePct = (THEME_SIZES.find(s=>s.key===theme.size)?.pct) ?? 100;
@@ -68,45 +73,37 @@ const db   = firebase.database();
 
 /* ---------- In-memory state ---------- */
 let state = {
-  session: null,         // { uid, email, displayName, role }
+  session: null,
   route: 'dashboard',
   searchQ: '',
-  // live KV
-  posts: [],
-  inventory: [],
-  products: [],
-  tasks: [],
-  cogs: [],
-  users: [],             // local address book for your tenant (no images)
-  registry: {},          // {uid:{email,name}} (everyone writes their own; used by admin to see UIDs)
+  posts: [], inventory: [], products: [], tasks: [], cogs: [], users: [],
+  registry: {},
   theme: { mode:'sky', size:'medium' }
 };
 
-/* ---------- DB helpers (per-tenant kv) ---------- */
+/* ---------- DB helpers ---------- */
 function uid(){ return auth.currentUser?.uid || null; }
 function pathKV(k){ return db.ref(`tenants/${uid()}/kv/${k}`); }
-function loadKVLocal(k, fallback){
-  try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; }
-}
-function saveKVLocal(k, v){
-  try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
-}
-function saveKV(k, v){
-  saveKVLocal(k, v); // keep a local cache for instant UX
-  if (!uid()) return;
-  return pathKV(k).set({ key:k, val:v, updatedAt: firebase.database.ServerValue.TIMESTAMP })
-    .catch(e=> console.warn('[saveKV]', k, e));
-}
-function loadKV(k, fallback){
-  return (state?.[k]) ?? loadKVLocal(k, fallback);
-}
+function loadKVLocal(k, fallback){ try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; } }
+function saveKVLocal(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function saveKV(k, v){ saveKVLocal(k, v); if (!uid()) return; return pathKV(k).set({ key:k, val:v, updatedAt: firebase.database.ServerValue.TIMESTAMP }).catch(e=> console.warn('[saveKV]', k, e)); }
+function loadKV(k, fallback){ return (state?.[k]) ?? loadKVLocal(k, fallback); }
 
-/* ---------- Live sync ---------- */
+/* ---------- Live sync attach/detach to prevent duplicates ---------- */
 const CLOUD_KEYS = ['posts','inventory','products','tasks','cogs','users','_theme'];
+let liveRefs = [];
+function stopLiveSync(){
+  liveRefs.forEach(ref => ref.off('value'));
+  db.ref('registry/users').off('value');
+  liveRefs = [];
+}
 function startLiveSync(){
   if (!uid()) return;
+  stopLiveSync();
+
   CLOUD_KEYS.forEach(k=>{
-    pathKV(k).on('value', snap=>{
+    const ref = pathKV(k);
+    ref.on('value', snap=>{
       const row = snap.val(); if (!row) return;
       const incoming = row.val;
       if (k === '_theme'){ state.theme = incoming || state.theme; applyTheme(state.theme); }
@@ -114,23 +111,22 @@ function startLiveSync(){
       saveKVLocal(k, incoming);
       renderApp();
     });
+    liveRefs.push(ref);
   });
 
-  // registry mapping (everyone writes own card; admins can view list)
-  db.ref(`registry/users`).on('value', snap=>{
-    state.registry = snap.val() || {};
-    renderApp();
-  });
+  const regRef = db.ref(`registry/users`);
+  regRef.on('value', snap=>{ state.registry = snap.val() || {}; renderApp(); });
 }
 
-/* ---------- Auth + Roles ---------- */
-async function setRoleIfFirstLogin(){
+/* ---------- Roles ---------- */
+async function seedRoleIfFirstLogin(){
   if (!uid()) return;
   const roleRef = db.ref(`userRoles/${uid()}`);
   const snap = await roleRef.get();
   if (!snap.exists()){
-    // new users set to "user" (rules should allow this self-set for the first time)
-    await roleRef.set('user').catch(()=>{});
+    const email = (auth.currentUser?.email || '').toLowerCase();
+    const target = ADMIN_EMAILS.includes(email) ? 'admin' : 'user';
+    await roleRef.set(target).catch(()=>{ /* rules may block; rules patch above enables it */ });
   }
 }
 async function fetchRole(){
@@ -142,15 +138,13 @@ function canAdd(){ return ['admin','manager','associate'].includes(state.session
 function canEdit(){ return ['admin','manager'].includes(state.session?.role || 'user'); }
 function canDelete(){ return ['admin'].includes(state.session?.role || 'user'); }
 
-/* ---------- Idle auto logout (20 minutes) ---------- */
+/* ---------- Auto logout (20 min) ---------- */
 const AUTO_LOGOUT_MIN = 20;
 let __lastActivity = Date.now();
 ['click','keydown','mousemove','scroll','touchstart'].forEach(evt=> document.addEventListener(evt, ()=>{ __lastActivity=Date.now(); }, {passive:true}));
 setInterval(()=> { if (!auth.currentUser) return; if (Date.now() - __lastActivity > AUTO_LOGOUT_MIN*60*1000) doLogout(); }, 30*1000);
 
-/* =========================
-   Router + Shell
-   ========================= */
+/* ---------- Sidebar + pages (unchanged features) ---------- */
 function renderSidebar(active='dashboard'){
   const links = [
     { route:'dashboard', icon:'ri-dashboard-line',           label:'Dashboard' },
@@ -830,7 +824,9 @@ const pageContent = {
 function viewPage(key){ return `<div class="card"><div class="card-body">${pageContent[key] || '<p>Page</p>'}</div></div>`; }
 
 /* ---------- Search ---------- */
-function buildSearchIndex(){
+/* ---------- Search (deduped listeners to stop "increasing numbers") ---------- */
+let __wiredSearchClose = false;
+function buildSearchIndex(){ /* same as previous message */ 
   const posts=state.posts||[], inv=state.inventory||[], prods=state.products||[], cogs=state.cogs||[], users=state.users||[];
   const pages=[
     { id:'about',label:'About',section:'Pages',route:'about' },
@@ -851,16 +847,12 @@ function buildSearchIndex(){
 function searchAll(index,q){
   const norm=s=>(s||'').toLowerCase();
   const tokens=norm(q).split(/\s+/).filter(Boolean);
-  return index
-    .map(item=>{
-      const label=norm(item.label), text=norm(item.text||''); let hits=0;
-      const ok = tokens.every(t=>{ const hit = label.includes(t)||text.includes(t); if(hit) hits++; return hit; });
-      const score = ok ? (hits*3 + (label.includes(tokens[0]||'')?2:0)) : 0;
-      return { item, score };
-    })
-    .filter(x=>x.score>0)
-    .sort((a,b)=>b.score-a.score)
-    .map(x=>x.item);
+  return index.map(item=>{
+    const label=norm(item.label), text=norm(item.text||''); let hits=0;
+    const ok = tokens.every(t=>{ const hit = label.includes(t)||text.includes(t); if(hit) hits++; return hit; });
+    const score = ok ? (hits*3 + (label.includes(tokens[0]||'')?2:0)) : 0;
+    return { item, score };
+  }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).map(x=>x.item);
 }
 function hookSidebarInteractions(){
   const input = $('#globalSearch'), results = $('#searchResults');
@@ -874,8 +866,8 @@ function hookSidebarInteractions(){
   };
 
   let timer;
-  input.addEventListener('keydown', (e)=>{ if (e.key === 'Enter'){ const q=input.value.trim(); if(!q) return; const ix=buildSearchIndex(); const out=searchAll(ix,q); if(out[0]) openResultsPage(out[0]); } });
-  input.addEventListener('input', ()=>{
+  input.onkeydown = (e)=>{ if (e.key === 'Enter'){ const q=input.value.trim(); if(!q) return; const ix=buildSearchIndex(); const out=searchAll(ix,q); if(out[0]) openResultsPage(out[0]); } };
+  input.oninput = ()=>{
     clearTimeout(timer);
     const q=input.value.trim(); if(!q){ results.classList.remove('active'); results.innerHTML=''; return; }
     timer=setTimeout(()=>{
@@ -887,11 +879,21 @@ function hookSidebarInteractions(){
         row.onclick=()=> openResultsPage({route:row.getAttribute('data-route'), id: row.getAttribute('data-id')});
       });
     }, 150);
-  });
-  document.addEventListener('click', (e)=>{ if(!results.contains(e.target) && e.target!==input) results.classList.remove('active'); });
+  };
+
+  // Only wire this once; it always grabs the current elements by id
+  if (!__wiredSearchClose){
+    __wiredSearchClose = true;
+    document.addEventListener('click', (e)=>{
+      const rEl=document.getElementById('searchResults');
+      const iEl=document.getElementById('globalSearch');
+      if (!rEl || !iEl) return;
+      if(!rEl.contains(e.target) && e.target !== iEl) rEl.classList.remove('active');
+    });
+  }
 }
 
-/* ---------- Login screen ---------- */
+/* ---------- Login screen (centered + proper spacing) ---------- */
 function renderLogin(){
   const root = $('#root');
   root.innerHTML = `
@@ -904,17 +906,15 @@ function renderLogin(){
             <input id="li-email" class="input" type="email" placeholder="Email" autocomplete="username"/>
             <input id="li-pass"  class="input" type="password" placeholder="Password" autocomplete="current-password"/>
             <button id="btnLogin" class="btn"><i class="ri-login-box-line"></i> Sign In</button>
-
-            <div class="flex" style="justify-content:space-between;padding-top:8px">
-              <a id="link-forgot" href="#" class="btn secondary" style="padding:8px 12px"><i class="ri-key-2-line"></i> Forgot password</a>
-              <a id="link-register" href="#" class="btn ghost" style="padding:8px 12px"><i class="ri-user-add-line"></i> Sign up</a>
+            <div class="link-row">
+              <a id="link-forgot" href="#" class="btn secondary" style="padding:10px 12px"><i class="ri-key-2-line"></i> Forgot password</a>
+              <a id="link-register" href="#" class="btn ghost" style="padding:10px 12px"><i class="ri-user-add-line"></i> Sign up</a>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Auth modals -->
     <div class="modal-backdrop" id="mb-auth"></div>
 
     <div class="modal" id="m-signup">
@@ -1196,22 +1196,22 @@ document.addEventListener('click', (e)=>{
 /* ---------- Auth lifecycle ---------- */
 auth.onAuthStateChanged(async (user)=>{
   if (!user){
+    stopLiveSync();
     state.session = null;
     renderApp();
     return;
   }
-  // write registry card (uid -> email/name)
+  // registry card
   try{
     await db.ref(`registry/users/${user.uid}`).set({ email: (user.email||'').toLowerCase(), name: user.displayName||user.email?.split('@')[0]||'User' });
   }catch{}
 
-  await setRoleIfFirstLogin();
+  await seedRoleIfFirstLogin();              // <-- this promotes allowlisted emails to admin on first login
   const role = await fetchRole();
   state.session = { uid: user.uid, email: (user.email||'').toLowerCase(), displayName: user.displayName||'', role };
 
   // hydrate from local first
-  CLOUD_KEYS.forEach(k=>{ const v = loadKVLocal(k, null); if (v!==null) state[k.replace(/^_/, '')] = v; });
-  state.theme = loadKVLocal('_theme', state.theme);
+  ['posts','inventory','products','tasks','cogs','users','_theme'].forEach(k=>{ const v = loadKVLocal(k, null); if (v!==null) (k==='_theme' ? state.theme=v : state[k]=v); });
   applyTheme(state.theme);
 
   startLiveSync();
@@ -1220,9 +1220,10 @@ auth.onAuthStateChanged(async (user)=>{
 
 async function doLogout(){
   try{ await auth.signOut(); }catch{}
+  stopLiveSync();
   state.session = null;
   renderApp();
 }
 
-/* ---------- Boot ---------- */
+/* ---------- Initial render ---------- */
 renderApp();

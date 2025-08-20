@@ -8,11 +8,9 @@
     />
     <title>Inventory</title>
 
-    <!-- App icons (ensure these two pngs exist in /public/icons) -->
     <link rel="icon" sizes="192x192" href="/icons/icon-192.png" />
     <link rel="icon" sizes="512x512" href="/icons/icon-512.png" />
 
-    <!-- Fonts + Icons -->
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap"
       rel="stylesheet"
@@ -22,22 +20,17 @@
       rel="stylesheet"
     />
 
-    <!-- Styles -->
     <link rel="stylesheet" href="/css/styles.css" />
   </head>
   <body>
     <div id="root"></div>
-
     <div id="notification" class="notification"></div>
 
-    <!-- Firebase SDK (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-    <!-- Inject your project config BEFORE app.js loads -->
     <script>
-      // Fill these with your real config values from Firebase Console
       window.__FIREBASE_CONFIG = window.__FIREBASE_CONFIG || {
         apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
         authDomain: "inventory-us.firebaseapp.com",
@@ -50,10 +43,8 @@
       };
     </script>
 
-    <!-- App -->
-    <script defer src="/js/app.js?v=2025-08-20a"></script>
+    <script defer src="/js/app.js?v=2025-08-20b"></script>
 
-    <!-- SW -->
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
