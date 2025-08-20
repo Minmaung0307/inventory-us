@@ -1,36 +1,44 @@
-<!doctype html>
-<html lang="en" data-theme="sunset">
+<!DOCTYPE html>
+<html lang="en" data-theme="sky">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
     <title>Inventory</title>
 
-    <!-- Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Public+Sans:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <!-- Icons -->
-    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.7.0/fonts/remixicon.css" rel="stylesheet"/>
+    <!-- App icons (ensure these two pngs exist in /public/icons) -->
+    <link rel="icon" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" sizes="512x512" href="/icons/icon-512.png" />
 
-    <!-- PWA / Icons -->
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#0ea5a0"/>
-    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
-    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
-    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png">
+    <!-- Fonts + Icons -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
+      rel="stylesheet"
+    />
 
-    <link rel="stylesheet" href="/css/styles.css?v=2025-08-19d" />
+    <!-- Styles -->
+    <link rel="stylesheet" href="/css/styles.css" />
   </head>
   <body>
     <div id="root"></div>
 
-    <!-- Firebase (Compat) -->
+    <div id="notification" class="notification"></div>
+
+    <!-- Firebase SDK (Compat) -->
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
-    <!-- Provide your config -->
+    <!-- Inject your project config BEFORE app.js loads -->
     <script>
-      window.__FIREBASE_CONFIG = {
+      // Fill these with your real config values from Firebase Console
+      window.__FIREBASE_CONFIG = window.__FIREBASE_CONFIG || {
         apiKey: "AIzaSyAlElNC22VZKTGu4QkF0rUl_vdbY4k5_pA",
         authDomain: "inventory-us.firebaseapp.com",
         databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
@@ -42,6 +50,18 @@
       };
     </script>
 
-    <script src="/js/app.js?v=2025-08-19d"></script>
+    <!-- App -->
+    <script defer src="/js/app.js?v=2025-08-20a"></script>
+
+    <!-- SW -->
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/service-worker.js")
+            .catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>
