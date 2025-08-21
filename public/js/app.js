@@ -1,16 +1,16 @@
-/* Inventory SPA — Firestore + EmailJS (v1.0.2)
+/* Inventory SPA — Firestore + EmailJS (v1.0.3)
    -----------------------------------------------------
-   Fill Firebase config in index.html (window.__FIREBASE_CONFIG)
-   Fill EmailJS IDs below to enable sending from Contact page.
+   Surgical fixes: mobile burger + drawer, solid sidebar background on mobile,
+   close drawer on main/brand/backdrop tap; preserves all UI/UX + features.
    ----------------------------------------------------- */
 
 (() => {
   'use strict';
 
   /* ---------- EmailJS config (optional) ---------- */
-  const EMAILJS_PUBLIC_KEY = 'WT0GOYrL9HnDKvLUf';     // e.g. 'aBc123...'
-  const EMAILJS_SERVICE_ID = 'service_z9tkmvr';       // e.g. 'service_xxx'
-  const EMAILJS_TEMPLATE_ID = 'template_q5q471f';     // e.g. 'template_xxx'
+  const EMAILJS_PUBLIC_KEY = 'WT0GOYrL9HnDKvLUf';
+  const EMAILJS_SERVICE_ID = 'service_z9tkmvr';
+  const EMAILJS_TEMPLATE_ID = 'template_q5q471f';
 
   /* ---------- Firebase ---------- */
   if (!window.firebase || !window.__FIREBASE_CONFIG) {
@@ -22,10 +22,10 @@
 
   /* ---------- App State ---------- */
   const ADMIN_EMAILS = ['admin@inventory.com', 'minmaung0307@gmail.com'];
-  const ROLES = ['user','associate','manager','admin']; // <— used for validation
+  const ROLES = ['user','associate','manager','admin'];
   const state = {
     user: null,
-    role: 'user',           // user | associate | manager | admin
+    role: 'user',
     route: 'dashboard',
     searchQ: '',
     inventory: [],
@@ -33,7 +33,7 @@
     cogs: [],
     tasks: [],
     posts: [],
-    links: [],              // Link Pages collection
+    links: [],
     users: [],
     theme: { palette:'sunrise', font:'medium' },
     unsub: []
@@ -122,7 +122,7 @@
     attach('cogs','cogs');
     attach('tasks','tasks');
     attach('posts','posts');
-    attach('users','users');     // tenant-visible user list (for admin UI)
+    attach('users','users');
     attach('links','links');
   }
 
@@ -139,34 +139,24 @@
     }
   }
 
-  /* ---------- Role resolution (FIX) ---------- */
+  /* ---------- Role resolution ---------- */
   async function resolveRoleForEmail(email){
     const e = (email||'').toLowerCase();
-
-    // 1) hard-coded admins
     if (ADMIN_EMAILS.includes(e)) return 'admin';
-
-    // 2) global registry by email: registry/userRoles/byEmail/{email}
     try{
-      const rdoc = await db
-        .collection('registry').doc('userRoles')
-        .collection('byEmail').doc(e).get();
+      const rdoc = await db.collection('registry').doc('userRoles').collection('byEmail').doc(e).get();
       if (rdoc.exists){
         const r = rdoc.data()?.role;
-        if (ROLES.includes(r)) return r;
+        if (['user','associate','manager','admin'].includes(r)) return r;
       }
     }catch{}
-
-    // 3) per-tenant list (if you created a row with this email in your own tenant)
     try{
       const qs = await tcol('users').where('email','==', e).limit(1).get();
       if (!qs.empty){
         const r = qs.docs[0].data()?.role;
-        if (ROLES.includes(r)) return r;
+        if (['user','associate','manager','admin'].includes(r)) return r;
       }
     }catch{}
-
-    // 4) default
     return 'user';
   }
 
@@ -202,7 +192,7 @@
     return `
       <div class="app">
         <aside class="sidebar">
-          <div class="brand">
+          <div class="brand" id="brand">
             <div class="logo">📦</div>
             <div class="title">Inventory</div>
           </div>
@@ -227,12 +217,18 @@
             <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
             <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
           </div>
-          <!-- NEW: subtle credit (auto year) -->
           <div class="footer" id="powered" style="font-size:12px;color:var(--muted)">Powered by MM, ${new Date().getFullYear()}</div>
         </aside>
 
+        <!-- Mobile drawer helpers -->
+        <div class="backdrop" id="sidebarBackdrop"></div>
+        <div id="sidebarEdge" aria-hidden="true"></div>
+
         <div>
           <div class="topbar">
+            <button class="btn ghost burger" id="btnBurger" aria-label="Open menu" title="Menu">
+              <i class="ri-menu-line"></i>
+            </button>
             <div class="badge"><i class="ri-shield-user-line"></i> ${state.role.toUpperCase()}</div>
             <div class="search">
               <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
@@ -697,20 +693,44 @@
 
   /* ---------- Wiring (shell + routes) ---------- */
   function wireShell(){
-    // NAV — event delegation (fixes mobile taps)
+    const isMobile = () => window.matchMedia('(max-width: 920px)').matches;
+    const openSidebar = () => { document.body.classList.add('sidebar-open'); $('#sidebarBackdrop')?.classList.add('active'); };
+    const closeSidebar = () => { document.body.classList.remove('sidebar-open'); $('#sidebarBackdrop')?.classList.remove('active'); };
+
+    // Burger toggle
+    $('#btnBurger')?.addEventListener('click', ()=>{
+      if (document.body.classList.contains('sidebar-open')) closeSidebar();
+      else openSidebar();
+    });
+
+    // Close drawer when tapping main pane or brand (logo/title)
+    $('#main')?.addEventListener('click', ()=> { if (isMobile()) closeSidebar(); });
+    $('#sidebarBackdrop')?.addEventListener('click', ()=> closeSidebar());
+    $('#brand')?.addEventListener('click', ()=> { if (isMobile()) closeSidebar(); });
+
+    // Left edge hot zone opens drawer
+    $('#sidebarEdge')?.addEventListener('click', ()=> { if (isMobile()) openSidebar(); });
+
+    // NAV — event delegation
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
       const it = e.target.closest('.item[data-route]');
       if (it){
         go(it.getAttribute('data-route'));
-        if (window.matchMedia('(max-width: 920px)').matches) {
+        if (isMobile()){
+          closeSidebar();
           setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
         }
       }
     });
     nav?.addEventListener('keydown', (e)=>{
       if (e.key==='Enter' || e.key===' '){
-        const it = e.target.closest('.item[data-route]'); if (it){ e.preventDefault(); go(it.getAttribute('data-route')); }
+        const it = e.target.closest('.item[data-route]');
+        if (it){
+          e.preventDefault();
+          go(it.getAttribute('data-route'));
+          if (isMobile()) closeSidebar();
+        }
       }
     });
 
@@ -734,6 +754,7 @@
             state.searchQ = q;
             go('search');
             results.classList.remove('active');
+            if (isMobile()) closeSidebar();
           }
         }
       });
@@ -751,14 +772,21 @@
               state.searchQ = q; go(r);
               setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
               results.classList.remove('active');
+              if (isMobile()) closeSidebar();
             };
           });
         }, 120);
       });
       document.addEventListener('click', (e)=>{ if (!results.contains(e.target) && e.target !== input) results.classList.remove('active'); });
     }
+
     // modal close
     $('#mm-close')?.addEventListener('click', ()=> closeModal('m-modal'));
+
+    // Ensure we don't keep drawer open if resizing to desktop
+    window.addEventListener('resize', ()=>{
+      if (!isMobile()) closeSidebar();
+    }, {passive:true});
   }
 
   function wireRoute(){
@@ -786,7 +814,7 @@
       if (!email || !pass) return notify('Enter email & password','warn');
       try{
         await auth.signInWithEmailAndPassword(email, pass);
-        setRoleByEmail(email); // temporary badge; real role resolved in onAuthStateChanged
+        setRoleByEmail(email);
       }catch(e){
         notify(e?.message||'Login failed','danger');
       }
@@ -809,7 +837,7 @@
     });
   }
 
-  /* ---------- Posts (dashboard) ---------- */
+  /* ---------- Posts ---------- */
   function wirePosts(){
     $('#addPost')?.addEventListener('click', ()=>{
       if(!canAdd()) return notify('No permission','warn');
@@ -819,7 +847,7 @@
           <input id="post-title" class="input" placeholder="Title"/>
           <textarea id="post-body" class="input" placeholder="Body"></textarea>
         </div>`;
-      $('#mm-foot').innerHTML = `<button class="btn" id="save-post">Save</button>`;
+    $('#mm-foot').innerHTML = `<button class="btn" id="save-post">Save</button>`;
       openModal('m-modal');
 
       $('#save-post').onclick = async ()=>{
@@ -1269,14 +1297,12 @@
         };
         if(!u.email) return notify('Email required','warn');
         await tcol('users').add(u);
-        // NEW: write to global registry so role applies when that user logs in
         try{
           const e=(u.email||'').toLowerCase();
           await db.collection('registry').doc('userRoles')
             .collection('byEmail').doc(e)
             .set({ role:u.role, tenant: uid(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
         }catch{}
-        // If you just added yourself, adopt role immediately:
         if ((u.email||'').toLowerCase() === (state.user?.email||'').toLowerCase()){
           state.role = u.role; render();
         }
@@ -1310,14 +1336,13 @@
             role:newRole,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, {merge:true});
-          // NEW: update registry
           try{
             const e=(newEmail||'').toLowerCase();
             await db.collection('registry').doc('userRoles')
               .collection('byEmail').doc(e)
               .set({ role:newRole, tenant: uid(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
           }catch{}
-          if (e && (newEmail||'').toLowerCase() === (state.user?.email||'').toLowerCase()){
+          if ((newEmail||'').toLowerCase() === (state.user?.email||'').toLowerCase()){
             state.role = newRole; render();
           }
           closeModal('m-modal'); notify('Saved');
@@ -1329,7 +1354,7 @@
     });
   }
 
-  /* ---------- Links (EmailJS + Link viewer) ---------- */
+  /* ---------- Links ---------- */
   function wireLinks(){
     if (window.emailjs && EMAILJS_PUBLIC_KEY) {
       try { window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY }); } catch {}
@@ -1349,7 +1374,6 @@
 
     const sec=document.querySelector('[data-section="links"]'); if(!sec||sec.__wired) return; sec.__wired=true;
 
-    // open link in in-app viewer
     sec.addEventListener('click', async (e)=>{
       const openBtn = e.target.closest('button[data-open]');
       const editBtn = e.target.closest('button[data-edit]');
@@ -1399,7 +1423,6 @@
       }
     });
 
-    // add link
     $('#addLink')?.addEventListener('click', ()=>{
       if(!canAdd()) return notify('No permission','warn');
       $('#mm-title').textContent='Add Link';
@@ -1434,11 +1457,8 @@
       render();
       return;
     }
-
-    // Role resolution FIX (see function above)
     state.role = await resolveRoleForEmail(user.email);
 
-    // seed kv theme doc if absent
     try{
       const kv = await tdoc('_theme').get();
       if (!kv.exists){
