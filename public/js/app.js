@@ -1,10 +1,11 @@
 /* Inventory SPA — Firestore + EmailJS (v1.0.3)
    -----------------------------------------------------
-   • No redesign; surgical fixes only.
-   • Adds: search highlight + auto-scroll, solid mobile sidebar,
-           burger/backdrop/edge opener, iPhone-friendly,
-           real-time Users table update, role mapping via userRegistry,
-           “Powered by MM, YEAR”.
+   • Surgical fixes only; no redesign.
+   • Roles via userRegistry (user/associate/manager/admin)
+   • Mobile drawer + backdrop + burger + iPhone-safe
+   • Search: highlight selected row (bg highlight)
+   • “Powered by MM, <year>” auto-updates
+   • Crisp calculator SVG replaces emoji logo
    ----------------------------------------------------- */
 
 (() => {
@@ -30,10 +31,10 @@
   /* ---------- App State ---------- */
   const state = {
     user: null,
-    role: 'user',                 // user | associate | manager | admin
+    role: 'user',
     route: 'dashboard',
     searchQ: '',
-    searchHitId: null,            // << highlight target id
+    searchHitId: null,       // the row to highlight after a search
     inventory: [],
     products: [],
     cogs: [],
@@ -50,6 +51,23 @@
   const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
   const fmtUSD = v => `$${Number(v||0).toFixed(2)}`;
   const yearNow = () => new Date().getFullYear();
+
+  // Minimal calculator logo (SVG uses currentColor, sits on gradient .logo)
+  function appLogoSVG(){
+    return `
+    <svg viewBox="0 0 24 24" aria-hidden="true" role="img">
+      <rect x="3" y="2.5" width="18" height="19" rx="4.5" ry="4.5"
+            fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <rect x="7" y="5.5" width="10" height="4" rx="1.2"
+            fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <circle cx="8.5" cy="12.5" r="1.25" fill="currentColor"/>
+      <circle cx="12"  cy="12.5" r="1.25" fill="currentColor"/>
+      <circle cx="15.5" cy="12.5" r="1.25" fill="currentColor"/>
+      <circle cx="8.5" cy="16.5" r="1.25" fill="currentColor"/>
+      <circle cx="12"  cy="16.5" r="1.25" fill="currentColor"/>
+      <rect x="14.5" y="15" width="3.2" height="3.6" rx="0.8" fill="currentColor"/>
+    </svg>`;
+  }
 
   function notify(msg, type='ok') {
     let n = $('#notification');
@@ -97,7 +115,7 @@
     }
   };
 
-  /* ---------- Modal helpers ---------- */
+  /* ---------- Modals ---------- */
   function openModal(id){
     $('#'+id)?.classList.add('active');
     $('#mb-'+(id.split('-')[1]||''))?.classList.add('active');
@@ -111,7 +129,7 @@
   const routes = ['dashboard','inventory','products','cogs','tasks','settings','links','search'];
   function go(route){
     state.route = routes.includes(route) ? route : 'dashboard';
-    closeSidebar(); // close on mobile when navigating
+    closeSidebar();
     render();
   }
 
@@ -127,17 +145,14 @@
     // KV: theme
     state.unsub.push(tdoc('_theme').onSnapshot(snap=>{
       const data = snap.data() || {};
-      const palette = data.palette || state.theme.palette;
-      const font    = data.font    || state.theme.font;
-      setTheme(palette, font);
+      setTheme(data.palette || state.theme.palette, data.font || state.theme.font);
     }));
 
-    // Collections (re-render on every change to reflect immediately on any route)
     const attach = (name, targetKey, order='desc') => {
       state.unsub.push(
         tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
           state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
-          render(); // <— ensures Settings shows new Users right away
+          if (['dashboard',name].includes(state.route)) render();
         })
       );
     };
@@ -190,27 +205,13 @@
       .slice(0,20);
   }
 
-  // Search-hit highlighter
-  function flashHit(id){
-    state.searchHitId = id || null;
-    render();
-    if (!id) return;
-    setTimeout(()=> document.getElementById(id)?.scrollIntoView({behavior:'smooth', block:'center'}), 50);
-    clearTimeout(state.__hitTimer);
-    state.__hitTimer = setTimeout(()=>{
-      state.searchHitId = null;
-      const el = document.getElementById(id);
-      if (el) el.classList.remove('search-hit');
-    }, 4000);
-  }
-
   /* ---------- Layout ---------- */
   function layout(content){
     return `
       <div class="app">
         <aside class="sidebar" id="sidebar">
           <div class="brand" id="brand">
-            <div class="logo">📦</div>
+            <div class="logo">${appLogoSVG()}</div>
             <div class="title">Inventory</div>
           </div>
 
@@ -285,7 +286,7 @@
         <div class="card login-card">
           <div class="card-body">
             <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
-              <div class="logo">📦</div>
+              <div class="logo">${appLogoSVG()}</div>
               <div>
                 <div style="font-size:20px;font-weight:800">Inventory</div>
                 <div style="color:var(--muted)">Sign in to continue</div>
@@ -301,8 +302,8 @@
                 <button id="link-forgot" class="btn ghost" style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</button>
                 <button id="link-register" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Sign up</button>
               </div>
-              <!-- <div class="muted" style="font-size:12px;margin-top:6px">Tip: Admins — admin@inventory.com / admin123</div>
-            </div> -->
+              <div class="muted" style="font-size:12px;margin-top:6px">Tip: Admins — admin@inventory.com / admin123</div>
+            </div>
           </div>
         </div>
       </div>`;
@@ -350,7 +351,7 @@
         </div>
         <div class="grid" data-section="posts" style="grid-template-columns: 1fr;">
           ${(state.posts||[]).map(p=>`
-            <div class="card${state.searchHitId===p.id?' search-hit':''}" id="${p.id}">
+            <div class="card" id="${p.id}">
               <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
                 <div><strong>${p.title}</strong><div style="color:var(--muted);font-size:12px">${new Date(p.createdAt?.toDate?.()||p.createdAt||Date.now()).toLocaleString()}</div></div>
                 <div class="actions">
@@ -385,9 +386,12 @@
               ${state.inventory.map(it=>{
                 const critical = it.stock <= Math.max(1, Math.floor(it.threshold*0.6));
                 const low = !critical && it.stock <= it.threshold;
-                const rowClass = critical? 'critical' : (low? 'low' : '');
+                const rowClass = [
+                  critical ? 'critical' : (low? 'low' : ''),
+                  (state.searchHitId === it.id ? 'search-hit' : '')
+                ].join(' ').trim();
                 return `
-                  <tr id="${it.id}" class="${rowClass}${state.searchHitId===it.id?' search-hit':''}">
+                  <tr id="${it.id}" class="${rowClass}">
                     <td>${it.name}</td>
                     <td>${it.code}</td>
                     <td>${it.type||'-'}</td>
@@ -545,7 +549,7 @@
             </div>
             <div class="grid lane-grid" id="lane-${key}">
               ${cards.map(t=>`
-                <div class="card task-card${state.searchHitId===t.id?' search-hit':''}" id="${t.id}" draggable="true" data-task="${t.id}" style="cursor:grab">
+                <div class="card task-card" id="${t.id}" draggable="true" data-task="${t.id}" style="cursor:grab">
                   <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
                     <div>${t.title}</div>
                     <div class="actions">
@@ -633,7 +637,7 @@
           </div>
           <div class="grid cols-2" data-section="links">
             ${(state.links||[]).map(l=>`
-              <div class="card${state.searchHitId===l.id?' search-hit':''}" id="${l.id}">
+              <div class="card">
                 <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
                   <div>
                     <div style="font-weight:700">${l.title||'(untitled)'}</div>
@@ -718,6 +722,13 @@
     root.innerHTML = html;
     wireShell();
     wireRoute();
+
+    // If a search hit is set, scroll it into view
+    if (state.searchHitId){
+      setTimeout(()=>{
+        document.getElementById(state.searchHitId)?.scrollIntoView({behavior:'smooth', block:'center'});
+      }, 80);
+    }
   }
 
   /* ---------- Sidebar helpers (mobile) ---------- */
@@ -750,22 +761,26 @@
     $('#main')?.addEventListener('click', closeSidebar);
     ensureEdgeOpener();
 
-    // Sidebar NAV
+    // Sidebar NAV — event delegation
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
       const it = e.target.closest('.item[data-route]');
-      if (it){ go(it.getAttribute('data-route')); }
+      if (it){
+        state.searchHitId = null;     // clear highlight when using nav
+        go(it.getAttribute('data-route'));
+      }
     });
     nav?.addEventListener('keydown', (e)=>{
       if (e.key==='Enter' || e.key===' '){
-        const it = e.target.closest('.item[data-route]'); if (it){ e.preventDefault(); go(it.getAttribute('data-route')); }
+        const it = e.target.closest('.item[data-route]');
+        if (it){ e.preventDefault(); state.searchHitId=null; go(it.getAttribute('data-route')); }
       }
     });
 
-    // Dashboard quick tiles
+    // Dashboard quick tiles open
     $('#main')?.addEventListener('click', (e)=>{
       const card = e.target.closest('.card.clickable[data-go]');
-      if (card){ go(card.getAttribute('data-go')); }
+      if (card){ state.searchHitId = null; go(card.getAttribute('data-go')); }
     });
 
     // Logout
@@ -778,7 +793,8 @@
       input.addEventListener('keydown', (e)=>{
         if (e.key==='Enter'){
           const q = input.value.trim();
-          state.searchQ = q; go('search'); results.classList.remove('active');
+          state.searchQ = q; state.searchHitId = null;
+          go('search'); results.classList.remove('active');
         }
       });
       input.addEventListener('input', ()=>{
@@ -792,8 +808,7 @@
           results.querySelectorAll('.row').forEach(row=>{
             row.onclick = ()=>{
               const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
-              state.searchQ = q; go(r);
-              setTimeout(()=> flashHit(id), 30);
+              state.searchQ = q; state.searchHitId = id || null; go(r);
               results.classList.remove('active');
             };
           });
@@ -809,7 +824,8 @@
       sInput.addEventListener('keydown', (e)=>{
         if (e.key==='Enter'){
           const q = sInput.value.trim();
-          state.searchQ = q; go('search'); sResults.classList.remove('active'); closeSidebar();
+          state.searchQ = q; state.searchHitId = null;
+          go('search'); sResults.classList.remove('active'); closeSidebar();
         }
       });
       sInput.addEventListener('input', ()=>{
@@ -823,8 +839,7 @@
           sResults.querySelectorAll('.row').forEach(row=>{
             row.onclick = ()=>{
               const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
-              state.searchQ = q; go(r); closeSidebar();
-              setTimeout(()=> flashHit(id), 30);
+              state.searchQ = q; state.searchHitId = id || null; go(r); closeSidebar();
               sResults.classList.remove('active');
             };
           });
@@ -881,6 +896,7 @@
       if (!email) return notify('Enter an email in Email box, then click Sign up again.','warn');
       try{
         await auth.createUserWithEmailAndPassword(email, pass);
+        // create default role if not exists
         const id = email.toLowerCase();
         await regDoc(id).set({
           email: id, role: ADMIN_EMAILS.includes(id)?'admin':'user',
@@ -1322,7 +1338,7 @@
     }
   }
 
-  /* ---------- Settings (theme + users) ---------- */
+  /* ---------- Settings (theme + users + registry) ---------- */
   function wireSettings(){
     $('#theme-palette')?.addEventListener('change', (e)=>{ setTheme(e.target.value, null); });
     $('#theme-font')?.addEventListener('change', (e)=>{ setTheme(null, e.target.value); });
@@ -1408,13 +1424,13 @@
         if(!canDelete()) return notify('No permission','warn');
         const snap=await tcol('users').doc(id).get(); const email=(snap.data()?.email||'').toLowerCase();
         await tcol('users').doc(id).delete();
-        if (email) await regDoc(email).set({ email, role:'user', updatedAt: firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
+        if (email) await regDoc(email).set({ email, role:'user', updatedAt: firebase.firestore.FieldValue.serverTimestamp() },{merge:true}); // fallback
         notify('Deleted');
       }
     });
   }
 
-  /* ---------- Links (EmailJS + Link viewer) ---------- */
+  /* ---------- Links (EmailJS + viewer) ---------- */
   function wireLinks(){
     if (window.emailjs && EMAILJS_PUBLIC_KEY) {
       try { window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY }); } catch {}
@@ -1506,14 +1522,13 @@
     document.querySelectorAll('[data-go]').forEach(el=>{
       el.addEventListener('click', ()=>{
         const r=el.getAttribute('data-go'); const id=el.getAttribute('data-id');
-        state.searchQ = state.searchQ || '';
+        state.searchHitId = id || null;
         go(r);
-        if (id) setTimeout(()=> flashHit(id), 30);
       });
     });
   }
 
-  /* ---------- Auth listener (role resolution from registry) ---------- */
+  /* ---------- Auth listener (role = adminList > registry > user) ---------- */
   auth.onAuthStateChanged(async (user)=>{
     state.user = user || null;
     if (!user){
@@ -1521,14 +1536,15 @@
       render();
       return;
     }
-    // Resolve role: admin list > registry > fallback user
     const emailLower = (user.email||'').toLowerCase();
     state.role = ADMIN_EMAILS.includes(emailLower) ? 'admin' : 'user';
     try{
       const reg = await regDoc(emailLower).get();
       const r = (reg.data()?.role || state.role || 'user').toLowerCase();
       if (VALID_ROLES.includes(r)) state.role = r;
-    }catch(e){ console.warn('userRegistry read failed; defaulting to "user"', e); }
+    }catch(e){
+      console.warn('userRegistry read failed; defaulting to "user"', e);
+    }
 
     // Seed/read theme
     try{

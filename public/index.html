@@ -7,49 +7,24 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
     <title>Inventory — SPA</title>
-    <!-- Favicons -->
-    <link
-      rel="icon"
-      href="/icons/favicon-32.png?v=3"
-      sizes="32x32"
-      type="image/png"
-    />
-    <link
-      rel="icon"
-      href="/icons/favicon-64.png?v=3"
-      sizes="64x64"
-      type="image/png"
-    />
-    <link rel="icon" href="/icons/favicon.svg?v=3" type="image/svg+xml" />
 
-    <!-- iOS icon (Safari ignores manifest icons) -->
-    <link
-      rel="apple-touch-icon"
-      href="/icons/apple-touch-icon.png?v=3"
-      sizes="180x180"
-    />
-    <link
-      rel="apple-touch-icon-precomposed"
-      href="/icons/apple-touch-icon.png?v=3"
-    />
-
-    <!-- Manifest (Android/Chrome uses these for the app icon) -->
-    <link rel="manifest" href="/manifest.webmanifest?v=3" />
-
-    <!-- Nice PWA theming -->
-    <meta name="theme-color" content="#ff9d5c" />
+    <!-- PWA icons / manifest (home-screen icon) -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#151311" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta
-      name="apple-mobile-web-app-status-bar-style"
-      content="black-translucent"
-    />
+    <meta name="mobile-web-app-capable" content="yes" />
 
+    <!-- Fonts + CSS -->
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./css/styles.css" />
+
     <!-- Icons -->
     <link
       href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
@@ -93,7 +68,7 @@
   <body>
     <div id="root"></div>
 
-    <!-- Service worker (optional) -->
+    <!-- Service worker -->
     <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
