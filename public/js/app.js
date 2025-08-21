@@ -140,7 +140,12 @@
       state.unsub.push(
         tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
           state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
-          if (['dashboard',name].includes(state.route)) render();
+          // also refresh Settings when /users snapshot changes
+if (
+  state.route === 'dashboard' ||
+  state.route === name ||
+  (name === 'users' && state.route === 'settings')
+) render();
         })
       );
     };
