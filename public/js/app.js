@@ -1348,24 +1348,24 @@
       openModal('m-modal');
 
       $('#save-user').onclick = async ()=>{
-        const name = ($('#user-name')?.value||'').trim();
-        const email= ($('#user-email')?.value||'').trim().toLowerCase();
-        const role = ($('#user-role')?.value||'user').toLowerCase();
-        if(!email) return notify('Email required','warn');
-        if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
+  const name = ($('#user-name')?.value||'').trim();
+  const email= ($('#user-email')?.value||'').trim().toLowerCase();
+  const role = ($('#user-role')?.value||'user').toLowerCase();
+  if(!email) return notify('Email required','warn');
+  if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
 
-        await Promise.all([
-          tcol('users').add({
-            name, email, role,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          }),
-          regDoc(email).set({
-            email, role,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }, {merge:true})
-        ]);
-        closeModal('m-modal'); notify('Saved');
-      };
+  try {
+    const ts = firebase.firestore.FieldValue.serverTimestamp();
+    await Promise.all([
+      tcol('users').add({ name, email, role, createdAt: ts }),
+      regDoc(email).set({ email, role, updatedAt: ts }, { merge:true })
+    ]);
+    closeModal('m-modal');
+    notify('Saved');
+  } catch(e){
+    notify(e?.message || 'Failed to save user','danger');
+  }
+};
     });
 
     // Edit / delete (also reflect in registry)
@@ -1389,22 +1389,23 @@
         $('#mm-foot').innerHTML = `<button class="btn" id="save-user">Save</button>`;
         openModal('m-modal');
         $('#save-user').onclick = async ()=>{
-          const name = ($('#user-name')?.value||'').trim();
-          const email= ($('#user-email')?.value||'').trim().toLowerCase();
-          const role = ($('#user-role')?.value||'user').toLowerCase();
-          if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
-          await Promise.all([
-            tcol('users').doc(id).set({
-              name, email, role,
-              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }, {merge:true}),
-            regDoc(email).set({
-              email, role,
-              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }, {merge:true})
-          ]);
-          closeModal('m-modal'); notify('Saved');
-        };
+  const name = ($('#user-name')?.value||'').trim();
+  const email= ($('#user-email')?.value||'').trim().toLowerCase();
+  const role = ($('#user-role')?.value||'user').toLowerCase();
+  if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
+
+  try {
+    const ts = firebase.firestore.FieldValue.serverTimestamp();
+    await Promise.all([
+      tcol('users').doc(id).set({ name, email, role, updatedAt: ts }, { merge:true }),
+      regDoc(email).set({ email, role, updatedAt: ts }, { merge:true })
+    ]);
+    closeModal('m-modal');
+    notify('Saved');
+  } catch(e){
+    notify(e?.message || 'Failed to update','danger');
+  }
+};
       } else {
         if(!canDelete()) return notify('No permission','warn');
         const snap=await tcol('users').doc(id).get(); const email=(snap.data()?.email||'').toLowerCase();
@@ -1526,7 +1527,10 @@
       const reg = await regDoc(emailLower).get();
       const r = (reg.data()?.role || state.role || 'user').toLowerCase();
       if (VALID_ROLES.includes(r)) state.role = r;
-    }catch{/* ignore */}
+    }catch(e) {
+    console.warn('userRegistry read failed; defaulting to "user"', e);
+  }
+
 
     // Seed/read theme
     try{
