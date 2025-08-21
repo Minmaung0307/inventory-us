@@ -70,12 +70,8 @@
   };
 
   const idle = {
-    timer:null,
-    MAX: 20*60*1000,
-    arm(){
-      this.disarm();
-      this.timer = setTimeout(()=> auth.signOut().catch(()=>{}), this.MAX);
-    },
+    timer:null, MAX: 20*60*1000,
+    arm(){ this.disarm(); this.timer = setTimeout(()=> auth.signOut().catch(()=>{}), this.MAX); },
     disarm(){ if (this.timer){ clearTimeout(this.timer); this.timer=null; } },
     hook(){
       ['click','keydown','mousemove','scroll','touchstart'].forEach(evt=>{
@@ -126,7 +122,6 @@
     if (!uid()) return;
     clearSnapshots();
 
-    // theme (kv)
     state.unsub.push(tdoc('_theme').onSnapshot(snap=>{
       const data = snap.data() || {};
       const palette = data.palette || state.theme.palette;
@@ -138,27 +133,26 @@
       state.unsub.push(tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
         state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
 
-        // *** ROLE FIX: keep current user's role in sync with Users collection ***
+        // keep role synced from Users collection (associate/manager/admin)
         if (name === 'users') {
           const me = (auth.currentUser?.email || '').toLowerCase();
           const mine = state.users.find(u => (u.email||'').toLowerCase() === me);
           if (mine && mine.role && mine.role !== state.role) {
-            state.role = mine.role;           // update role (e.g., associate)
-            render();                          // re-render so buttons/badges adjust
+            state.role = mine.role;
+            render();
             return;
           }
         }
-
         if (['dashboard',name].includes(state.route)) render();
       }));
     };
-    attach('inventory','inventory');   // items
-    attach('products','products');     // products
-    attach('cogs','cogs');             // cogs rows
-    attach('tasks','tasks');           // kanban
-    attach('posts','posts');           // dashboard posts
-    attach('users','users');           // tenant user list (drives role badge)
-    attach('links','links');           // link pages data
+    attach('inventory','inventory');
+    attach('products','products');
+    attach('cogs','cogs');
+    attach('tasks','tasks');
+    attach('posts','posts');
+    attach('users','users');
+    attach('links','links');
   }
 
   async function saveKVTheme(){
@@ -206,10 +200,17 @@
     return `
       <div class="app">
         <aside class="sidebar">
-          <div class="brand">
+          <div class="brand" id="brand">
             <div class="logo">📦</div>
             <div class="title">Inventory</div>
           </div>
+
+          <!-- Mobile search inside sidebar -->
+          <div class="search search-wrap">
+            <input id="globalSearchMobile" class="input" placeholder="Search everything…" autocomplete="off" />
+            <div id="searchResultsMobile" class="search-results"></div>
+          </div>
+
           <div class="nav" id="side-nav">
             ${[
               ['dashboard','Dashboard','ri-dashboard-line'],
@@ -235,21 +236,21 @@
 
         <div>
           <div class="topbar">
-            <!-- NEW: burger button (mobile/desktop OK) -->
             <button class="btn ghost" id="burger" aria-label="Menu"><i class="ri-menu-line"></i></button>
 
             <div class="badge"><i class="ri-shield-user-line"></i> ${state.role.toUpperCase()}</div>
-            <!-- add search-inline class so CSS can hide it on phones -->
+
+            <!-- Desktop search -->
             <div class="search search-inline">
               <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
               <div id="searchResults" class="search-results"></div>
             </div>
+
             <div style="display:flex;gap:8px">
               <button class="btn ghost" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
             </div>
           </div>
 
-          <!-- NEW: backdrop for mobile drawer -->
           <div class="backdrop" id="backdrop"></div>
 
           <div class="main" id="main">${content}</div>
@@ -264,7 +265,7 @@
     `;
   }
 
-  function viewLogin(){
+  function viewLogin(){ /* unchanged */ 
     return `
       <div class="login-page">
         <div class="card login-card">
@@ -703,22 +704,23 @@
     root.innerHTML = html;
     wireShell();
     wireRoute();
-    ensureSidebarEdge();  // NEW
-    hookEdgeReveal();     // NEW
+    ensureSidebarEdge();
+    hookEdgeReveal();
   }
 
   /* ---------- Wiring (shell + routes) ---------- */
   function wireShell(){
-    // NAV — event delegation (works on mobile)
+    const isMobile = () => window.matchMedia('(max-width: 920px)').matches;
+
+    // NAV
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
       const it = e.target.closest('.item[data-route]');
       if (it){
         go(it.getAttribute('data-route'));
-        // close drawer & focus content on phones
-        if (window.matchMedia('(max-width: 920px)').matches) {
+        if (isMobile()) {
           closeSidebar();
-          setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
+          setTimeout(()=> $('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
         }
       }
     });
@@ -728,18 +730,24 @@
       }
     });
 
-    // DASHBOARD quick nav (cards)
+    // DASHBOARD quick nav
     $('#main')?.addEventListener('click', (e)=>{
       const card = e.target.closest('.card.clickable[data-go]');
       if (card){ go(card.getAttribute('data-go')); }
+      // NEW: tap/click main pane closes drawer on mobile
+      if (isMobile() && document.body.classList.contains('sidebar-open')) closeSidebar();
     });
+
+    // NEW: clicking the brand (app icon/Inventory) closes drawer on mobile
+    $('#brand')?.addEventListener('click', ()=> { if (isMobile()) closeSidebar(); });
 
     // logout
     $('#btnLogout')?.addEventListener('click', ()=> auth.signOut());
 
-    // search
-    const input = $('#globalSearch'), results = $('#searchResults');
-    if (input && results){
+    // Search wiring (desktop + mobile)
+    const wireSearchBox = (inputSel, resultsSel) => {
+      const input = $(inputSel), results = $(resultsSel);
+      if (!input || !results) return;
       let timer;
       input.addEventListener('input', ()=>{
         clearTimeout(timer);
@@ -753,6 +761,7 @@
             row.onclick = ()=>{
               const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
               state.searchQ = q; go(r);
+              if (isMobile()) closeSidebar();
               setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
               results.classList.remove('active');
             };
@@ -760,12 +769,14 @@
         }, 120);
       });
       document.addEventListener('click', (e)=>{ if (!results.contains(e.target) && e.target !== input) results.classList.remove('active'); });
-    }
+    };
+    wireSearchBox('#globalSearch', '#searchResults');             // desktop
+    wireSearchBox('#globalSearchMobile', '#searchResultsMobile'); // mobile in drawer
 
     // modal close
     $('#mm-close')?.addEventListener('click', ()=> closeModal('m-modal'));
 
-    // NEW: mobile drawer controls
+    // mobile drawer controls
     $('#burger')?.addEventListener('click', toggleSidebar);
     $('#backdrop')?.addEventListener('click', closeSidebar);
   }
@@ -1420,10 +1431,7 @@
       render();
       return;
     }
-    // default role by email map (updated shortly by Users snapshot if exists)
     state.role = ADMIN_EMAILS.includes((user.email||'').toLowerCase()) ? 'admin' : 'user';
-
-    // seed kv theme doc if absent
     try{
       const kv = await tdoc('_theme').get();
       if (!kv.exists){

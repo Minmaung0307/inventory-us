@@ -59,8 +59,10 @@ a:hover { text-decoration: underline; }
 }
 
 .sidebar {
-  position: sticky; top:0; height: 100vh; overflow:auto; background:linear-gradient(180deg,var(--panel),var(--panel-2));
+  position: sticky; top:0; height: 100vh; overflow:auto;
+  background:linear-gradient(180deg,var(--panel),var(--panel-2));
   border-right:1px solid var(--border);
+  -webkit-overflow-scrolling: touch; /* iPhone smooth scroll */
 }
 .brand {
   display:flex; align-items:center; gap:10px; padding:16px; position: sticky; top:0; background:linear-gradient(180deg,var(--panel),transparent);
@@ -187,7 +189,8 @@ a:hover { text-decoration: underline; }
 .lane-row.drop { outline: 2px dashed color-mix(in srgb, var(--brand) 55%, transparent); border-radius: 12px; }
 .lane-row.drop .lane-grid { background: rgba(255,255,255,.03); border-radius: 12px; }
 
-/* === Mobile drawer for sidebar + edge opener + mobile search === */
+/* ---- Mobile sidebar & search ---- */
+.sidebar .search-wrap{ display:none; padding: 0 12px 8px; }
 @media (max-width: 920px){
   .sidebar{
     position: fixed;
@@ -197,11 +200,12 @@ a:hover { text-decoration: underline; }
     transition: transform .28s ease, box-shadow .28s ease;
     z-index: 1100;
     box-shadow: 0 12px 30px rgba(0,0,0,.18);
-    background: var(--panel-1);
+    /* FIX: solid background (no transparency) */
+    background: linear-gradient(180deg,var(--panel),var(--panel-2));
   }
   body.sidebar-open .sidebar{ transform: translateX(0); }
 
-  /* Backdrop already exists; just animate it on mobile */
+  /* Backdrop for drawer */
   .backdrop{ opacity: 0; pointer-events: none; transition: opacity .25s ease; }
   .backdrop.active{ opacity: .6; pointer-events: auto; }
 
@@ -213,7 +217,7 @@ a:hover { text-decoration: underline; }
     z-index: 1099;
   }
 
-  /* Use the sidebar search on mobile; hide any topbar inline search if present */
+  /* Show sidebar search on mobile; hide topbar inline search */
   .topbar .search-inline{ display: none !important; }
   .sidebar .search-wrap{ display: block !important; }
 }
