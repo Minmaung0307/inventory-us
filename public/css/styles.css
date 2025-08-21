@@ -15,6 +15,31 @@
   --danger: #ef4444;
   --border: rgba(255,255,255,.08);
   --shadow: 0 10px 30px rgba(0,0,0,.25);
+
+  --hit-bg: color-mix(in srgb, var(--brand) 18%, transparent);
+  --hit-bg-strong: color-mix(in srgb, var(--brand) 26%, transparent);
+}
+
+/* Cards, tasks, generic containers */
+.card.search-hit,
+.task-card.search-hit,
+.search-hit{
+  background: var(--hit-bg);
+  animation: hitBgPulse 1.25s ease-in-out 2;
+  border-radius: 12px;
+  outline: none;            /* ensure no border/outline */
+  box-shadow: none;
+}
+
+/* Table rows need to color their cells */
+.table tr.search-hit td{
+  background: var(--hit-bg) !important;
+}
+
+/* Gentle pulse from stronger to softer bg */
+@keyframes hitBgPulse{
+  0%   { background: var(--hit-bg-strong); }
+  100% { background: var(--hit-bg); }
 }
 
 html[data-theme="sunrise"]{
