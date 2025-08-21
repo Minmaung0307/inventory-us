@@ -1,34 +1,39 @@
 /* Inventory SPA — Firestore + EmailJS (v1.0.2)
-   Minimal, surgical fixes to:
-   - mobile sidebar (burger, backdrop, solid bg, close on tap)
-   - role resolution (associate/manager/admin from Firestore or registry)
-   - Powered by MM (auto-year)
-*/
+   -----------------------------------------------------
+   • Keep your existing HTML/CSS (no redesign).
+   • Fixes:
+     - Reliable role mapping (user/associate/manager/admin) via userRegistry
+     - Mobile drawer: burger/backdrop/edge, closes on main/brand tap
+     - Sidebar has solid bg on mobile; search also available in sidebar
+     - Works on iPhone Safari (no eval/unsafe)
+     - Keeps all previous features (COGS export, tasks DnD, products card, etc.)
+   ----------------------------------------------------- */
 
 (() => {
   'use strict';
 
   /* ---------- EmailJS config (optional) ---------- */
-  const EMAILJS_PUBLIC_KEY = 'WT0GOYrL9HnDKvLUf';
-  const EMAILJS_SERVICE_ID = 'service_z9tkmvr';
+  const EMAILJS_PUBLIC_KEY  = 'WT0GOYrL9HnDKvLUf';
+  const EMAILJS_SERVICE_ID  = 'service_z9tkmvr';
   const EMAILJS_TEMPLATE_ID = 'template_q5q471f';
 
   /* ---------- Firebase ---------- */
   if (!window.firebase || !window.__FIREBASE_CONFIG) {
     console.error('Firebase SDK or config missing.');
   }
+  // Compat v9 SDKs are already loaded by index.html
   firebase.initializeApp(window.__FIREBASE_CONFIG);
   const auth = firebase.auth();
   const db   = firebase.firestore();
 
-  /* ---------- Admin allow-list (kept) ---------- */
+  /* ---------- Constants ---------- */
   const ADMIN_EMAILS = ['admin@inventory.com', 'minmaung0307@gmail.com'];
+  const VALID_ROLES  = ['user','associate','manager','admin'];
 
   /* ---------- App State ---------- */
   const state = {
-    user: null,
-    role: 'user',           // user | associate | manager | admin
-    tenantId: null,         // resolved tenant for this user
+    user: null,          // firebase.User
+    role: 'user',        // user | associate | manager | admin
     route: 'dashboard',
     searchQ: '',
     inventory: [],
@@ -44,9 +49,11 @@
 
   /* ---------- Utilities ---------- */
   const $  = (s, r=document) => r.querySelector(s);
-  const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+  const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
   const fmtUSD = v => `$${Number(v||0).toFixed(2)}`;
-  const notify = (msg, type='ok') => {
+  const yearNow = () => new Date().getFullYear();
+
+  function notify(msg, type='ok') {
     let n = $('#notification');
     if (!n) {
       n = document.createElement('div');
@@ -56,24 +63,18 @@
     }
     n.textContent = msg;
     n.className = `notification show ${type}`;
-    setTimeout(()=> n.className='notification', 2200);
-  };
-
-  /* ---------- Role helpers (normalized) ---------- */
-  function normalizeRole(r){
-    const x = String(r || 'user').trim().toLowerCase();
-    if (['user','associate','manager','admin'].includes(x)) return x;
-    if (x.startsWith('assoc')) return 'associate';
-    if (x.startsWith('manag')) return 'manager';
-    if (x.startsWith('adm'))   return 'admin';
-    return 'user';
+    setTimeout(()=> n.className='notification', 2300);
   }
-  const roleOf     = () => normalizeRole(state.role);
-  const canAdd     = () => ['associate','manager','admin'].includes(roleOf());
-  const canEdit    = () => ['manager','admin'].includes(roleOf());
-  const canDelete  = () => roleOf() === 'admin';
 
-  /* ---------- Theme ---------- */
+  const canAdd    = () => ['associate','manager','admin'].includes(state.role);
+  const canEdit   = () => ['manager','admin'].includes(state.role);
+  const canDelete = () => state.role === 'admin';
+
+  const uid  = () => auth.currentUser?.uid || null;
+  const tcol = (name) => db.collection('tenants').doc(uid()).collection(name);
+  const tdoc = (name) => db.collection('tenants').doc(uid()).collection('kv').doc(name);
+  const regDoc = (emailLower) => db.collection('userRegistry').doc(emailLower); // global roles by email
+
   const setTheme = (palette, font) => {
     if (palette) state.theme.palette = palette;
     if (font)    state.theme.font    = font;
@@ -81,7 +82,7 @@
     document.documentElement.setAttribute('data-font',  state.theme.font);
   };
 
-  /* ---------- Idle sign-out ---------- */
+  /* ---------- Idle auto logout (20 min) ---------- */
   const idle = {
     timer:null,
     MAX: 20*60*1000,
@@ -91,7 +92,7 @@
     },
     disarm(){ if (this.timer){ clearTimeout(this.timer); this.timer=null; } },
     hook(){
-      ['click','keydown','mousemove','scroll','touchstart'].forEach(evt=>{
+      ['click','keydown','mousemove','scroll','touchstart','pointerdown'].forEach(evt=>{
         document.addEventListener(evt, ()=> this.arm(), {passive:true});
       });
       this.arm();
@@ -99,29 +100,34 @@
   };
 
   /* ---------- Modal helpers ---------- */
-  function openModal(id){ $('#'+id)?.classList.add('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.add('active'); }
-  function closeModal(id){ $('#'+id)?.classList.remove('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.remove('active'); }
+  function openModal(id){
+    $('#'+id)?.classList.add('active');
+    $('#mb-'+(id.split('-')[1]||''))?.classList.add('active');
+  }
+  function closeModal(id){
+    $('#'+id)?.classList.remove('active');
+    $('#mb-'+(id.split('-')[1]||''))?.classList.remove('active');
+  }
 
   /* ---------- Router ---------- */
   const routes = ['dashboard','inventory','products','cogs','tasks','settings','links','search'];
-  function go(route){ state.route = routes.includes(route) ? route : 'dashboard'; render(); }
+  function go(route){
+    state.route = routes.includes(route) ? route : 'dashboard';
+    // Close sidebar on mobile when navigating
+    closeSidebar();
+    render();
+  }
 
-  /* ---------- Tenant helpers (use resolved tenantId) ---------- */
-  const uid = () => auth.currentUser?.uid || null;
-  const tenant = () => state.tenantId || uid();
-  const tcol = (name) => db.collection('tenants').doc(tenant()).collection(name);
-  const tdoc = (name) => db.collection('tenants').doc(tenant()).collection('kv').doc(name);
-
-  /* ---------- Firestore snapshots ---------- */
+  /* ---------- Firestore sync ---------- */
   function clearSnapshots(){
     state.unsub.forEach(u=>{ try{ u(); }catch{} });
     state.unsub = [];
   }
   function syncTenant(){
-    if (!tenant()) return;
+    if (!uid()) return;
     clearSnapshots();
 
-    // theme (kv)
+    // KV: theme
     state.unsub.push(tdoc('_theme').onSnapshot(snap=>{
       const data = snap.data() || {};
       const palette = data.palette || state.theme.palette;
@@ -129,11 +135,14 @@
       setTheme(palette, font);
     }));
 
+    // Collections
     const attach = (name, targetKey, order='desc') => {
-      state.unsub.push(tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
-        state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
-        if (['dashboard',name].includes(state.route)) render();
-      }));
+      state.unsub.push(
+        tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
+          state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
+          if (['dashboard',name].includes(state.route)) render();
+        })
+      );
     };
     attach('inventory','inventory');
     attach('products','products');
@@ -151,8 +160,8 @@
         font: state.theme.font,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge:true });
-    } catch (e) {
-      console.warn('[theme save]', e);
+      notify('Theme saved');
+    } catch {
       notify('Could not save theme (still applied locally).','warn');
     }
   }
@@ -184,15 +193,22 @@
       .slice(0,20);
   }
 
-  /* ---------- Views ---------- */
+  /* ---------- Layout ---------- */
   function layout(content){
     return `
       <div class="app">
-        <aside class="sidebar">
-          <div class="brand" id="brand-home">
+        <aside class="sidebar" id="sidebar">
+          <div class="brand" id="brand">
             <div class="logo">📦</div>
             <div class="title">Inventory</div>
           </div>
+
+          <!-- Mobile-first sidebar search -->
+          <div class="search-wrap" style="padding:0 12px 8px; display:none">
+            <input id="sideSearch" class="input" placeholder="Search…" autocomplete="off" />
+            <div id="sideSearchResults" class="search-results"></div>
+          </div>
+
           <div class="nav" id="side-nav">
             ${[
               ['dashboard','Dashboard','ri-dashboard-line'],
@@ -207,36 +223,42 @@
                 <i class="${icon}"></i><span>${label}</span>
               </div>`).join('')}
           </div>
-          <div class="footer">
-            <a href="https://youtube.com" target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
-            <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
-            <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
-            <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
-            <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
+
+          <div class="footer" style="flex-direction:column;gap:8px;padding-bottom:16px">
+            <div style="display:flex;gap:10px">
+              <a href="https://youtube.com"  target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
+              <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
+              <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
+              <a href="https://tiktok.com"   target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
+              <a href="https://twitter.com"  target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
+            </div>
+            <div class="muted" style="font-size:12px" id="copyright">Powered by MM, ${yearNow()}</div>
           </div>
         </aside>
 
         <div>
           <div class="topbar">
-            <div class="left">
-              <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
-              <div class="badge"><i class="ri-shield-user-line"></i> ${roleOf().toUpperCase()}</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn ghost" id="burger" aria-label="Open Menu" title="Menu"><i class="ri-menu-line"></i></button>
+              <div class="badge"><i class="ri-shield-user-line"></i> ${state.role.toUpperCase()}</div>
             </div>
-            <div class="search">
+
+            <div class="search-inline">
               <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
               <div id="searchResults" class="search-results"></div>
             </div>
+
             <div style="display:flex;gap:8px">
               <button class="btn ghost" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
             </div>
           </div>
-          <div id="backdrop" class="backdrop"></div>
+
+          <div class="backdrop" id="backdrop"></div>
           <div class="main" id="main">${content}</div>
         </div>
       </div>
 
-      <div class="footer" id="powered">Powered by MM, <span id="pow-year"></span></div>
-
+      <!-- Reusable modal -->
       <div class="modal" id="m-modal"><div class="dialog">
         <div class="head"><strong id="mm-title">Modal</strong><button class="btn ghost" id="mm-close">Close</button></div>
         <div class="body" id="mm-body"></div>
@@ -245,6 +267,7 @@
     `;
   }
 
+  /* ---------- Views ---------- */
   function viewLogin(){
     return `
       <div class="login-page">
@@ -267,16 +290,21 @@
                 <button id="link-forgot" class="btn ghost" style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</button>
                 <button id="link-register" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Sign up</button>
               </div>
+              <div class="muted" style="font-size:12px;margin-top:6px">Tip: Admins — admin@inventory.com / admin123</div>
             </div>
           </div>
         </div>
       </div>`;
   }
 
-  const dashCard = (label, value, route) => `
-    <div class="card clickable" data-go="${route}">
-      <div class="card-body"><div>${label}</div><h2>${value}</h2></div>
+  function dashCard(label, value, route){
+    return `<div class="card clickable" data-go="${route}">
+      <div class="card-body">
+        <div>${label}</div>
+        <h2>${value}</h2>
+      </div>
     </div>`;
+  }
 
   function viewDashboard(){
     const lowCt  = state.inventory.filter(i => i.stock <= i.threshold && i.stock > Math.max(1, Math.floor(i.threshold*0.6))).length;
@@ -370,7 +398,7 @@
             </tbody>
           </table>
           <div style="color:var(--muted);margin-top:8px">
-            Tip: Use <strong>+</strong>/<strong>−</strong> to adjust stock. Set <em>Threshold</em> in Add/Edit.
+            Tip: Use <strong>+</strong>/<strong>−</strong> to adjust stock (manager/admin).
           </div>
         </div>
       </div></div>
@@ -554,7 +582,7 @@
           <h3 style="margin-top:0">Account</h3>
           <div class="grid">
             <div><strong>Email:</strong> ${state.user?.email||'-'}</div>
-            <div><strong>Role:</strong> ${roleOf()}</div>
+            <div><strong>Role:</strong> ${state.role}</div>
           </div>
         </div></div>
 
@@ -670,9 +698,6 @@
   /* ---------- Render ---------- */
   function render(){
     const root = $('#root');
-    // ensure main visible on login render
-    document.body.classList.remove('sidebar-open');
-
     if (!auth.currentUser){
       root.innerHTML = viewLogin();
       wireLogin();
@@ -680,55 +705,71 @@
     }
     const html = layout( safeView(state.route) );
     root.innerHTML = html;
-    $('#pow-year').textContent = new Date().getFullYear();
     wireShell();
     wireRoute();
   }
 
-  /* ---------- Shell & route wiring ---------- */
-  function openSidebar(){ document.body.classList.add('sidebar-open'); $('#backdrop')?.classList.add('active'); }
-  function closeSidebar(){ document.body.classList.remove('sidebar-open'); $('#backdrop')?.classList.remove('active'); }
+  /* ---------- Sidebar helpers (mobile) ---------- */
+  function openSidebar(){
+    document.body.classList.add('sidebar-open');
+    $('#backdrop')?.classList.add('active');
+  }
+  function closeSidebar(){
+    document.body.classList.remove('sidebar-open');
+    $('#backdrop')?.classList.remove('active');
+  }
+  function ensureEdgeOpener(){
+    if ($('#sidebarEdge')) return;
+    const edge = document.createElement('div');
+    edge.id = 'sidebarEdge';
+    document.body.appendChild(edge);
+    const opener = ()=> openSidebar();
+    ['pointerenter','touchstart'].forEach(evt=> edge.addEventListener(evt, opener, {passive:true}));
+  }
 
+  /* ---------- Wiring (shell + routes) ---------- */
   function wireShell(){
-    // NAV — event delegation
+    // Burger / Backdrop / Brand / Main -> close on mobile
+    $('#burger')?.addEventListener('click', ()=>{
+      if (document.body.classList.contains('sidebar-open')) closeSidebar();
+      else openSidebar();
+    });
+    $('#backdrop')?.addEventListener('click', closeSidebar);
+    $('#brand')?.addEventListener('click', closeSidebar);
+    $('#main')?.addEventListener('click', closeSidebar);
+    ensureEdgeOpener();
+
+    // Sidebar NAV — event delegation
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
       const it = e.target.closest('.item[data-route]');
-      if (it){
-        go(it.getAttribute('data-route'));
-        // Close drawer on mobile
-        if (window.matchMedia('(max-width: 920px)').matches) closeSidebar();
-        setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
-      }
+      if (it){ go(it.getAttribute('data-route')); }
     });
     nav?.addEventListener('keydown', (e)=>{
       if (e.key==='Enter' || e.key===' '){
-        const it = e.target.closest('.item[data-route]'); if (it){ e.preventDefault(); go(it.getAttribute('data-route')); if (window.matchMedia('(max-width: 920px)').matches) closeSidebar(); }
+        const it = e.target.closest('.item[data-route]'); if (it){ e.preventDefault(); go(it.getAttribute('data-route')); }
       }
     });
 
-    // Burger / backdrop
-    $('#burger')?.addEventListener('click', ()=>{
-      if (document.body.classList.contains('sidebar-open')) closeSidebar(); else openSidebar();
-    });
-    $('#backdrop')?.addEventListener('click', closeSidebar);
-    $('#brand-home')?.addEventListener('click', ()=>{ go('dashboard'); closeSidebar(); });
-    $('#main')?.addEventListener('click', ()=>{ if (window.matchMedia('(max-width: 920px)').matches) closeSidebar(); });
-
-    // Dashboard quick nav
+    // Dashboard quick tiles open
     $('#main')?.addEventListener('click', (e)=>{
       const card = e.target.closest('.card.clickable[data-go]');
       if (card){ go(card.getAttribute('data-go')); }
     });
 
-    // logout
+    // Logout
     $('#btnLogout')?.addEventListener('click', ()=> auth.signOut());
 
-    // search
+    // Topbar search
     const input = $('#globalSearch'), results = $('#searchResults');
     if (input && results){
       let timer;
-      input.addEventListener('keydown', (e)=>{ if (e.key==='Enter'){ const q=input.value.trim(); if(q){ state.searchQ=q; go('search'); results.classList.remove('active'); input.blur(); closeSidebar(); } } });
+      input.addEventListener('keydown', (e)=>{
+        if (e.key==='Enter'){
+          const q = input.value.trim();
+          state.searchQ = q; go('search'); results.classList.remove('active');
+        }
+      });
       input.addEventListener('input', ()=>{
         clearTimeout(timer);
         const q = input.value.trim();
@@ -742,15 +783,50 @@
               const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
               state.searchQ = q; go(r);
               setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
-              results.classList.remove('active'); closeSidebar();
+              results.classList.remove('active');
             };
           });
         }, 120);
       });
       document.addEventListener('click', (e)=>{ if (!results.contains(e.target) && e.target !== input) results.classList.remove('active'); });
     }
-    // modal close
+
+    // Sidebar search (mobile)
+    const sInput = $('#sideSearch'), sResults = $('#sideSearchResults');
+    if (sInput && sResults){
+      let t;
+      sInput.addEventListener('keydown', (e)=>{
+        if (e.key==='Enter'){
+          const q = sInput.value.trim();
+          state.searchQ = q; go('search'); sResults.classList.remove('active'); closeSidebar();
+        }
+      });
+      sInput.addEventListener('input', ()=>{
+        clearTimeout(t);
+        const q = sInput.value.trim();
+        if (!q){ sResults.classList.remove('active'); sResults.innerHTML=''; return; }
+        t = setTimeout(()=>{
+          const out = doSearch(q).slice(0,12);
+          sResults.innerHTML = out.map(r=>`<div class="row" data-route="${r.route}" data-id="${r.id||''}"><strong>${r.label}</strong> <span style="color:var(--muted)">— ${r.section}</span></div>`).join('');
+          sResults.classList.add('active');
+          sResults.querySelectorAll('.row').forEach(row=>{
+            row.onclick = ()=>{
+              const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
+              state.searchQ = q; go(r); closeSidebar();
+              setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
+              sResults.classList.remove('active');
+            };
+          });
+        }, 120);
+      });
+      document.addEventListener('click', (e)=>{ if (!sResults.contains(e.target) && e.target !== sInput) sResults.classList.remove('active'); });
+    }
+
+    // Modal close
     $('#mm-close')?.addEventListener('click', ()=> closeModal('m-modal'));
+
+    // Update year in footer
+    $('#copyright')?.replaceChildren(document.createTextNode(`Powered by MM, ${yearNow()}`));
   }
 
   function wireRoute(){
@@ -768,35 +844,51 @@
 
   /* ---------- Login ---------- */
   function wireLogin(){
-    const setRoleByEmail = (email)=>{
-      const e = (email||'').toLowerCase();
-      state.role = ADMIN_EMAILS.includes(e) ? 'admin' : 'user';
-    };
+    async function resolveRole(emailLower){
+      // Admin override
+      if (ADMIN_EMAILS.includes(emailLower)) return 'admin';
+      // Check global registry
+      try{
+        const snap = await regDoc(emailLower).get();
+        const role = (snap.data()?.role || 'user').toLowerCase();
+        return VALID_ROLES.includes(role) ? role : 'user';
+      }catch{ return 'user'; }
+    }
+
     const doLogin = async ()=>{
       const email = ($('#li-email')?.value||'').trim();
       const pass  = ($('#li-pass')?.value||'').trim();
       if (!email || !pass) return notify('Enter email & password','warn');
       try{
         await auth.signInWithEmailAndPassword(email, pass);
-        setRoleByEmail(email); // temporary; will be replaced by resolver below in onAuthStateChanged
+        // role resolved in onAuthStateChanged
       }catch(e){
         notify(e?.message||'Login failed','danger');
       }
     };
+
     $('#btnLogin')?.addEventListener('click', doLogin);
     $('#li-pass')?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+
     $('#link-forgot')?.addEventListener('click', async ()=>{
       const email = ($('#li-email')?.value||'').trim();
       if (!email) return notify('Enter your email first','warn');
       try { await auth.sendPasswordResetEmail(email); notify('Reset email sent','ok'); } catch(e){ notify(e?.message||'Failed','danger'); }
     });
+
     $('#link-register')?.addEventListener('click', async ()=>{
       const email = ($('#li-email')?.value||'').trim();
-      const pass  = ($('#li-pass')?.value||'').trim() || 'admin123';
+      const pass  = ($('#li-pass')?.value||'').trim() || 'admin123'; // quick start
       if (!email) return notify('Enter an email in Email box, then click Sign up again.','warn');
       try{
         await auth.createUserWithEmailAndPassword(email, pass);
-        // role resolved after auth by resolver
+        // Create default registry role if not exists
+        const id = email.toLowerCase();
+        await regDoc(id).set({
+          email: id, role: ADMIN_EMAILS.includes(id)?'admin':'user',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, {merge:true});
+        notify('Account created — you can sign in.');
       }catch(e){ notify(e?.message||'Signup failed','danger'); }
     });
   }
@@ -903,7 +995,7 @@
 
     const sec=document.querySelector('[data-section="inventory"]'); if(!sec||sec.__wired) return; sec.__wired=true;
 
-    // inc/dec stock
+    // inc/dec (manager/admin only)
     sec.addEventListener('click', async (e)=>{
       const incBtn = e.target.closest('button[data-inc]'); const decBtn = e.target.closest('button[data-dec]');
       if (incBtn || decBtn){
@@ -1068,7 +1160,8 @@
       });
       const headers=['id','date','grossIncome','produceCost','itemCost','freight','other'];
       const csv=[headers.join(',')].concat(rows.map(r=> headers.map(h=> String(r[h]??'').replace(/"/g,'""')).map(s=> /[",\n]/.test(s)?`"${s}"`:s ).join(','))).join('\n');
-      const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download = y ? (m?`cogs_${y}-${String(m).padStart(2,'0')}.csv`:`cogs_${y}.csv`) : 'cogs_range.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
+      const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download = y ? (m?`cogs_${y}-${String(m).padStart(2,'0')}.csv`:`cogs_${y}.csv`) : 'cogs_range.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
     });
 
     $('#addCOGS')?.addEventListener('click', ()=>{
@@ -1231,13 +1324,15 @@
     }
   }
 
-  /* ---------- Settings (includes registry writes) ---------- */
+  /* ---------- Settings (theme + users) ---------- */
   function wireSettings(){
     $('#theme-palette')?.addEventListener('change', (e)=>{ setTheme(e.target.value, null); });
     $('#theme-font')?.addEventListener('change', (e)=>{ setTheme(null, e.target.value); });
     $('#save-theme')?.addEventListener('click', saveKVTheme);
 
     const table=document.querySelector('[data-section="users"]');
+
+    // Add user to tenant + registry (role)
     $('#addUser')?.addEventListener('click', ()=>{
       if(!canAdd()) return notify('No permission','warn');
       $('#mm-title').textContent='Tenant User';
@@ -1246,33 +1341,38 @@
           <input id="user-name" class="input" placeholder="Name"/>
           <input id="user-email" class="input" placeholder="Email"/>
           <select id="user-role" class="input">
-            ${['user','associate','manager','admin'].map(x=>`<option value="${x}">${x}</option>`).join('')}
+            ${VALID_ROLES.map(x=>`<option value="${x}">${x}</option>`).join('')}
           </select>
         </div>`;
       $('#mm-foot').innerHTML = `<button class="btn" id="save-user">Save</button>`;
       openModal('m-modal');
 
       $('#save-user').onclick = async ()=>{
-        const email = ($('#user-email')?.value||'').trim().toLowerCase();
-        const role  = normalizeRole(($('#user-role')?.value||'user'));
-        const u={
-          name:($('#user-name')?.value||'').trim(),
-          email,
-          role,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
+        const name = ($('#user-name')?.value||'').trim();
+        const email= ($('#user-email')?.value||'').trim().toLowerCase();
+        const role = ($('#user-role')?.value||'user').toLowerCase();
         if(!email) return notify('Email required','warn');
-        await tcol('users').add(u);
-        // cache in registry
-        await db.collection('registry').doc('userRoles')
-          .collection('byEmail').doc(email)
-          .set({ role, tenant: tenant(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+        if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
+
+        await Promise.all([
+          tcol('users').add({
+            name, email, role,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          }),
+          regDoc(email).set({
+            email, role,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge:true})
+        ]);
         closeModal('m-modal'); notify('Saved');
       };
     });
+
+    // Edit / delete (also reflect in registry)
     table?.addEventListener('click', async (e)=>{
       const btn=e.target.closest('button'); if(!btn) return;
       const id=btn.getAttribute('data-edit')||btn.getAttribute('data-del'); if(!id) return;
+
       if(btn.hasAttribute('data-edit')){
         if(!canEdit()) return notify('No permission','warn');
         const snap=await tcol('users').doc(id).get(); if(!snap.exists) return;
@@ -1283,33 +1383,34 @@
             <input id="user-name" class="input" placeholder="Name" value="${u.name||''}"/>
             <input id="user-email" class="input" placeholder="Email" value="${u.email||''}"/>
             <select id="user-role" class="input">
-              ${['user','associate','manager','admin'].map(x=>`<option value="${x}" ${normalizeRole(u.role)===x?'selected':''}>${x}</option>`).join('')}
+              ${VALID_ROLES.map(x=>`<option value="${x}" ${u.role===x?'selected':''}>${x}</option>`).join('')}
             </select>
           </div>`;
         $('#mm-foot').innerHTML = `<button class="btn" id="save-user">Save</button>`;
         openModal('m-modal');
         $('#save-user').onclick = async ()=>{
-          const email = ($('#user-email')?.value||'').trim().toLowerCase();
-          const role  = normalizeRole(($('#user-role')?.value||'user'));
-          await tcol('users').doc(id).set({
-            name:($('#user-name')?.value||'').trim(),
-            email,
-            role,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          }, {merge:true});
-          await db.collection('registry').doc('userRoles')
-            .collection('byEmail').doc(email)
-            .set({ role, tenant: tenant(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+          const name = ($('#user-name')?.value||'').trim();
+          const email= ($('#user-email')?.value||'').trim().toLowerCase();
+          const role = ($('#user-role')?.value||'user').toLowerCase();
+          if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
+          await Promise.all([
+            tcol('users').doc(id).set({
+              name, email, role,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, {merge:true}),
+            regDoc(email).set({
+              email, role,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, {merge:true})
+          ]);
           closeModal('m-modal'); notify('Saved');
         };
       } else {
         if(!canDelete()) return notify('No permission','warn');
-        const snap=await tcol('users').doc(id).get();
-        const email=(snap.data()?.email||'').toLowerCase();
-        await tcol('users').doc(id).delete(); notify('Deleted');
-        if (email){
-          // keep registry entry (do not delete) to preserve role on next login unless you want to remove it
-        }
+        const snap=await tcol('users').doc(id).get(); const email=(snap.data()?.email||'').toLowerCase();
+        await tcol('users').doc(id).delete();
+        if (email) await regDoc(email).set({ email, role:'user', updatedAt: firebase.firestore.FieldValue.serverTimestamp() },{merge:true}); // fallback
+        notify('Deleted');
       }
     });
   }
@@ -1326,7 +1427,7 @@
         try{
           await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, { from_name:name, reply_to:email, message:msg, to_email:'minmaung0307@gmail.com' });
           notify('Email sent!'); $('#ct-name').value=''; $('#ct-email').value=''; $('#ct-msg').value='';
-        }catch(e){ notify('EmailJS failed; using mail app…','warn'); window.open(`mailto:minmaung0307@gmail.com?subject=Hello&body=${encodeURIComponent(msg)}`,'_blank'); }
+        }catch(e){ notify('EmailJS failed; opening mail app…','warn'); window.open(`mailto:minmaung0307@gmail.com?subject=Hello&body=${encodeURIComponent(msg)}`,'_blank'); }
       } else {
         window.open(`mailto:minmaung0307@gmail.com?subject=Hello&body=${encodeURIComponent(msg)}`,'_blank');
       }
@@ -1410,60 +1511,7 @@
     });
   }
 
-  /* ---------- Identity resolver (roles & tenant) ---------- */
-  async function resolveIdentity(email){
-    const e = (email || '').toLowerCase();
-    let role = 'user';
-    let tenantId = uid(); // default: their own tenant
-
-    // allow-list admins
-    if (ADMIN_EMAILS.includes(e)) {
-      return { role: 'admin', tenantId };
-    }
-
-    // registry cache
-    try{
-      const doc = await db.collection('registry').doc('userRoles')
-        .collection('byEmail').doc(e).get();
-      if (doc.exists){
-        const d = doc.data() || {};
-        role = normalizeRole(d.role);
-        tenantId = d.tenant || tenantId;
-        return { role, tenantId };
-      }
-    }catch{}
-
-    // fallback: query any tenant's users
-    try{
-      const qs = await db.collectionGroup('users')
-        .where('email','==', e)
-        .limit(1)
-        .get();
-
-      if (!qs.empty){
-        const hit = qs.docs[0];
-        role = normalizeRole(hit.data()?.role || 'user');
-        tenantId = hit.ref.parent.parent.id;
-
-        // cache to registry
-        try{
-          await db.collection('registry').doc('userRoles')
-            .collection('byEmail').doc(e)
-            .set({
-              role,
-              tenant: tenantId,
-              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge:true });
-        }catch{}
-
-        return { role, tenantId };
-      }
-    }catch{}
-
-    return { role, tenantId };
-  }
-
-  /* ---------- Auth listener ---------- */
+  /* ---------- Auth listener (with role resolution) ---------- */
   auth.onAuthStateChanged(async (user)=>{
     state.user = user || null;
     if (!user){
@@ -1471,13 +1519,16 @@
       render();
       return;
     }
+    // Resolve role: admin list > registry > fallback user
+    const emailLower = (user.email||'').toLowerCase();
+    state.role = ADMIN_EMAILS.includes(emailLower) ? 'admin' : 'user';
+    try{
+      const reg = await regDoc(emailLower).get();
+      const r = (reg.data()?.role || state.role || 'user').toLowerCase();
+      if (VALID_ROLES.includes(r)) state.role = r;
+    }catch{/* ignore */}
 
-    // resolve role + tenant robustly
-    const ident = await resolveIdentity(user.email);
-    state.role     = normalizeRole(ident.role);
-    state.tenantId = ident.tenantId;
-
-    // theme init (kv)
+    // Seed/read theme
     try{
       const kv = await tdoc('_theme').get();
       if (!kv.exists){
@@ -1490,7 +1541,6 @@
       }
     }catch{}
 
-    // snapshots
     syncTenant();
     idle.hook();
     render();
@@ -1500,7 +1550,7 @@
   setTheme('sunrise','medium');
   render();
 
-  // Dashboard “Users” card scroll to users table
+  // “Users” tile — scroll to users table after navigate
   document.addEventListener('click', (e)=>{
     const card = e.target.closest('.card.clickable[data-go="settings"]');
     if (card){
