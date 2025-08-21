@@ -1,12 +1,10 @@
-/* Inventory SPA — Firestore + EmailJS (v1.0.2)
+/* Inventory SPA — Firestore + EmailJS (v1.0.3)
    -----------------------------------------------------
-   • Keep your existing HTML/CSS (no redesign).
-   • Fixes:
-     - Reliable role mapping (user/associate/manager/admin) via userRegistry
-     - Mobile drawer: burger/backdrop/edge, closes on main/brand tap
-     - Sidebar has solid bg on mobile; search also available in sidebar
-     - Works on iPhone Safari (no eval/unsafe)
-     - Keeps all previous features (COGS export, tasks DnD, products card, etc.)
+   • No redesign; surgical fixes only.
+   • Adds: search highlight + auto-scroll, solid mobile sidebar,
+           burger/backdrop/edge opener, iPhone-friendly,
+           real-time Users table update, role mapping via userRegistry,
+           “Powered by MM, YEAR”.
    ----------------------------------------------------- */
 
 (() => {
@@ -21,7 +19,6 @@
   if (!window.firebase || !window.__FIREBASE_CONFIG) {
     console.error('Firebase SDK or config missing.');
   }
-  // Compat v9 SDKs are already loaded by index.html
   firebase.initializeApp(window.__FIREBASE_CONFIG);
   const auth = firebase.auth();
   const db   = firebase.firestore();
@@ -32,10 +29,11 @@
 
   /* ---------- App State ---------- */
   const state = {
-    user: null,          // firebase.User
-    role: 'user',        // user | associate | manager | admin
+    user: null,
+    role: 'user',                 // user | associate | manager | admin
     route: 'dashboard',
     searchQ: '',
+    searchHitId: null,            // << highlight target id
     inventory: [],
     products: [],
     cogs: [],
@@ -73,7 +71,7 @@
   const uid  = () => auth.currentUser?.uid || null;
   const tcol = (name) => db.collection('tenants').doc(uid()).collection(name);
   const tdoc = (name) => db.collection('tenants').doc(uid()).collection('kv').doc(name);
-  const regDoc = (emailLower) => db.collection('userRegistry').doc(emailLower); // global roles by email
+  const regDoc = (emailLower) => db.collection('userRegistry').doc(emailLower);
 
   const setTheme = (palette, font) => {
     if (palette) state.theme.palette = palette;
@@ -113,8 +111,7 @@
   const routes = ['dashboard','inventory','products','cogs','tasks','settings','links','search'];
   function go(route){
     state.route = routes.includes(route) ? route : 'dashboard';
-    // Close sidebar on mobile when navigating
-    closeSidebar();
+    closeSidebar(); // close on mobile when navigating
     render();
   }
 
@@ -135,17 +132,12 @@
       setTheme(palette, font);
     }));
 
-    // Collections
+    // Collections (re-render on every change to reflect immediately on any route)
     const attach = (name, targetKey, order='desc') => {
       state.unsub.push(
         tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
           state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
-          // also refresh Settings when /users snapshot changes
-if (
-  state.route === 'dashboard' ||
-  state.route === name ||
-  (name === 'users' && state.route === 'settings')
-) render();
+          render(); // <— ensures Settings shows new Users right away
         })
       );
     };
@@ -196,6 +188,20 @@ if (
       .sort((a,b)=>b.score-a.score)
       .map(x=>x.item)
       .slice(0,20);
+  }
+
+  // Search-hit highlighter
+  function flashHit(id){
+    state.searchHitId = id || null;
+    render();
+    if (!id) return;
+    setTimeout(()=> document.getElementById(id)?.scrollIntoView({behavior:'smooth', block:'center'}), 50);
+    clearTimeout(state.__hitTimer);
+    state.__hitTimer = setTimeout(()=>{
+      state.searchHitId = null;
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('search-hit');
+    }, 4000);
   }
 
   /* ---------- Layout ---------- */
@@ -344,7 +350,7 @@ if (
         </div>
         <div class="grid" data-section="posts" style="grid-template-columns: 1fr;">
           ${(state.posts||[]).map(p=>`
-            <div class="card" id="${p.id}">
+            <div class="card${state.searchHitId===p.id?' search-hit':''}" id="${p.id}">
               <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
                 <div><strong>${p.title}</strong><div style="color:var(--muted);font-size:12px">${new Date(p.createdAt?.toDate?.()||p.createdAt||Date.now()).toLocaleString()}</div></div>
                 <div class="actions">
@@ -381,7 +387,7 @@ if (
                 const low = !critical && it.stock <= it.threshold;
                 const rowClass = critical? 'critical' : (low? 'low' : '');
                 return `
-                  <tr id="${it.id}" class="${rowClass}">
+                  <tr id="${it.id}" class="${rowClass}${state.searchHitId===it.id?' search-hit':''}">
                     <td>${it.name}</td>
                     <td>${it.code}</td>
                     <td>${it.type||'-'}</td>
@@ -425,7 +431,7 @@ if (
             <thead><tr><th>Name</th><th>Barcode</th><th class="num">Price</th><th>Type</th><th>Actions</th></tr></thead>
             <tbody>
               ${state.products.map(it=>`
-                <tr id="${it.id}">
+                <tr id="${it.id}" class="${state.searchHitId===it.id?'search-hit':''}">
                   <td><button class="btn ghost" data-card="${it.id}" title="Open" style="padding:6px 10px">${it.name}</button></td>
                   <td>${it.barcode||''}</td>
                   <td class="num">${fmtUSD(it.price)}</td>
@@ -494,7 +500,7 @@ if (
             <thead><tr>${headers.map((h,i)=>`<th class="${i? 'num':''}">${h}</th>`).join('')}<th>Actions</th></tr></thead>
             <tbody id="cogs-tbody">
               ${rows.map(r=>`
-                <tr id="${r.id}">
+                <tr id="${r.id}" class="${state.searchHitId===r.id?'search-hit':''}">
                   <td>${r.date}</td>
                   <td class="num">${fmtUSD(r.grossIncome)}</td>
                   <td class="num">${fmtUSD(r.produceCost)}</td>
@@ -539,7 +545,7 @@ if (
             </div>
             <div class="grid lane-grid" id="lane-${key}">
               ${cards.map(t=>`
-                <div class="card task-card" id="${t.id}" draggable="true" data-task="${t.id}" style="cursor:grab">
+                <div class="card task-card${state.searchHitId===t.id?' search-hit':''}" id="${t.id}" draggable="true" data-task="${t.id}" style="cursor:grab">
                   <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
                     <div>${t.title}</div>
                     <div class="actions">
@@ -602,7 +608,7 @@ if (
               <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
               <tbody>
                 ${state.users.map(u=>`
-                  <tr id="${u.id}">
+                  <tr id="${u.id}" class="${state.searchHitId===u.id?'search-hit':''}">
                     <td>${u.name}</td><td>${u.email}</td><td>${u.role}</td>
                     <td class="actions">
                       ${canEdit()? `<button class="btn ghost" data-edit="${u.id}"><i class="ri-edit-line"></i></button>`:''}
@@ -627,7 +633,7 @@ if (
           </div>
           <div class="grid cols-2" data-section="links">
             ${(state.links||[]).map(l=>`
-              <div class="card">
+              <div class="card${state.searchHitId===l.id?' search-hit':''}" id="${l.id}">
                 <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
                   <div>
                     <div style="font-weight:700">${l.title||'(untitled)'}</div>
@@ -744,7 +750,7 @@ if (
     $('#main')?.addEventListener('click', closeSidebar);
     ensureEdgeOpener();
 
-    // Sidebar NAV — event delegation
+    // Sidebar NAV
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
       const it = e.target.closest('.item[data-route]');
@@ -756,7 +762,7 @@ if (
       }
     });
 
-    // Dashboard quick tiles open
+    // Dashboard quick tiles
     $('#main')?.addEventListener('click', (e)=>{
       const card = e.target.closest('.card.clickable[data-go]');
       if (card){ go(card.getAttribute('data-go')); }
@@ -787,7 +793,7 @@ if (
             row.onclick = ()=>{
               const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
               state.searchQ = q; go(r);
-              setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
+              setTimeout(()=> flashHit(id), 30);
               results.classList.remove('active');
             };
           });
@@ -818,7 +824,7 @@ if (
             row.onclick = ()=>{
               const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
               state.searchQ = q; go(r); closeSidebar();
-              setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
+              setTimeout(()=> flashHit(id), 30);
               sResults.classList.remove('active');
             };
           });
@@ -849,24 +855,12 @@ if (
 
   /* ---------- Login ---------- */
   function wireLogin(){
-    async function resolveRole(emailLower){
-      // Admin override
-      if (ADMIN_EMAILS.includes(emailLower)) return 'admin';
-      // Check global registry
-      try{
-        const snap = await regDoc(emailLower).get();
-        const role = (snap.data()?.role || 'user').toLowerCase();
-        return VALID_ROLES.includes(role) ? role : 'user';
-      }catch{ return 'user'; }
-    }
-
     const doLogin = async ()=>{
       const email = ($('#li-email')?.value||'').trim();
       const pass  = ($('#li-pass')?.value||'').trim();
       if (!email || !pass) return notify('Enter email & password','warn');
       try{
         await auth.signInWithEmailAndPassword(email, pass);
-        // role resolved in onAuthStateChanged
       }catch(e){
         notify(e?.message||'Login failed','danger');
       }
@@ -883,11 +877,10 @@ if (
 
     $('#link-register')?.addEventListener('click', async ()=>{
       const email = ($('#li-email')?.value||'').trim();
-      const pass  = ($('#li-pass')?.value||'').trim() || 'admin123'; // quick start
+      const pass  = ($('#li-pass')?.value||'').trim() || 'admin123';
       if (!email) return notify('Enter an email in Email box, then click Sign up again.','warn');
       try{
         await auth.createUserWithEmailAndPassword(email, pass);
-        // Create default registry role if not exists
         const id = email.toLowerCase();
         await regDoc(id).set({
           email: id, role: ADMIN_EMAILS.includes(id)?'admin':'user',
@@ -898,7 +891,7 @@ if (
     });
   }
 
-  /* ---------- Posts (dashboard) ---------- */
+  /* ---------- Posts ---------- */
   function wirePosts(){
     $('#addPost')?.addEventListener('click', ()=>{
       if(!canAdd()) return notify('No permission','warn');
@@ -1353,24 +1346,24 @@ if (
       openModal('m-modal');
 
       $('#save-user').onclick = async ()=>{
-  const name = ($('#user-name')?.value||'').trim();
-  const email= ($('#user-email')?.value||'').trim().toLowerCase();
-  const role = ($('#user-role')?.value||'user').toLowerCase();
-  if(!email) return notify('Email required','warn');
-  if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
+        const name = ($('#user-name')?.value||'').trim();
+        const email= ($('#user-email')?.value||'').trim().toLowerCase();
+        const role = ($('#user-role')?.value||'user').toLowerCase();
+        if(!email) return notify('Email required','warn');
+        if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
 
-  try {
-    const ts = firebase.firestore.FieldValue.serverTimestamp();
-    await Promise.all([
-      tcol('users').add({ name, email, role, createdAt: ts }),
-      regDoc(email).set({ email, role, updatedAt: ts }, { merge:true })
-    ]);
-    closeModal('m-modal');
-    notify('Saved');
-  } catch(e){
-    notify(e?.message || 'Failed to save user','danger');
-  }
-};
+        try {
+          const ts = firebase.firestore.FieldValue.serverTimestamp();
+          await Promise.all([
+            tcol('users').add({ name, email, role, createdAt: ts }),
+            regDoc(email).set({ email, role, updatedAt: ts }, { merge:true })
+          ]);
+          closeModal('m-modal');
+          notify('Saved');
+        } catch(e){
+          notify(e?.message || 'Failed to save user','danger');
+        }
+      };
     });
 
     // Edit / delete (also reflect in registry)
@@ -1394,28 +1387,28 @@ if (
         $('#mm-foot').innerHTML = `<button class="btn" id="save-user">Save</button>`;
         openModal('m-modal');
         $('#save-user').onclick = async ()=>{
-  const name = ($('#user-name')?.value||'').trim();
-  const email= ($('#user-email')?.value||'').trim().toLowerCase();
-  const role = ($('#user-role')?.value||'user').toLowerCase();
-  if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
+          const name = ($('#user-name')?.value||'').trim();
+          const email= ($('#user-email')?.value||'').trim().toLowerCase();
+          const role = ($('#user-role')?.value||'user').toLowerCase();
+          if(!VALID_ROLES.includes(role)) return notify('Invalid role','warn');
 
-  try {
-    const ts = firebase.firestore.FieldValue.serverTimestamp();
-    await Promise.all([
-      tcol('users').doc(id).set({ name, email, role, updatedAt: ts }, { merge:true }),
-      regDoc(email).set({ email, role, updatedAt: ts }, { merge:true })
-    ]);
-    closeModal('m-modal');
-    notify('Saved');
-  } catch(e){
-    notify(e?.message || 'Failed to update','danger');
-  }
-};
+          try {
+            const ts = firebase.firestore.FieldValue.serverTimestamp();
+            await Promise.all([
+              tcol('users').doc(id).set({ name, email, role, updatedAt: ts }, { merge:true }),
+              regDoc(email).set({ email, role, updatedAt: ts }, { merge:true })
+            ]);
+            closeModal('m-modal');
+            notify('Saved');
+          } catch(e){
+            notify(e?.message || 'Failed to update','danger');
+          }
+        };
       } else {
         if(!canDelete()) return notify('No permission','warn');
         const snap=await tcol('users').doc(id).get(); const email=(snap.data()?.email||'').toLowerCase();
         await tcol('users').doc(id).delete();
-        if (email) await regDoc(email).set({ email, role:'user', updatedAt: firebase.firestore.FieldValue.serverTimestamp() },{merge:true}); // fallback
+        if (email) await regDoc(email).set({ email, role:'user', updatedAt: firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
         notify('Deleted');
       }
     });
@@ -1512,12 +1505,15 @@ if (
   function wireSearch(){
     document.querySelectorAll('[data-go]').forEach(el=>{
       el.addEventListener('click', ()=>{
-        const r=el.getAttribute('data-go'); const id=el.getAttribute('data-id'); go(r); if (id) setTimeout(()=>document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}),80);
+        const r=el.getAttribute('data-go'); const id=el.getAttribute('data-id');
+        state.searchQ = state.searchQ || '';
+        go(r);
+        if (id) setTimeout(()=> flashHit(id), 30);
       });
     });
   }
 
-  /* ---------- Auth listener (with role resolution) ---------- */
+  /* ---------- Auth listener (role resolution from registry) ---------- */
   auth.onAuthStateChanged(async (user)=>{
     state.user = user || null;
     if (!user){
@@ -1532,10 +1528,7 @@ if (
       const reg = await regDoc(emailLower).get();
       const r = (reg.data()?.role || state.role || 'user').toLowerCase();
       if (VALID_ROLES.includes(r)) state.role = r;
-    }catch(e) {
-    console.warn('userRegistry read failed; defaulting to "user"', e);
-  }
-
+    }catch(e){ console.warn('userRegistry read failed; defaulting to "user"', e); }
 
     // Seed/read theme
     try{
