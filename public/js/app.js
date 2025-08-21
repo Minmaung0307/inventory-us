@@ -1,8 +1,9 @@
-/* Inventory SPA — Firestore + EmailJS (v1.0.3)
-   -----------------------------------------------------
-   Surgical fixes: mobile burger + drawer, solid sidebar background on mobile,
-   close drawer on main/brand/backdrop tap; preserves all UI/UX + features.
-   ----------------------------------------------------- */
+/* Inventory SPA — Firestore + EmailJS (v1.0.2)
+   Minimal, surgical fixes to:
+   - mobile sidebar (burger, backdrop, solid bg, close on tap)
+   - role resolution (associate/manager/admin from Firestore or registry)
+   - Powered by MM (auto-year)
+*/
 
 (() => {
   'use strict';
@@ -20,12 +21,14 @@
   const auth = firebase.auth();
   const db   = firebase.firestore();
 
-  /* ---------- App State ---------- */
+  /* ---------- Admin allow-list (kept) ---------- */
   const ADMIN_EMAILS = ['admin@inventory.com', 'minmaung0307@gmail.com'];
-  const ROLES = ['user','associate','manager','admin'];
+
+  /* ---------- App State ---------- */
   const state = {
     user: null,
-    role: 'user',
+    role: 'user',           // user | associate | manager | admin
+    tenantId: null,         // resolved tenant for this user
     route: 'dashboard',
     searchQ: '',
     inventory: [],
@@ -55,14 +58,22 @@
     n.className = `notification show ${type}`;
     setTimeout(()=> n.className='notification', 2200);
   };
-  const canAdd    = () => ['associate','manager','admin'].includes(state.role);
-  const canEdit   = () => ['manager','admin'].includes(state.role);
-  const canDelete = () => ['admin'].includes(state.role);
 
-  const uid = () => auth.currentUser?.uid || null;
-  const tcol = (name) => db.collection('tenants').doc(uid()).collection(name);
-  const tdoc = (name) => db.collection('tenants').doc(uid()).collection('kv').doc(name);
+  /* ---------- Role helpers (normalized) ---------- */
+  function normalizeRole(r){
+    const x = String(r || 'user').trim().toLowerCase();
+    if (['user','associate','manager','admin'].includes(x)) return x;
+    if (x.startsWith('assoc')) return 'associate';
+    if (x.startsWith('manag')) return 'manager';
+    if (x.startsWith('adm'))   return 'admin';
+    return 'user';
+  }
+  const roleOf     = () => normalizeRole(state.role);
+  const canAdd     = () => ['associate','manager','admin'].includes(roleOf());
+  const canEdit    = () => ['manager','admin'].includes(roleOf());
+  const canDelete  = () => roleOf() === 'admin';
 
+  /* ---------- Theme ---------- */
   const setTheme = (palette, font) => {
     if (palette) state.theme.palette = palette;
     if (font)    state.theme.font    = font;
@@ -70,6 +81,7 @@
     document.documentElement.setAttribute('data-font',  state.theme.font);
   };
 
+  /* ---------- Idle sign-out ---------- */
   const idle = {
     timer:null,
     MAX: 20*60*1000,
@@ -94,13 +106,19 @@
   const routes = ['dashboard','inventory','products','cogs','tasks','settings','links','search'];
   function go(route){ state.route = routes.includes(route) ? route : 'dashboard'; render(); }
 
-  /* ---------- Firestore sync ---------- */
+  /* ---------- Tenant helpers (use resolved tenantId) ---------- */
+  const uid = () => auth.currentUser?.uid || null;
+  const tenant = () => state.tenantId || uid();
+  const tcol = (name) => db.collection('tenants').doc(tenant()).collection(name);
+  const tdoc = (name) => db.collection('tenants').doc(tenant()).collection('kv').doc(name);
+
+  /* ---------- Firestore snapshots ---------- */
   function clearSnapshots(){
     state.unsub.forEach(u=>{ try{ u(); }catch{} });
     state.unsub = [];
   }
   function syncTenant(){
-    if (!uid()) return;
+    if (!tenant()) return;
     clearSnapshots();
 
     // theme (kv)
@@ -139,27 +157,6 @@
     }
   }
 
-  /* ---------- Role resolution ---------- */
-  async function resolveRoleForEmail(email){
-    const e = (email||'').toLowerCase();
-    if (ADMIN_EMAILS.includes(e)) return 'admin';
-    try{
-      const rdoc = await db.collection('registry').doc('userRoles').collection('byEmail').doc(e).get();
-      if (rdoc.exists){
-        const r = rdoc.data()?.role;
-        if (['user','associate','manager','admin'].includes(r)) return r;
-      }
-    }catch{}
-    try{
-      const qs = await tcol('users').where('email','==', e).limit(1).get();
-      if (!qs.empty){
-        const r = qs.docs[0].data()?.role;
-        if (['user','associate','manager','admin'].includes(r)) return r;
-      }
-    }catch{}
-    return 'user';
-  }
-
   /* ---------- Search ---------- */
   function buildIndex(){
     const ix = [];
@@ -192,7 +189,7 @@
     return `
       <div class="app">
         <aside class="sidebar">
-          <div class="brand" id="brand">
+          <div class="brand" id="brand-home">
             <div class="logo">📦</div>
             <div class="title">Inventory</div>
           </div>
@@ -217,19 +214,14 @@
             <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
             <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
           </div>
-          <div class="footer" id="powered" style="font-size:12px;color:var(--muted)">Powered by MM, ${new Date().getFullYear()}</div>
         </aside>
-
-        <!-- Mobile drawer helpers -->
-        <div class="backdrop" id="sidebarBackdrop"></div>
-        <div id="sidebarEdge" aria-hidden="true"></div>
 
         <div>
           <div class="topbar">
-            <button class="btn ghost burger" id="btnBurger" aria-label="Open menu" title="Menu">
-              <i class="ri-menu-line"></i>
-            </button>
-            <div class="badge"><i class="ri-shield-user-line"></i> ${state.role.toUpperCase()}</div>
+            <div class="left">
+              <div class="burger" id="burger"><i class="ri-menu-line"></i></div>
+              <div class="badge"><i class="ri-shield-user-line"></i> ${roleOf().toUpperCase()}</div>
+            </div>
             <div class="search">
               <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
               <div id="searchResults" class="search-results"></div>
@@ -238,9 +230,12 @@
               <button class="btn ghost" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
             </div>
           </div>
+          <div id="backdrop" class="backdrop"></div>
           <div class="main" id="main">${content}</div>
         </div>
       </div>
+
+      <div class="footer" id="powered">Powered by MM, <span id="pow-year"></span></div>
 
       <div class="modal" id="m-modal"><div class="dialog">
         <div class="head"><strong id="mm-title">Modal</strong><button class="btn ghost" id="mm-close">Close</button></div>
@@ -278,15 +273,10 @@
       </div>`;
   }
 
-  function dashCard(label, value, route, badgeClass=''){
-    return `<div class="card clickable" data-go="${route}">
-      <div class="card-body">
-        <div>${label}</div>
-        <h2>${value}</h2>
-        ${badgeClass ? `<div class="badge ${badgeClass}" style="margin-top:6px">${label}</div>`:''}
-      </div>
+  const dashCard = (label, value, route) => `
+    <div class="card clickable" data-go="${route}">
+      <div class="card-body"><div>${label}</div><h2>${value}</h2></div>
     </div>`;
-  }
 
   function viewDashboard(){
     const lowCt  = state.inventory.filter(i => i.stock <= i.threshold && i.stock > Math.max(1, Math.floor(i.threshold*0.6))).length;
@@ -364,12 +354,12 @@
                     <td>${it.type||'-'}</td>
                     <td class="num">${fmtUSD(it.price)}</td>
                     <td class="num">
-  <div class="qty">
-    ${canEdit()? `<button class="btn ghost" data-dec="${it.id}" title="Decrease"><i class="ri-subtract-line"></i></button>`:''}
-    <span class="qty-num">${it.stock}</span>
-    ${canEdit()? `<button class="btn ghost" data-inc="${it.id}" title="Increase"><i class="ri-add-line"></i></button>`:''}
-  </div>
-</td>
+                      <div class="qty">
+                        ${canEdit()? `<button class="btn ghost" data-dec="${it.id}" title="Decrease"><i class="ri-subtract-line"></i></button>`:''}
+                        <span class="qty-num">${it.stock}</span>
+                        ${canEdit()? `<button class="btn ghost" data-inc="${it.id}" title="Increase"><i class="ri-add-line"></i></button>`:''}
+                      </div>
+                    </td>
                     <td class="num">${it.threshold}</td>
                     <td class="actions">
                       ${canEdit()? `<button class="btn ghost" data-edit="${it.id}" title="Edit"><i class="ri-edit-line"></i></button>`:''}
@@ -564,7 +554,7 @@
           <h3 style="margin-top:0">Account</h3>
           <div class="grid">
             <div><strong>Email:</strong> ${state.user?.email||'-'}</div>
-            <div><strong>Role:</strong> ${state.role}</div>
+            <div><strong>Role:</strong> ${roleOf()}</div>
           </div>
         </div></div>
 
@@ -680,6 +670,9 @@
   /* ---------- Render ---------- */
   function render(){
     const root = $('#root');
+    // ensure main visible on login render
+    document.body.classList.remove('sidebar-open');
+
     if (!auth.currentUser){
       root.innerHTML = viewLogin();
       wireLogin();
@@ -687,54 +680,42 @@
     }
     const html = layout( safeView(state.route) );
     root.innerHTML = html;
+    $('#pow-year').textContent = new Date().getFullYear();
     wireShell();
     wireRoute();
   }
 
-  /* ---------- Wiring (shell + routes) ---------- */
+  /* ---------- Shell & route wiring ---------- */
+  function openSidebar(){ document.body.classList.add('sidebar-open'); $('#backdrop')?.classList.add('active'); }
+  function closeSidebar(){ document.body.classList.remove('sidebar-open'); $('#backdrop')?.classList.remove('active'); }
+
   function wireShell(){
-    const isMobile = () => window.matchMedia('(max-width: 920px)').matches;
-    const openSidebar = () => { document.body.classList.add('sidebar-open'); $('#sidebarBackdrop')?.classList.add('active'); };
-    const closeSidebar = () => { document.body.classList.remove('sidebar-open'); $('#sidebarBackdrop')?.classList.remove('active'); };
-
-    // Burger toggle
-    $('#btnBurger')?.addEventListener('click', ()=>{
-      if (document.body.classList.contains('sidebar-open')) closeSidebar();
-      else openSidebar();
-    });
-
-    // Close drawer when tapping main pane or brand (logo/title)
-    $('#main')?.addEventListener('click', ()=> { if (isMobile()) closeSidebar(); });
-    $('#sidebarBackdrop')?.addEventListener('click', ()=> closeSidebar());
-    $('#brand')?.addEventListener('click', ()=> { if (isMobile()) closeSidebar(); });
-
-    // Left edge hot zone opens drawer
-    $('#sidebarEdge')?.addEventListener('click', ()=> { if (isMobile()) openSidebar(); });
-
     // NAV — event delegation
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
       const it = e.target.closest('.item[data-route]');
       if (it){
         go(it.getAttribute('data-route'));
-        if (isMobile()){
-          closeSidebar();
-          setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
-        }
+        // Close drawer on mobile
+        if (window.matchMedia('(max-width: 920px)').matches) closeSidebar();
+        setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
       }
     });
     nav?.addEventListener('keydown', (e)=>{
       if (e.key==='Enter' || e.key===' '){
-        const it = e.target.closest('.item[data-route]');
-        if (it){
-          e.preventDefault();
-          go(it.getAttribute('data-route'));
-          if (isMobile()) closeSidebar();
-        }
+        const it = e.target.closest('.item[data-route]'); if (it){ e.preventDefault(); go(it.getAttribute('data-route')); if (window.matchMedia('(max-width: 920px)').matches) closeSidebar(); }
       }
     });
 
-    // DASHBOARD quick nav (cards + low/critical)
+    // Burger / backdrop
+    $('#burger')?.addEventListener('click', ()=>{
+      if (document.body.classList.contains('sidebar-open')) closeSidebar(); else openSidebar();
+    });
+    $('#backdrop')?.addEventListener('click', closeSidebar);
+    $('#brand-home')?.addEventListener('click', ()=>{ go('dashboard'); closeSidebar(); });
+    $('#main')?.addEventListener('click', ()=>{ if (window.matchMedia('(max-width: 920px)').matches) closeSidebar(); });
+
+    // Dashboard quick nav
     $('#main')?.addEventListener('click', (e)=>{
       const card = e.target.closest('.card.clickable[data-go]');
       if (card){ go(card.getAttribute('data-go')); }
@@ -747,17 +728,7 @@
     const input = $('#globalSearch'), results = $('#searchResults');
     if (input && results){
       let timer;
-      input.addEventListener('keydown', (e)=>{
-        if (e.key==='Enter'){
-          const q = input.value.trim();
-          if (q){
-            state.searchQ = q;
-            go('search');
-            results.classList.remove('active');
-            if (isMobile()) closeSidebar();
-          }
-        }
-      });
+      input.addEventListener('keydown', (e)=>{ if (e.key==='Enter'){ const q=input.value.trim(); if(q){ state.searchQ=q; go('search'); results.classList.remove('active'); input.blur(); closeSidebar(); } } });
       input.addEventListener('input', ()=>{
         clearTimeout(timer);
         const q = input.value.trim();
@@ -771,22 +742,15 @@
               const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
               state.searchQ = q; go(r);
               setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
-              results.classList.remove('active');
-              if (isMobile()) closeSidebar();
+              results.classList.remove('active'); closeSidebar();
             };
           });
         }, 120);
       });
       document.addEventListener('click', (e)=>{ if (!results.contains(e.target) && e.target !== input) results.classList.remove('active'); });
     }
-
     // modal close
     $('#mm-close')?.addEventListener('click', ()=> closeModal('m-modal'));
-
-    // Ensure we don't keep drawer open if resizing to desktop
-    window.addEventListener('resize', ()=>{
-      if (!isMobile()) closeSidebar();
-    }, {passive:true});
   }
 
   function wireRoute(){
@@ -814,7 +778,7 @@
       if (!email || !pass) return notify('Enter email & password','warn');
       try{
         await auth.signInWithEmailAndPassword(email, pass);
-        setRoleByEmail(email);
+        setRoleByEmail(email); // temporary; will be replaced by resolver below in onAuthStateChanged
       }catch(e){
         notify(e?.message||'Login failed','danger');
       }
@@ -832,12 +796,12 @@
       if (!email) return notify('Enter an email in Email box, then click Sign up again.','warn');
       try{
         await auth.createUserWithEmailAndPassword(email, pass);
-        state.role = ADMIN_EMAILS.includes(email.toLowerCase()) ? 'admin' : 'user';
+        // role resolved after auth by resolver
       }catch(e){ notify(e?.message||'Signup failed','danger'); }
     });
   }
 
-  /* ---------- Posts ---------- */
+  /* ---------- Posts (dashboard) ---------- */
   function wirePosts(){
     $('#addPost')?.addEventListener('click', ()=>{
       if(!canAdd()) return notify('No permission','warn');
@@ -847,7 +811,7 @@
           <input id="post-title" class="input" placeholder="Title"/>
           <textarea id="post-body" class="input" placeholder="Body"></textarea>
         </div>`;
-    $('#mm-foot').innerHTML = `<button class="btn" id="save-post">Save</button>`;
+      $('#mm-foot').innerHTML = `<button class="btn" id="save-post">Save</button>`;
       openModal('m-modal');
 
       $('#save-post').onclick = async ()=>{
@@ -939,7 +903,7 @@
 
     const sec=document.querySelector('[data-section="inventory"]'); if(!sec||sec.__wired) return; sec.__wired=true;
 
-    // inc/dec stock fast
+    // inc/dec stock
     sec.addEventListener('click', async (e)=>{
       const incBtn = e.target.closest('button[data-inc]'); const decBtn = e.target.closest('button[data-dec]');
       if (incBtn || decBtn){
@@ -1267,7 +1231,7 @@
     }
   }
 
-  /* ---------- Settings ---------- */
+  /* ---------- Settings (includes registry writes) ---------- */
   function wireSettings(){
     $('#theme-palette')?.addEventListener('change', (e)=>{ setTheme(e.target.value, null); });
     $('#theme-font')?.addEventListener('change', (e)=>{ setTheme(null, e.target.value); });
@@ -1289,23 +1253,20 @@
       openModal('m-modal');
 
       $('#save-user').onclick = async ()=>{
+        const email = ($('#user-email')?.value||'').trim().toLowerCase();
+        const role  = normalizeRole(($('#user-role')?.value||'user'));
         const u={
           name:($('#user-name')?.value||'').trim(),
-          email:($('#user-email')?.value||'').trim(),
-          role: ($('#user-role')?.value||'user'),
+          email,
+          role,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         };
-        if(!u.email) return notify('Email required','warn');
+        if(!email) return notify('Email required','warn');
         await tcol('users').add(u);
-        try{
-          const e=(u.email||'').toLowerCase();
-          await db.collection('registry').doc('userRoles')
-            .collection('byEmail').doc(e)
-            .set({ role:u.role, tenant: uid(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
-        }catch{}
-        if ((u.email||'').toLowerCase() === (state.user?.email||'').toLowerCase()){
-          state.role = u.role; render();
-        }
+        // cache in registry
+        await db.collection('registry').doc('userRoles')
+          .collection('byEmail').doc(email)
+          .set({ role, tenant: tenant(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
         closeModal('m-modal'); notify('Saved');
       };
     });
@@ -1322,39 +1283,38 @@
             <input id="user-name" class="input" placeholder="Name" value="${u.name||''}"/>
             <input id="user-email" class="input" placeholder="Email" value="${u.email||''}"/>
             <select id="user-role" class="input">
-              ${['user','associate','manager','admin'].map(x=>`<option value="${x}" ${u.role===x?'selected':''}>${x}</option>`).join('')}
+              ${['user','associate','manager','admin'].map(x=>`<option value="${x}" ${normalizeRole(u.role)===x?'selected':''}>${x}</option>`).join('')}
             </select>
           </div>`;
         $('#mm-foot').innerHTML = `<button class="btn" id="save-user">Save</button>`;
         openModal('m-modal');
         $('#save-user').onclick = async ()=>{
-          const newEmail = ($('#user-email')?.value||'').trim();
-          const newRole  = ($('#user-role')?.value||'user');
+          const email = ($('#user-email')?.value||'').trim().toLowerCase();
+          const role  = normalizeRole(($('#user-role')?.value||'user'));
           await tcol('users').doc(id).set({
             name:($('#user-name')?.value||'').trim(),
-            email:newEmail,
-            role:newRole,
+            email,
+            role,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, {merge:true});
-          try{
-            const e=(newEmail||'').toLowerCase();
-            await db.collection('registry').doc('userRoles')
-              .collection('byEmail').doc(e)
-              .set({ role:newRole, tenant: uid(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
-          }catch{}
-          if ((newEmail||'').toLowerCase() === (state.user?.email||'').toLowerCase()){
-            state.role = newRole; render();
-          }
+          await db.collection('registry').doc('userRoles')
+            .collection('byEmail').doc(email)
+            .set({ role, tenant: tenant(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
           closeModal('m-modal'); notify('Saved');
         };
       } else {
         if(!canDelete()) return notify('No permission','warn');
+        const snap=await tcol('users').doc(id).get();
+        const email=(snap.data()?.email||'').toLowerCase();
         await tcol('users').doc(id).delete(); notify('Deleted');
+        if (email){
+          // keep registry entry (do not delete) to preserve role on next login unless you want to remove it
+        }
       }
     });
   }
 
-  /* ---------- Links ---------- */
+  /* ---------- Links (EmailJS + Link viewer) ---------- */
   function wireLinks(){
     if (window.emailjs && EMAILJS_PUBLIC_KEY) {
       try { window.emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY }); } catch {}
@@ -1423,6 +1383,7 @@
       }
     });
 
+    // add link
     $('#addLink')?.addEventListener('click', ()=>{
       if(!canAdd()) return notify('No permission','warn');
       $('#mm-title').textContent='Add Link';
@@ -1449,6 +1410,59 @@
     });
   }
 
+  /* ---------- Identity resolver (roles & tenant) ---------- */
+  async function resolveIdentity(email){
+    const e = (email || '').toLowerCase();
+    let role = 'user';
+    let tenantId = uid(); // default: their own tenant
+
+    // allow-list admins
+    if (ADMIN_EMAILS.includes(e)) {
+      return { role: 'admin', tenantId };
+    }
+
+    // registry cache
+    try{
+      const doc = await db.collection('registry').doc('userRoles')
+        .collection('byEmail').doc(e).get();
+      if (doc.exists){
+        const d = doc.data() || {};
+        role = normalizeRole(d.role);
+        tenantId = d.tenant || tenantId;
+        return { role, tenantId };
+      }
+    }catch{}
+
+    // fallback: query any tenant's users
+    try{
+      const qs = await db.collectionGroup('users')
+        .where('email','==', e)
+        .limit(1)
+        .get();
+
+      if (!qs.empty){
+        const hit = qs.docs[0];
+        role = normalizeRole(hit.data()?.role || 'user');
+        tenantId = hit.ref.parent.parent.id;
+
+        // cache to registry
+        try{
+          await db.collection('registry').doc('userRoles')
+            .collection('byEmail').doc(e)
+            .set({
+              role,
+              tenant: tenantId,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge:true });
+        }catch{}
+
+        return { role, tenantId };
+      }
+    }catch{}
+
+    return { role, tenantId };
+  }
+
   /* ---------- Auth listener ---------- */
   auth.onAuthStateChanged(async (user)=>{
     state.user = user || null;
@@ -1457,8 +1471,13 @@
       render();
       return;
     }
-    state.role = await resolveRoleForEmail(user.email);
 
+    // resolve role + tenant robustly
+    const ident = await resolveIdentity(user.email);
+    state.role     = normalizeRole(ident.role);
+    state.tenantId = ident.tenantId;
+
+    // theme init (kv)
     try{
       const kv = await tdoc('_theme').get();
       if (!kv.exists){
@@ -1470,6 +1489,8 @@
         setTheme(data.palette||state.theme.palette, data.font||state.theme.font);
       }
     }catch{}
+
+    // snapshots
     syncTenant();
     idle.hook();
     render();
