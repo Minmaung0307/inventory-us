@@ -32,7 +32,7 @@
     cogs: [],
     tasks: [],
     posts: [],
-    links: [],              // << new: Link Pages collection
+    links: [],
     users: [],
     theme: { palette:'sunrise', font:'medium' },
     unsub: []
@@ -85,6 +85,30 @@
     }
   };
 
+  /* ---------- Sidebar (mobile) helpers ---------- */
+  function openSidebar(){
+    document.body.classList.add('sidebar-open');
+    $('#backdrop')?.classList.add('active');
+  }
+  function closeSidebar(){
+    document.body.classList.remove('sidebar-open');
+    $('#backdrop')?.classList.remove('active');
+  }
+  function toggleSidebar(){
+    if (document.body.classList.contains('sidebar-open')) closeSidebar(); else openSidebar();
+  }
+  function ensureSidebarEdge(){
+    if (!$('#sidebarEdge')){
+      const edge=document.createElement('div');
+      edge.id='sidebarEdge';
+      document.body.appendChild(edge);
+    }
+  }
+  function hookEdgeReveal(){
+    const edge=$('#sidebarEdge'); if(!edge || edge.__wired) return; edge.__wired=true;
+    ['pointerenter','mouseenter','touchstart'].forEach(evt=> edge.addEventListener(evt, openSidebar, {passive:true}));
+  }
+
   /* ---------- Modal helpers ---------- */
   function openModal(id){ $('#'+id)?.classList.add('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.add('active'); }
   function closeModal(id){ $('#'+id)?.classList.remove('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.remove('active'); }
@@ -113,6 +137,18 @@
     const attach = (name, targetKey, order='desc') => {
       state.unsub.push(tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
         state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
+
+        // *** ROLE FIX: keep current user's role in sync with Users collection ***
+        if (name === 'users') {
+          const me = (auth.currentUser?.email || '').toLowerCase();
+          const mine = state.users.find(u => (u.email||'').toLowerCase() === me);
+          if (mine && mine.role && mine.role !== state.role) {
+            state.role = mine.role;           // update role (e.g., associate)
+            render();                          // re-render so buttons/badges adjust
+            return;
+          }
+        }
+
         if (['dashboard',name].includes(state.route)) render();
       }));
     };
@@ -121,8 +157,8 @@
     attach('cogs','cogs');             // cogs rows
     attach('tasks','tasks');           // kanban
     attach('posts','posts');           // dashboard posts
-    attach('users','users');           // tenant user list
-    attach('links','links');           // NEW: link pages data
+    attach('users','users');           // tenant user list (drives role badge)
+    attach('links','links');           // link pages data
   }
 
   async function saveKVTheme(){
@@ -199,8 +235,12 @@
 
         <div>
           <div class="topbar">
+            <!-- NEW: burger button (mobile/desktop OK) -->
+            <button class="btn ghost" id="burger" aria-label="Menu"><i class="ri-menu-line"></i></button>
+
             <div class="badge"><i class="ri-shield-user-line"></i> ${state.role.toUpperCase()}</div>
-            <div class="search">
+            <!-- add search-inline class so CSS can hide it on phones -->
+            <div class="search search-inline">
               <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
               <div id="searchResults" class="search-results"></div>
             </div>
@@ -208,6 +248,10 @@
               <button class="btn ghost" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
             </div>
           </div>
+
+          <!-- NEW: backdrop for mobile drawer -->
+          <div class="backdrop" id="backdrop"></div>
+
           <div class="main" id="main">${content}</div>
         </div>
       </div>
@@ -659,29 +703,32 @@
     root.innerHTML = html;
     wireShell();
     wireRoute();
+    ensureSidebarEdge();  // NEW
+    hookEdgeReveal();     // NEW
   }
 
   /* ---------- Wiring (shell + routes) ---------- */
   function wireShell(){
-    // NAV — event delegation (fixes mobile taps)
+    // NAV — event delegation (works on mobile)
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
-  const it = e.target.closest('.item[data-route]');
-  if (it){
-    go(it.getAttribute('data-route'));
-    // NEW: ensure main content is visible on phones
-    if (window.matchMedia('(max-width: 920px)').matches) {
-      setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
-    }
-  }
-});
+      const it = e.target.closest('.item[data-route]');
+      if (it){
+        go(it.getAttribute('data-route'));
+        // close drawer & focus content on phones
+        if (window.matchMedia('(max-width: 920px)').matches) {
+          closeSidebar();
+          setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
+        }
+      }
+    });
     nav?.addEventListener('keydown', (e)=>{
       if (e.key==='Enter' || e.key===' '){
         const it = e.target.closest('.item[data-route]'); if (it){ e.preventDefault(); go(it.getAttribute('data-route')); }
       }
     });
 
-    // DASHBOARD quick nav (cards + low/critical)
+    // DASHBOARD quick nav (cards)
     $('#main')?.addEventListener('click', (e)=>{
       const card = e.target.closest('.card.clickable[data-go]');
       if (card){ go(card.getAttribute('data-go')); }
@@ -694,16 +741,6 @@
     const input = $('#globalSearch'), results = $('#searchResults');
     if (input && results){
       let timer;
-      input.addEventListener('keydown', (e)=>{ if (e.key==='Enter' || e.key===' '){
-  const it = e.target.closest('.item[data-route]');
-  if (it){
-    e.preventDefault();
-    go(it.getAttribute('data-route'));
-    if (window.matchMedia('(max-width: 920px)').matches) {
-      setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
-    }
-  }
-} });
       input.addEventListener('input', ()=>{
         clearTimeout(timer);
         const q = input.value.trim();
@@ -724,8 +761,13 @@
       });
       document.addEventListener('click', (e)=>{ if (!results.contains(e.target) && e.target !== input) results.classList.remove('active'); });
     }
+
     // modal close
     $('#mm-close')?.addEventListener('click', ()=> closeModal('m-modal'));
+
+    // NEW: mobile drawer controls
+    $('#burger')?.addEventListener('click', toggleSidebar);
+    $('#backdrop')?.addEventListener('click', closeSidebar);
   }
 
   function wireRoute(){
@@ -1293,7 +1335,7 @@
 
     const sec=document.querySelector('[data-section="links"]'); if(!sec||sec.__wired) return; sec.__wired=true;
 
-    // open link in in-app viewer (iframe with fallback)
+    // open link in in-app viewer
     sec.addEventListener('click', async (e)=>{
       const openBtn = e.target.closest('button[data-open]');
       const editBtn = e.target.closest('button[data-edit]');
@@ -1378,8 +1420,9 @@
       render();
       return;
     }
-    // role by email map
+    // default role by email map (updated shortly by Users snapshot if exists)
     state.role = ADMIN_EMAILS.includes((user.email||'').toLowerCase()) ? 'admin' : 'user';
+
     // seed kv theme doc if absent
     try{
       const kv = await tdoc('_theme').get();
