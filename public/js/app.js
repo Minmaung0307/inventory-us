@@ -1,4 +1,4 @@
-/* Inventory SPA — Firestore + EmailJS (v1.0.1)
+/* Inventory SPA — Firestore + EmailJS (v1.0.2)
    -----------------------------------------------------
    Fill Firebase config in index.html (window.__FIREBASE_CONFIG)
    Fill EmailJS IDs below to enable sending from Contact page.
@@ -9,8 +9,8 @@
 
   /* ---------- EmailJS config (optional) ---------- */
   const EMAILJS_PUBLIC_KEY = 'WT0GOYrL9HnDKvLUf';     // e.g. 'aBc123...'
-  const EMAILJS_SERVICE_ID = 'service_z9tkmvr';     // e.g. 'service_xxx'
-  const EMAILJS_TEMPLATE_ID = 'template_q5q471f';    // e.g. 'template_xxx'
+  const EMAILJS_SERVICE_ID = 'service_z9tkmvr';       // e.g. 'service_xxx'
+  const EMAILJS_TEMPLATE_ID = 'template_q5q471f';     // e.g. 'template_xxx'
 
   /* ---------- Firebase ---------- */
   if (!window.firebase || !window.__FIREBASE_CONFIG) {
@@ -22,6 +22,7 @@
 
   /* ---------- App State ---------- */
   const ADMIN_EMAILS = ['admin@inventory.com', 'minmaung0307@gmail.com'];
+  const ROLES = ['user','associate','manager','admin']; // <— used for validation
   const state = {
     user: null,
     role: 'user',           // user | associate | manager | admin
@@ -32,7 +33,7 @@
     cogs: [],
     tasks: [],
     posts: [],
-    links: [],
+    links: [],              // Link Pages collection
     users: [],
     theme: { palette:'sunrise', font:'medium' },
     unsub: []
@@ -70,8 +71,12 @@
   };
 
   const idle = {
-    timer:null, MAX: 20*60*1000,
-    arm(){ this.disarm(); this.timer = setTimeout(()=> auth.signOut().catch(()=>{}), this.MAX); },
+    timer:null,
+    MAX: 20*60*1000,
+    arm(){
+      this.disarm();
+      this.timer = setTimeout(()=> auth.signOut().catch(()=>{}), this.MAX);
+    },
     disarm(){ if (this.timer){ clearTimeout(this.timer); this.timer=null; } },
     hook(){
       ['click','keydown','mousemove','scroll','touchstart'].forEach(evt=>{
@@ -80,30 +85,6 @@
       this.arm();
     }
   };
-
-  /* ---------- Sidebar (mobile) helpers ---------- */
-  function openSidebar(){
-    document.body.classList.add('sidebar-open');
-    $('#backdrop')?.classList.add('active');
-  }
-  function closeSidebar(){
-    document.body.classList.remove('sidebar-open');
-    $('#backdrop')?.classList.remove('active');
-  }
-  function toggleSidebar(){
-    if (document.body.classList.contains('sidebar-open')) closeSidebar(); else openSidebar();
-  }
-  function ensureSidebarEdge(){
-    if (!$('#sidebarEdge')){
-      const edge=document.createElement('div');
-      edge.id='sidebarEdge';
-      document.body.appendChild(edge);
-    }
-  }
-  function hookEdgeReveal(){
-    const edge=$('#sidebarEdge'); if(!edge || edge.__wired) return; edge.__wired=true;
-    ['pointerenter','mouseenter','touchstart'].forEach(evt=> edge.addEventListener(evt, openSidebar, {passive:true}));
-  }
 
   /* ---------- Modal helpers ---------- */
   function openModal(id){ $('#'+id)?.classList.add('active'); $('#mb-'+(id.split('-')[1]||''))?.classList.add('active'); }
@@ -122,6 +103,7 @@
     if (!uid()) return;
     clearSnapshots();
 
+    // theme (kv)
     state.unsub.push(tdoc('_theme').onSnapshot(snap=>{
       const data = snap.data() || {};
       const palette = data.palette || state.theme.palette;
@@ -132,17 +114,6 @@
     const attach = (name, targetKey, order='desc') => {
       state.unsub.push(tcol(name).orderBy('createdAt', order).onSnapshot(s=>{
         state[targetKey] = s.docs.map(d=> ({ id:d.id, ...d.data() }));
-
-        // keep role synced from Users collection (associate/manager/admin)
-        if (name === 'users') {
-          const me = (auth.currentUser?.email || '').toLowerCase();
-          const mine = state.users.find(u => (u.email||'').toLowerCase() === me);
-          if (mine && mine.role && mine.role !== state.role) {
-            state.role = mine.role;
-            render();
-            return;
-          }
-        }
         if (['dashboard',name].includes(state.route)) render();
       }));
     };
@@ -151,7 +122,7 @@
     attach('cogs','cogs');
     attach('tasks','tasks');
     attach('posts','posts');
-    attach('users','users');
+    attach('users','users');     // tenant-visible user list (for admin UI)
     attach('links','links');
   }
 
@@ -166,6 +137,37 @@
       console.warn('[theme save]', e);
       notify('Could not save theme (still applied locally).','warn');
     }
+  }
+
+  /* ---------- Role resolution (FIX) ---------- */
+  async function resolveRoleForEmail(email){
+    const e = (email||'').toLowerCase();
+
+    // 1) hard-coded admins
+    if (ADMIN_EMAILS.includes(e)) return 'admin';
+
+    // 2) global registry by email: registry/userRoles/byEmail/{email}
+    try{
+      const rdoc = await db
+        .collection('registry').doc('userRoles')
+        .collection('byEmail').doc(e).get();
+      if (rdoc.exists){
+        const r = rdoc.data()?.role;
+        if (ROLES.includes(r)) return r;
+      }
+    }catch{}
+
+    // 3) per-tenant list (if you created a row with this email in your own tenant)
+    try{
+      const qs = await tcol('users').where('email','==', e).limit(1).get();
+      if (!qs.empty){
+        const r = qs.docs[0].data()?.role;
+        if (ROLES.includes(r)) return r;
+      }
+    }catch{}
+
+    // 4) default
+    return 'user';
   }
 
   /* ---------- Search ---------- */
@@ -200,17 +202,10 @@
     return `
       <div class="app">
         <aside class="sidebar">
-          <div class="brand" id="brand">
+          <div class="brand">
             <div class="logo">📦</div>
             <div class="title">Inventory</div>
           </div>
-
-          <!-- Mobile search inside sidebar -->
-          <div class="search search-wrap">
-            <input id="globalSearchMobile" class="input" placeholder="Search everything…" autocomplete="off" />
-            <div id="searchResultsMobile" class="search-results"></div>
-          </div>
-
           <div class="nav" id="side-nav">
             ${[
               ['dashboard','Dashboard','ri-dashboard-line'],
@@ -232,27 +227,21 @@
             <a href="https://tiktok.com" target="_blank" rel="noopener" title="TikTok"><i class="ri-tiktok-fill"></i></a>
             <a href="https://twitter.com" target="_blank" rel="noopener" title="X/Twitter"><i class="ri-twitter-x-line"></i></a>
           </div>
+          <!-- NEW: subtle credit (auto year) -->
+          <div class="footer" id="powered" style="font-size:12px;color:var(--muted)">Powered by MM, ${new Date().getFullYear()}</div>
         </aside>
 
         <div>
           <div class="topbar">
-            <button class="btn ghost" id="burger" aria-label="Menu"><i class="ri-menu-line"></i></button>
-
             <div class="badge"><i class="ri-shield-user-line"></i> ${state.role.toUpperCase()}</div>
-
-            <!-- Desktop search -->
-            <div class="search search-inline">
+            <div class="search">
               <input id="globalSearch" class="input" placeholder="Search everything…" autocomplete="off" />
               <div id="searchResults" class="search-results"></div>
             </div>
-
             <div style="display:flex;gap:8px">
               <button class="btn ghost" id="btnLogout"><i class="ri-logout-box-r-line"></i> Logout</button>
             </div>
           </div>
-
-          <div class="backdrop" id="backdrop"></div>
-
           <div class="main" id="main">${content}</div>
         </div>
       </div>
@@ -265,7 +254,7 @@
     `;
   }
 
-  function viewLogin(){ /* unchanged */ 
+  function viewLogin(){
     return `
       <div class="login-page">
         <div class="card login-card">
@@ -704,23 +693,18 @@
     root.innerHTML = html;
     wireShell();
     wireRoute();
-    ensureSidebarEdge();
-    hookEdgeReveal();
   }
 
   /* ---------- Wiring (shell + routes) ---------- */
   function wireShell(){
-    const isMobile = () => window.matchMedia('(max-width: 920px)').matches;
-
-    // NAV
+    // NAV — event delegation (fixes mobile taps)
     const nav = $('#side-nav');
     nav?.addEventListener('click', (e)=>{
       const it = e.target.closest('.item[data-route]');
       if (it){
         go(it.getAttribute('data-route'));
-        if (isMobile()) {
-          closeSidebar();
-          setTimeout(()=> $('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
+        if (window.matchMedia('(max-width: 920px)').matches) {
+          setTimeout(()=> document.querySelector('#main')?.scrollIntoView({ behavior:'smooth', block:'start' }), 0);
         }
       }
     });
@@ -730,25 +714,29 @@
       }
     });
 
-    // DASHBOARD quick nav
+    // DASHBOARD quick nav (cards + low/critical)
     $('#main')?.addEventListener('click', (e)=>{
       const card = e.target.closest('.card.clickable[data-go]');
       if (card){ go(card.getAttribute('data-go')); }
-      // NEW: tap/click main pane closes drawer on mobile
-      if (isMobile() && document.body.classList.contains('sidebar-open')) closeSidebar();
     });
-
-    // NEW: clicking the brand (app icon/Inventory) closes drawer on mobile
-    $('#brand')?.addEventListener('click', ()=> { if (isMobile()) closeSidebar(); });
 
     // logout
     $('#btnLogout')?.addEventListener('click', ()=> auth.signOut());
 
-    // Search wiring (desktop + mobile)
-    const wireSearchBox = (inputSel, resultsSel) => {
-      const input = $(inputSel), results = $(resultsSel);
-      if (!input || !results) return;
+    // search
+    const input = $('#globalSearch'), results = $('#searchResults');
+    if (input && results){
       let timer;
+      input.addEventListener('keydown', (e)=>{
+        if (e.key==='Enter'){
+          const q = input.value.trim();
+          if (q){
+            state.searchQ = q;
+            go('search');
+            results.classList.remove('active');
+          }
+        }
+      });
       input.addEventListener('input', ()=>{
         clearTimeout(timer);
         const q = input.value.trim();
@@ -761,7 +749,6 @@
             row.onclick = ()=>{
               const r = row.getAttribute('data-route'); const id=row.getAttribute('data-id');
               state.searchQ = q; go(r);
-              if (isMobile()) closeSidebar();
               setTimeout(()=>{ if (id) document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'center'}); }, 80);
               results.classList.remove('active');
             };
@@ -769,16 +756,9 @@
         }, 120);
       });
       document.addEventListener('click', (e)=>{ if (!results.contains(e.target) && e.target !== input) results.classList.remove('active'); });
-    };
-    wireSearchBox('#globalSearch', '#searchResults');             // desktop
-    wireSearchBox('#globalSearchMobile', '#searchResultsMobile'); // mobile in drawer
-
+    }
     // modal close
     $('#mm-close')?.addEventListener('click', ()=> closeModal('m-modal'));
-
-    // mobile drawer controls
-    $('#burger')?.addEventListener('click', toggleSidebar);
-    $('#backdrop')?.addEventListener('click', closeSidebar);
   }
 
   function wireRoute(){
@@ -806,7 +786,7 @@
       if (!email || !pass) return notify('Enter email & password','warn');
       try{
         await auth.signInWithEmailAndPassword(email, pass);
-        setRoleByEmail(email);
+        setRoleByEmail(email); // temporary badge; real role resolved in onAuthStateChanged
       }catch(e){
         notify(e?.message||'Login failed','danger');
       }
@@ -824,7 +804,7 @@
       if (!email) return notify('Enter an email in Email box, then click Sign up again.','warn');
       try{
         await auth.createUserWithEmailAndPassword(email, pass);
-        if (ADMIN_EMAILS.includes(email.toLowerCase())) state.role='admin'; else state.role='user';
+        state.role = ADMIN_EMAILS.includes(email.toLowerCase()) ? 'admin' : 'user';
       }catch(e){ notify(e?.message||'Signup failed','danger'); }
     });
   }
@@ -1289,6 +1269,17 @@
         };
         if(!u.email) return notify('Email required','warn');
         await tcol('users').add(u);
+        // NEW: write to global registry so role applies when that user logs in
+        try{
+          const e=(u.email||'').toLowerCase();
+          await db.collection('registry').doc('userRoles')
+            .collection('byEmail').doc(e)
+            .set({ role:u.role, tenant: uid(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+        }catch{}
+        // If you just added yourself, adopt role immediately:
+        if ((u.email||'').toLowerCase() === (state.user?.email||'').toLowerCase()){
+          state.role = u.role; render();
+        }
         closeModal('m-modal'); notify('Saved');
       };
     });
@@ -1311,12 +1302,24 @@
         $('#mm-foot').innerHTML = `<button class="btn" id="save-user">Save</button>`;
         openModal('m-modal');
         $('#save-user').onclick = async ()=>{
+          const newEmail = ($('#user-email')?.value||'').trim();
+          const newRole  = ($('#user-role')?.value||'user');
           await tcol('users').doc(id).set({
             name:($('#user-name')?.value||'').trim(),
-            email:($('#user-email')?.value||'').trim(),
-            role: ($('#user-role')?.value||'user'),
+            email:newEmail,
+            role:newRole,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, {merge:true});
+          // NEW: update registry
+          try{
+            const e=(newEmail||'').toLowerCase();
+            await db.collection('registry').doc('userRoles')
+              .collection('byEmail').doc(e)
+              .set({ role:newRole, tenant: uid(), updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+          }catch{}
+          if (e && (newEmail||'').toLowerCase() === (state.user?.email||'').toLowerCase()){
+            state.role = newRole; render();
+          }
           closeModal('m-modal'); notify('Saved');
         };
       } else {
@@ -1431,7 +1434,11 @@
       render();
       return;
     }
-    state.role = ADMIN_EMAILS.includes((user.email||'').toLowerCase()) ? 'admin' : 'user';
+
+    // Role resolution FIX (see function above)
+    state.role = await resolveRoleForEmail(user.email);
+
+    // seed kv theme doc if absent
     try{
       const kv = await tdoc('_theme').get();
       if (!kv.exists){
