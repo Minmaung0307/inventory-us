@@ -88,3 +88,4 @@ precache-manifest.*.js
 *.local
 
 oldFiles/
+.firebase
