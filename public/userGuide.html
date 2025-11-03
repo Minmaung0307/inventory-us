@@ -57,8 +57,11 @@
         <a href="#inventory">Inventory</a>
         <a href="#products">Products</a>
         <a href="#search">Search</a>
-        <a href="#export">Export</a>
+        <a href="#cogs">COGS</a>
+        <a href="#task">Task</a>
         <a href="#roles">Roles & Permissions</a>
+        <a href="#links">Link Pages</a>
+        <a href="#settings">Settings</a>
         <a href="#troubleshoot">Troubleshooting</a>
       </nav>
       <section class="card">
@@ -139,9 +142,10 @@
       <h2>5) Search</h2>
       <p>Use the top search or sidebar search: type to see live suggestions, press <kbd>Enter</kbd> to jump, or click a suggestion result to navigate directly.</p>
       <p class="mm">အပေါ်ဘား သို့မဟုတ် ဘေးဘားရှာဖွေမှုတွင် စာရိုက်လိုက်တာနဲ့ အကြံပြုစာရင်းတွေ မြင်ရပြီး <kbd>Enter</kbd> နှိပ်ပြီး သွားနိုင်သလို ရလဒ်တန်းကို နှိပ်ပြီး လှည့်ပတ်နိုင်ပါတယ်။</p>
+      <p>App ရဲ့ Topbar (အပေါ်ဆုံးဘား) မှာ "Search everything..." လို့ရေးထားတဲ့ Input Box ကို တွေ့ရပါမယ်။ ဒီနေရာမှာ စကားလုံး (သို့မဟုတ်) Code များကို ရိုက်ထည့်ပြီး Inventory, Products, COGS, Tasks, Posts, Links, Users စတဲ့ မည်သည့်အချက်အလက်ကိုမဆို ရှာဖွေနိုင်ပါတယ်။</p>
     </section>
 
-    <section id="export" class="card">
+    <section id="cogs" class="card">
       <h2>6) COGS (Cost of Goods Sold - ရောင်းရငွေကုန်ကျစရိတ်)</h2>
       <p>ဘယ်ဘက် Sidebar မှ "COGS" ကို ရွေးချယ်ပြီး ရောင်းရငွေကုန်ကျစရိတ် မှတ်တမ်းကို ကြည့်ရှုနိုင်ပါတယ်။</p>
       <ul>
@@ -155,9 +159,20 @@
       </ul>
     </section>
 
+    <section id="task" class="card">
+      <h2>7) Tasks (လုပ်ဆောင်စရာများ)</h2>
+      <p>ဘယ်ဘက် Sidebar မှ "Tasks" ကို ရွေးချယ်ပြီး လုပ်ဆောင်စရာများကို စီမံခန့်ခွဲနိုင်ပါတယ်။</p>
+      <ul>
+        <li><strong>Add Task: </strong>Manager, Admin, Associate Role များသည် "Add Task" ခလုတ်ကို နှိပ်ပြီး လုပ်ဆောင်စရာအသစ် ထည့်သွင်းနိုင်ပါတယ်။ Title နဲ့ Status (To Do, In Progress, Done) ကို ဖြည့်သွင်းရပါမယ်။</li>
+        <li><strong>Drag & Drop: </strong>လုပ်ဆောင်စရာ Card များကို "To Do", "In Progress", "Done" ကဏ္ဍများကြား ရွှေ့ပြောင်းနိုင်ပါတယ်။ (Manager, Admin, Associate Role များသာ)</li>
+        <li><strong>Tap to Advance (မိုဘိုင်းလ်အတွက်): </strong>Touch Screen ဖုန်းတွေမှာ Card ကို နှိပ်လိုက်ရုံနဲ့ Status ကို တစ်ဆင့်ချင်းစီ ပြောင်းလဲနိုင်ပါတယ်။</li>
+        <li><strong>Edit: </strong>Manager နဲ့ Admin Role များသည် "Edit" ခလုတ်ကို နှိပ်ပြီး လုပ်ဆောင်စရာအချက်အလက်များကို ပြန်လည်ပြင်ဆင်နိုင်ပါတယ်။</li>
+        <li><strong>Delete: </strong>Admin Role သည် "Delete" ခလုတ်ကို နှိပ်ပြီး လုပ်ဆောင်စရာများကို ဖျက်ပစ်နိုင်ပါတယ်။</li>
+      </ul>
+    </section>
+
     <section id="roles" class="card">
-      <h2>7) Roles & Permissions</h2>
-      <p>The app enforces permissions. Typical actions require “can add/edit/delete” depending on your role (e.g., admin or manager). If you see “No permission”, contact an admin to adjust your role.</p>
+      <h2>8) Roles & Permissions</h2>
       <p class="mm">ခွင့်ပြုချက်စနစ် ရှိပါတယ်။ မည်သည့်လုပ်ဆောင်ချက်တွင်မဆို သင့်အခန်းကဏ္ဍအလိုက် add/edit/delete ခွင့်လိုအပ်နိုင်ပါတယ်။ “No permission” ပြပါက admin ကို ဆက်သွယ်ကာ အခန်းကဏ္ဍ ပြင်ဆင်ပေးရန် တောင်းဆိုပါ။</p>
       <h3>Role (အခန်းကဏ္ဍ) လေးမျိုး</h3>
       <ul>
@@ -168,8 +183,38 @@
       </ul>
     </section>
 
+    <section id="links" class="card">
+      <h2>9) Link Pages</h2>
+      <p class="mm">ဘယ်ဘက် Sidebar မှ "Link Pages" ကို ရွေးချယ်ပြီး အသုံးဝင်တဲ့ လင့်ခ်များကို သိမ်းဆည်းနိုင်ပါတယ်။</p>
+      <ul>
+        <li><strong>Add Link: </strong>Manager, Admin, Associate Role များသည် "Add Link" ခလုတ်ကို နှိပ်ပြီး လင့်ခ်အသစ် ထည့်သွင်းနိုင်ပါတယ်။ Title နဲ့ URL ကို ဖြည့်သွင်းရပါမယ်။</li>
+        <li><strong>Open: </strong>"Open" ခလုတ်ကို နှိပ်ပြီး App အတွင်းမှ Modal ဖြင့် ကြည့်ရှုနိုင်ပါတယ်။ (သို့မဟုတ် "Open in new tab" ဖြင့် Browser တွင် ဖွင့်နိုင်ပါတယ်။)</li>
+        <li><strong>Edit: </strong>Manager နဲ့ Admin Role များသည် "Edit" ခလုတ်ကို နှိပ်ပြီး လင့်ခ်အချက်အလက်များကို ပြန်လည်ပြင်ဆင်နိုင်ပါတယ်။</li>
+        <li><strong>Delete: </strong>Admin Role သည် "Delete" ခလုတ်ကို နှိပ်ပြီး လင့်ခ်များကို ဖျက်ပစ်နိုင်ပါတယ်။</li>
+        <li><strong>Contact: </strong>ဒီအပိုင်းမှာ Contact Form တစ်ခု ပါဝင်ပါတယ်။ သင့်ရဲ့ Name, Email, Message များကို ဖြည့်သွင်းပြီး "Send" ခလုတ်ကို နှိပ်ကာ Email ပို့နိုင်ပါတယ်။ EmailJS service ကို အသုံးပြုထားခြင်းဖြစ်ပါတယ်။</li>
+        <li><strong>About: </strong>App ရဲ့ အကျဉ်းချုပ် အကြောင်းအရာကို ဖော်ပြထားပါတယ်။</li>
+      </ul>
+    </section>
+
+    <section id="settings" class="card">
+      <h2>10) Settings</h2>
+      <p class="mm">ဘယ်ဘက် Sidebar မှ "Settings" ကို ရွေးချယ်ပြီး App ရဲ့ ဒီဇိုင်းနဲ့ အသုံးပြုသူများကို စီမံခန့်ခွဲနိုင်ပါတယ်။</p>
+      <h3>Theme (ဒီဇိုင်း)</h3>
+      <ul>
+        <li><strong>Palette: </strong>"sunrise", "sky", "mint", "slate", "dark" စတဲ့ အရောင်အသွေးများကို ရွေးချယ်နိုင်ပါတယ်။</li>
+        <li><strong>Font Size: </strong>"small", "medium", "large" စတဲ့ စာလုံးအရွယ်အစားများကို ရွေးချယ်နိုင်ပါတယ်။</li>
+        <li><strong>Save Theme: </strong>ပြောင်းလဲထားတဲ့ Theme များကို "Save Theme" ခလုတ်ဖြင့် သိမ်းဆည်းနိုင်ပါတယ်။</li>
+        <li><strong>Account: </strong>သင့်ရဲ့ Email နဲ့ Role ကို ပြသထားပါတယ်။</li>
+        <li><strong>Users (tenant): </strong>ဒီအပိုင်းမှာ သင့်လုပ်ငန်းရဲ့ အသုံးပြုသူစာရင်းကို စီမံခန့်ခွဲနိုင်ပါတယ်။ (Admin, Manager, Associate Role များသာ)
+        <li><strong>Add User: </strong>Manager, Admin, Associate Role များသည် "Add User" ခလုတ်ကို နှိပ်ပြီး အသုံးပြုသူအသစ် ထည့်သွင်းနိုင်ပါတယ်။ Name, Email, Role (user, associate, manager, admin) များကို ဖြည့်သွင်းရပါမယ်။</li>
+        <li><strong>Edit: </strong>Manager နဲ့ Admin Role များသည် "Edit" ခလုတ်ကို နှိပ်ပြီး အသုံးပြုသူအချက်အလက်များကို ပြန်လည်ပြင်ဆင်နိုင်ပါတယ်။</li>
+        <li><strong>Delete: </strong>Admin Role သည် "Delete" ခလုတ်ကို နှိပ်ပြီး အသုံးပြုသူများကို ဖျက်ပစ်နိုင်ပါတယ်။</li>
+        </li>
+      </ul>
+    </section>
+
     <section id="troubleshoot" class="card">
-      <h2>8) Troubleshooting</h2>
+      <h2>11) Troubleshooting</h2>
       <ul>
         <li><strong>“Name required”</strong> → Fill the Name field before saving (Inventory & Products).</li>
         <li><strong>“Login failed”</strong> → Check email and password; try <em>Forgot?</em> to reset.</li>
