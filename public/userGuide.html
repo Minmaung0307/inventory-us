@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>User Guide • Inventory & Products App</title>
+  <style>
+    :root{
+      --bg:#0f172a; --fg:#e5e7eb; --muted:#94a3b8; --card:#111827; --accent:#22d3ee;
+      --ok:#10b981; --warn:#f59e0b; --danger:#ef4444; --link:#38bdf8;
+    }
+    html,body{margin:0;padding:0;background:linear-gradient(180deg,#0b1022,#0f172a 30%,#0b1022);color:var(--fg);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
+    .container{max-width:1100px;margin:40px auto;padding:0 20px}
+    header.hero{display:flex;align-items:center;gap:18px;margin-bottom:18px}
+    .dot{width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 20px var(--accent)}
+    h1{font-size:clamp(28px,4vw,40px);margin:0}
+    h2{font-size:clamp(20px,3vw,28px);margin:26px 0 10px}
+    h3{font-size:clamp(17px,2.6vw,22px);margin:20px 0 6px;color:#cbd5e1}
+    p{margin:10px 0}
+    .card{background:linear-gradient(180deg,#0b1226,#0b1328);border:1px solid rgba(148,163,184,.15);border-radius:16px;padding:18px 16px;box-shadow:0 8px 40px rgba(0,0,0,.25)}
+    .grid{display:grid;gap:14px}
+    .grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    @media (max-width:860px){.grid.cols-2,.grid.cols-3{grid-template-columns:1fr}}
+    ul{margin:8px 0 16px 22px}
+    code,kbd{background:#0a0f1f;border:1px solid rgba(148,163,184,.2);padding:.15em .45em;border-radius:8px}
+    kbd{font-weight:600}
+    a{color:var(--link);text-decoration:none}
+    .pill{display:inline-block;border:1px solid rgba(148,163,184,.25);padding:.25em .6em;border-radius:999px;color:#cbd5e1}
+    .badge{font-size:12px;padding:.2em .6em;border-radius:999px}
+    .ok{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35)}
+    .warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35)}
+    .danger{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35)}
+    .twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    @media (max-width:860px){.twocol{grid-template-columns:1fr}}
+    .mm{opacity:.9}
+    footer{margin:36px 0 20px;color:var(--muted);text-align:center}
+    .toc a{display:block;padding:6px 10px;border-left:3px solid transparent}
+    .toc a:hover{border-color:var(--accent);background:rgba(34,211,238,.06)}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="hero">
+      <div class="dot"></div>
+      <div>
+        <h1>Inventory & Products App — User Guide</h1>
+        <div class="mm">English + Myanmar (မြန်မာ)</div>
+      </div>
+    </header>
+
+    <div class="grid cols-2">
+      <nav class="card toc">
+        <h3>Quick jumps</h3>
+        <a href="#login">Login / Sign up</a>
+        <a href="#nav">Navigation</a>
+        <a href="#inventory">Inventory</a>
+        <a href="#products">Products</a>
+        <a href="#search">Search</a>
+        <a href="#export">Export</a>
+        <a href="#roles">Roles & Permissions</a>
+        <a href="#troubleshoot">Troubleshooting</a>
+      </nav>
+      <section class="card">
+        <p><strong>Goal:</strong> help your team add items/products, upload optional images (JPG/PNG), search quickly, and export CSV. This guide matches the features present in your current build.</p>
+        <p class="mm"><strong>ရည်ရွယ်ချက်:</strong> သင့်အသင်းက အရင်းအစာများ/ကုန်ပစ္စည်းများကို ထည့်သွင်း ပြင်ဆင်ရန်၊ ရုပ်ပုံကို (JPG/PNG) ထည့်ရန်၊ အမြန်ရှာရန်၊ CSV ထုတ်ယူရန် လွယ်ကူစေဖို့ ဒီလမ်းညွှန်ရေးထားတာ ဖြစ်ပါတယ်။</p>
+      </section>
+    </div>
+
+    <section id="login" class="card">
+      <h2>1) Login & Sign up</h2>
+      <div class="twocol">
+        <div>
+          <ol>
+            <li>Enter your <em>Email</em> and <em>Password</em>, then press <kbd>Sign in</kbd>.</li>
+            <li>New user? Click <kbd>Sign up</kbd> to create an account (default password allowed by the app).</li>
+            <li>Forgot password? Use <kbd>Forgot?</kbd> to receive a reset email.</li>
+          </ol>
+          <p class="mm">အသစ်ဝင်ရောက်ရန် <em>Email</em> + <em>Password</em> ဖြည့်ပြီး <kbd>Sign in</kbd> နှိပ်ပါ။
+          အကောင့်မရှိသေးရင် <kbd>Sign up</kbd> နှိပ်ပြီး အကောင့်ဖန်တီးနိုင်ပါတယ်။ Password မေ့နေပါက <kbd>Forgot?</kbd> ကိုနှိပ်ပြီး Reset Email ရယူနိုင်ပါတယ်။</p>
+          <p class="pill">Tech: Firebase Auth (email/password)</p>
+        </div>
+        <div>
+          <p class="badge ok">Under the hood</p>
+          <ul>
+            <li>Sign in via <code>auth.signInWithEmailAndPassword</code>.</li>
+            <li>Sign up creates a registry doc and sets role (admin if email is whitelisted).</li>
+            <li>Password reset uses <code>auth.sendPasswordResetEmail</code>.</li>
+          </ul>
+          <p class="mm">အထဲမှာ အကောင့်ဝင်ခြင်း၊ အကောင့်ဖန်တီးခြင်း၊ Password Reset စသည်များကို Firebase Auth နဲ့ ဆောင်ရွက်ပါတယ်။</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="nav" class="card">
+      <h2>2) Navigation</h2>
+      <p>Use the sidebar to switch between: <strong>Dashboard</strong>, <strong>Inventory</strong>, <strong>Products</strong>, <strong>COGS</strong>, <strong>Tasks</strong>, <strong>Settings</strong>, <strong>Links</strong>, and <strong>Search</strong>.</p>
+      <p class="mm">ဘေးဘားမှ <strong>Dashboard</strong>, <strong>Inventory</strong>, <strong>Products</strong>, <strong>COGS</strong>, <strong>Tasks</strong>, <strong>Settings</strong>, <strong>Links</strong>, <strong>Search</strong> တို့ကိုရွေးချယ်ပို့နိုင်ပါတယ်။</p>
+    </section>
+
+    <section id="inventory" class="card">
+      <h2>3) Inventory</h2>
+      <h3>Add an item</h3>
+      <ol>
+        <li>Click <kbd>Add Item</kbd>.</li>
+        <li>Fill <em>Name</em>, <em>Code</em>, <em>Type</em>, <em>Price</em>, <em>Stock</em>, <em>Threshold</em>.</li>
+        <li>Press <kbd>Save</kbd>. (Name is required.)</li>
+      </ol>
+      <p class="mm"><kbd>Add Item</kbd> နှိပ်ပြီး အချက်အလက်များ ဖြည့်ပါ (<em>Name</em>, <em>Code</em>, <em>Type</em>, <em>Price</em>, <em>Stock</em>, <em>Threshold</em>)။ <kbd>Save</kbd> နှိပ်ပါ (<em>Name</em> မဖြည့်လျှင် မသိမ်းပါ）。</p>
+
+      <h3>Optional: attach an image</h3>
+      <p>If your “Add Item” modal includes <em>Image URL</em> and/or <em>File</em>, you can attach a JPG/PNG. Files are uploaded to Firebase Storage and the public URL is saved to <code>imageUrl</code>. URL input is also accepted.</p>
+      <ul>
+        <li>Accepted file types: <strong>image/jpeg</strong>, <strong>image/png</strong>.</li>
+        <li>Stored path format: <code>tenants/&lt;uid&gt;/inventory/&lt;docId&gt;/image.&lt;ext&gt;</code>.</li>
+      </ul>
+      <p class="mm">မော်ဒယ်ထဲမှာ <em>Image URL</em> / <em>File</em> ရှိပါက JPG/PNG ကို ထည့်နိုင်ပါတယ်။ File ကို Firebase Storage သို့တင်ပြီး <code>imageUrl</code> အနေဖြင့် သိမ်းမည်။ URL ထည့်ခြင်းလည်း လက်ခံပါတယ်။</p>
+
+      <h3>Edit, delete, and quick stock +/-</h3>
+      <ul>
+        <li>Edit or Delete via row buttons (permission required).</li>
+        <li>Use <kbd>+</kbd>/<kbd>-</kbd> buttons on a row to adjust stock by one.</li>
+      </ul>
+      <p class="mm">တန်းစီမှုအတန်းတွင် Edit/Delete ခလုတ်များ (ခွင့်ပြုချက်လို)၊ <kbd>+</kbd>/<kbd>-</kbd> ဖြင့် stock ကို တစ်လှမ်းစီ ပြောင်းလဲနိုင်ပါတယ်။</p>
+    </section>
+
+    <section id="products" class="card">
+      <h2>4) Products</h2>
+      <h3>Add a product</h3>
+      <ol>
+        <li>Click <kbd>Add Product</kbd>.</li>
+        <li>Fill basic fields (Name, Barcode, Price, Type, etc.).</li>
+        <li>Optionally add <em>Image URL</em> or select a <em>File</em> (JPG/PNG). On save, the file is uploaded and <code>imageUrl</code> is stored.</li>
+      </ol>
+      <p class="mm"><kbd>Add Product</kbd> နှိပ်ပြီး အချက်အလက်များ ဖြည့်ပါ။ <em>Image URL</em> သို့မဟုတ် <em>File</em> (JPG/PNG) ထည့်နိုင်ပြီး သိမ်းချိန်တွင် ကိုယ်တိုင် upload လုပ်ပြီး <code>imageUrl</code> သိမ်းမည်။</p>
+    </section>
+
+    <section id="search" class="card">
+      <h2>5) Search</h2>
+      <p>Use the top search or sidebar search: type to see live suggestions, press <kbd>Enter</kbd> to jump, or click a suggestion result to navigate directly.</p>
+      <p class="mm">အပေါ်ဘား သို့မဟုတ် ဘေးဘားရှာဖွေမှုတွင် စာရိုက်လိုက်တာနဲ့ အကြံပြုစာရင်းတွေ မြင်ရပြီး <kbd>Enter</kbd> နှိပ်ပြီး သွားနိုင်သလို ရလဒ်တန်းကို နှိပ်ပြီး လှည့်ပတ်နိုင်ပါတယ်။</p>
+    </section>
+
+    <section id="export" class="card">
+      <h2>6) Export</h2>
+      <p>Inventory → click <kbd>Export CSV</kbd> to download a spreadsheet of current rows.</p>
+      <p class="mm">Inventory မှာ <kbd>Export CSV</kbd> ကို နှိပ်ပြီး လက်ရှိအချက်အလက်များကို spreadsheet အဖြစ် ဒေါင်းလုဒ်နိုင်ပါတယ်။</p>
+    </section>
+
+    <section id="roles" class="card">
+      <h2>7) Roles & Permissions</h2>
+      <p>The app enforces permissions. Typical actions require “can add/edit/delete” depending on your role (e.g., admin or manager). If you see “No permission”, contact an admin to adjust your role.</p>
+      <p class="mm">ခွင့်ပြုချက်စနစ် ရှိပါတယ်။ မည်သည့်လုပ်ဆောင်ချက်တွင်မဆို သင့်အခန်းကဏ္ဍအလိုက် add/edit/delete ခွင့်လိုအပ်နိုင်ပါတယ်။ “No permission” ပြပါက admin ကို ဆက်သွယ်ကာ အခန်းကဏ္ဍ ပြင်ဆင်ပေးရန် တောင်းဆိုပါ။</p>
+    </section>
+
+    <section id="troubleshoot" class="card">
+      <h2>8) Troubleshooting</h2>
+      <ul>
+        <li><strong>“Name required”</strong> → Fill the Name field before saving (Inventory & Products).</li>
+        <li><strong>“Login failed”</strong> → Check email and password; try <em>Forgot?</em> to reset.</li>
+        <li><strong>“No permission”</strong> → Your role lacks access for that action. Ask an admin.</li>
+        <li><strong>Image upload</strong> → Only JPG/PNG; use URL if you already host the image.</li>
+      </ul>
+      <p class="mm"><strong>“Name required”</strong> → Name ကို ဖြည့်ပါ။ <strong>“Login failed”</strong> → Email/Password စစ်ပါ၊ Reset လုပ်ပါ။ <strong>“No permission”</strong> → ခွင့်မရှိသေးပါ။ Admin ကို ဆက်သွယ်ပါ။ <strong>Image upload</strong> → JPG/PNG သာ လက်ခံပါသည်။ URL ရှိရင်လည်း ထည့်နိုင်ပါသည်။</p>
+    </section>
+
+    <footer>
+      <p>Made for your current build. Keep this file with your deployment and share with your team.</p>
+    </footer>
+  </div>
+</body>
+</html>
