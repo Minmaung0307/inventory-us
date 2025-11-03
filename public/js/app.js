@@ -302,7 +302,7 @@
                 <button id="link-forgot" class="btn ghost" style="padding:6px 10px;font-size:12px"><i class="ri-key-2-line"></i> Forgot password</button>
                 <button id="link-register" class="btn secondary" style="padding:6px 10px;font-size:12px"><i class="ri-user-add-line"></i> Sign up</button>
               </div>
-              <div class="muted" style="font-size:12px;margin-top:6px">Tip: Admins — admin@inventory.com / admin123</div>
+              <div class="muted" style="font-size:12px;margin-top:6px">Tip: Admin — admin@inventory.com</div>
             </div>
           </div>
         </div>
