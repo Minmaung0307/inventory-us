@@ -79,6 +79,11 @@
           <p class="mm">အသစ်ဝင်ရောက်ရန် <em>Email</em> + <em>Password</em> ဖြည့်ပြီး <kbd>Sign in</kbd> နှိပ်ပါ။
           အကောင့်မရှိသေးရင် <kbd>Sign up</kbd> နှိပ်ပြီး အကောင့်ဖန်တီးနိုင်ပါတယ်။ Password မေ့နေပါက <kbd>Forgot?</kbd> ကိုနှိပ်ပြီး Reset Email ရယူနိုင်ပါတယ်။</p>
           <p class="pill">Tech: Firebase Auth (email/password)</p>
+          <ul>
+            <li><strong>Sign In: </strong>Email နဲ့ Password ဖြည့်ပြီးရင် "Sign In" ခလုတ်ကို နှိပ်ပါ။</li>
+            <li><strong>Forgot Password: </strong>Password မေ့သွားပါက Email ဖြည့်ပြီး "Forgot password" ခလုတ်ကို နှိပ်ပါ၊ Password Reset Link ကို Email ထဲသို့ ပို့ပေးပါလိမ့်မယ်။</li>
+            <li><strong>Sign Up: </strong>အကောင့်မရှိသေးပါက Email ဖြည့်ပြီး "Sign up" ခလုတ်ကို နှိပ်ကာ အကောင့်အသစ် ဖန်တီးနိုင်ပါတယ်။ ပုံမှန်အားဖြင့် admin123 ကို Default Password အဖြစ် သတ်မှတ်ပေးပါလိမ့်မယ်။ Admin Role ရဖို့အတွက် Admin Email (ဥပမာ: admin@inventory.com သို့မဟုတ် minmaung0307@gmail.com) ကို အသုံးပြုပြီး Sign Up လုပ်ရပါမယ်။</li>
+          </ul>
         </div>
         <div>
           <p class="badge ok">Under the hood</p>
@@ -96,43 +101,38 @@
       <h2>2) Navigation</h2>
       <p>Use the sidebar to switch between: <strong>Dashboard</strong>, <strong>Inventory</strong>, <strong>Products</strong>, <strong>COGS</strong>, <strong>Tasks</strong>, <strong>Settings</strong>, <strong>Links</strong>, and <strong>Search</strong>.</p>
       <p class="mm">ဘေးဘားမှ <strong>Dashboard</strong>, <strong>Inventory</strong>, <strong>Products</strong>, <strong>COGS</strong>, <strong>Tasks</strong>, <strong>Settings</strong>, <strong>Links</strong>, <strong>Search</strong> တို့ကိုရွေးချယ်ပို့နိုင်ပါတယ်။</p>
+      <p>Login ဝင်ပြီးတာနဲ့ Dashboard ကို ရောက်ပါလိမ့်မယ်။ ဒီနေရာမှာ အောက်ပါအချက်အလက်တွေကို အကျဉ်းချုပ် တွေ့ရပါမယ်။</p>
+      <ul>
+        <li><strong>Inventory, Products, Tasks, Users အရေအတွက်: </strong>အသီးသီးရှိတဲ့ အရေအတွက်ကို ပြသပေးထားပါတယ်။</li>
+        <li><strong>Low Stock, Critical Stock: </strong>စတော့ခ် နည်းနေတဲ့ပစ္စည်း အရေအတွက် နဲ့ အရေးပေါ်အခြေအနေရောက်နေတဲ့ပစ္စည်း အရေအတွက်ကို ပြသပေးထားပါတယ်။</li>
+        <li><strong>G-Profit (YTD): </strong>တစ်နှစ်တာအတွက် စုစုပေါင်း အမြတ်အစွန်းကို ပြသပေးထားပါတယ်။</li>
+        <li><strong>Posts: </strong>အသုံးပြုသူများအတွက် အသိပေးကြေညာချက်များ၊ သတင်းအချက်အလက်များကို ထည့်သွင်းထားသော Post များကို တွေ့မြင်နိုင်ပါတယ်။ Admin, Manager, Associate Role များသည် Post အသစ်များ ထည့်သွင်းနိုင်ပြီး Admin, Manager Role များသည် Post များကို တည်းဖြတ်နိုင်ကာ Admin Role သည် Post များကို ဖျက်ပစ်နိုင်ပါသည်။</li>
+      </ul>
     </section>
 
     <section id="inventory" class="card">
       <h2>3) Inventory</h2>
-      <h3>Add an item</h3>
-      <ol>
-        <li>Click <kbd>Add Item</kbd>.</li>
-        <li>Fill <em>Name</em>, <em>Code</em>, <em>Type</em>, <em>Price</em>, <em>Stock</em>, <em>Threshold</em>.</li>
-        <li>Press <kbd>Save</kbd>. (Name is required.)</li>
-      </ol>
-      <p class="mm"><kbd>Add Item</kbd> နှိပ်ပြီး အချက်အလက်များ ဖြည့်ပါ (<em>Name</em>, <em>Code</em>, <em>Type</em>, <em>Price</em>, <em>Stock</em>, <em>Threshold</em>)။ <kbd>Save</kbd> နှိပ်ပါ (<em>Name</em> မဖြည့်လျှင် မသိမ်းပါ）。</p>
-
-      <h3>Optional: attach an image</h3>
-      <p>If your “Add Item” modal includes <em>Image URL</em> and/or <em>File</em>, you can attach a JPG/PNG. Files are uploaded to Firebase Storage and the public URL is saved to <code>imageUrl</code>. URL input is also accepted.</p>
+      <p>ဘယ်ဘက် Sidebar မှ "Inventory" ကို ရွေးချယ်ပြီး စတော့ခ် စာရင်းကို ကြည့်ရှုနိုင်ပါတယ်။</p>
       <ul>
-        <li>Accepted file types: <strong>image/jpeg</strong>, <strong>image/png</strong>.</li>
-        <li>Stored path format: <code>tenants/&lt;uid&gt;/inventory/&lt;docId&gt;/image.&lt;ext&gt;</code>.</li>
+        <li><strong>Export CSV: </strong>"Export CSV" ခလုတ်ကို နှိပ်ပြီး Inventory ဒေတာအားလုံးကို CSV ဖိုင်အဖြစ် ထုတ်ယူနိုင်ပါတယ်။</li>
+        <li><strong>Add Item: </strong>Manager, Admin, Associate Role များသည် "Add Item" ခလုတ်ကို နှိပ်ပြီး ပစ္စည်းအသစ် ထည့်သွင်းနိုင်ပါတယ်။ Name, Code, Type, Price, Stock, Threshold စတဲ့ အချက်အလက်တွေကို ဖြည့်သွင်းရပါမယ်။</li>
+        <li><strong>Stock Adjustment (+/-): </strong>Manager နဲ့ Admin Role များသည် ပစ္စည်းတစ်ခုချင်းစီ၏ Stock ပမာဏကို + (တိုးရန်) သို့မဟုတ် - (လျှော့ရန်) ခလုတ်များဖြင့် ချိန်ညှိနိုင်ပါတယ်။</li>
+        <li><strong>Edit: </strong>Manager နဲ့ Admin Role များသည် "Edit" ခလုတ်ကို နှိပ်ပြီး ပစ္စည်းအချက်အလက်များကို ပြန်လည်ပြင်ဆင်နိုင်ပါတယ်။</li>
+        <li><strong>Delete: </strong>Admin Role သည် "Delete" ခလုတ်ကို နှိပ်ပြီး ပစ္စည်းများကို ဖျက်ပစ်နိုင်ပါတယ်။</li>
+        <li><strong>Low/Critical Highlight: </strong>Stock ပမာဏ နည်းနေပါက အဝါရောင်၊ အရေးပေါ် အခြေအနေရောက်နေပါက အနီရောင်ဖြင့် မီးမောင်းထိုးပြထားပါတယ်။</li>
       </ul>
-      <p class="mm">မော်ဒယ်ထဲမှာ <em>Image URL</em> / <em>File</em> ရှိပါက JPG/PNG ကို ထည့်နိုင်ပါတယ်။ File ကို Firebase Storage သို့တင်ပြီး <code>imageUrl</code> အနေဖြင့် သိမ်းမည်။ URL ထည့်ခြင်းလည်း လက်ခံပါတယ်။</p>
-
-      <h3>Edit, delete, and quick stock +/-</h3>
-      <ul>
-        <li>Edit or Delete via row buttons (permission required).</li>
-        <li>Use <kbd>+</kbd>/<kbd>-</kbd> buttons on a row to adjust stock by one.</li>
-      </ul>
-      <p class="mm">တန်းစီမှုအတန်းတွင် Edit/Delete ခလုတ်များ (ခွင့်ပြုချက်လို)၊ <kbd>+</kbd>/<kbd>-</kbd> ဖြင့် stock ကို တစ်လှမ်းစီ ပြောင်းလဲနိုင်ပါတယ်။</p>
     </section>
 
     <section id="products" class="card">
       <h2>4) Products</h2>
-      <h3>Add a product</h3>
-      <ol>
-        <li>Click <kbd>Add Product</kbd>.</li>
-        <li>Fill basic fields (Name, Barcode, Price, Type, etc.).</li>
-        <li>Optionally add <em>Image URL</em> or select a <em>File</em> (JPG/PNG). On save, the file is uploaded and <code>imageUrl</code> is stored.</li>
-      </ol>
-      <p class="mm"><kbd>Add Product</kbd> နှိပ်ပြီး အချက်အလက်များ ဖြည့်ပါ။ <em>Image URL</em> သို့မဟုတ် <em>File</em> (JPG/PNG) ထည့်နိုင်ပြီး သိမ်းချိန်တွင် ကိုယ်တိုင် upload လုပ်ပြီး <code>imageUrl</code> သိမ်းမည်။</p>
+      <p>ဘယ်ဘက် Sidebar မှ "Products" ကို ရွေးချယ်ပြီး ကုန်ပစ္စည်း စာရင်းကို ကြည့်ရှုနိုင်ပါတယ်။</p>
+      <ul>
+        <li><strong>Export CSV: </strong>"Export CSV" ခလုတ်ကို နှိပ်ပြီး Product ဒေတာအားလုံးကို CSV ဖိုင်အဖြစ် ထုတ်ယူနိုင်ပါတယ်။</li>
+        <li><strong>Add Product: </strong>Manager, Admin, Associate Role များသည် "Add Product" ခလုတ်ကို နှိပ်ပြီး ကုန်ပစ္စည်းအသစ် ထည့်သွင်းနိုင်ပါတယ်။ Name, Barcode, Price, Type, Ingredients, Instructions စတဲ့ အချက်အလက်တွေကို ဖြည့်သွင်းရပါမယ်။</li>
+        <li><strong>Product Card: </strong>ကုန်ပစ္စည်းအမည်ကို နှိပ်ခြင်းဖြင့် အသေးစိတ်အချက်အလက်များကို Modal (ပေါ်လာသော ပြတင်းပေါက်) ဖြင့် ကြည့်ရှုနိုင်ပါတယ်။</li>
+        <li><strong>Edit: </strong>Manager နဲ့ Admin Role များသည် "Edit" ခလုတ်ကို နှိပ်ပြီး ကုန်ပစ္စည်းအချက်အလက်များကို ပြန်လည်ပြင်ဆင်နိုင်ပါတယ်။</li>
+        <li><strong>Delete: </strong>Admin Role သည် "Delete" ခလုတ်ကို နှိပ်ပြီး ကုန်ပစ္စည်းများကို ဖျက်ပစ်နိုင်ပါတယ်။</li>
+      </ul>
     </section>
 
     <section id="search" class="card">
@@ -142,15 +142,30 @@
     </section>
 
     <section id="export" class="card">
-      <h2>6) Export</h2>
-      <p>Inventory → click <kbd>Export CSV</kbd> to download a spreadsheet of current rows.</p>
-      <p class="mm">Inventory မှာ <kbd>Export CSV</kbd> ကို နှိပ်ပြီး လက်ရှိအချက်အလက်များကို spreadsheet အဖြစ် ဒေါင်းလုဒ်နိုင်ပါတယ်။</p>
+      <h2>6) COGS (Cost of Goods Sold - ရောင်းရငွေကုန်ကျစရိတ်)</h2>
+      <p>ဘယ်ဘက် Sidebar မှ "COGS" ကို ရွေးချယ်ပြီး ရောင်းရငွေကုန်ကျစရိတ် မှတ်တမ်းကို ကြည့်ရှုနိုင်ပါတယ်။</p>
+      <ul>
+        <li><strong>Filter (စစ်ထုတ်ခြင်း): </strong>Year (နှစ်) နဲ့ Month (လ) အလိုက် ဒေတာတွေကို စစ်ထုတ်ပြီး ကြည့်ရှုနိုင်ပါတယ်။ "Filter" ခလုတ်ကို နှိပ်ပြီး အသုံးပြုပါ။</li>
+        <li><strong>Export CSV: </strong>"Export CSV" ခလုတ်ကို နှိပ်ပြီး COGS ဒေတာအားလုံးကို CSV ဖိုင်အဖြစ် ထုတ်ယူနိုင်ပါတယ်။</li>
+        <li><strong>Export Range: </strong>Year (နှစ်) နဲ့ Month (လ) စစ်ထုတ်ထားတဲ့အတိုင်း ဒေတာတွေကို CSV ဖိုင်အဖြစ် ထုတ်ယူနိုင်ပါတယ်။</li>
+        <li><strong>Add Row: </strong>Manager, Admin, Associate Role များသည် "Add Row" ခလုတ်ကို နှိပ်ပြီး COGS မှတ်တမ်းအသစ် ထည့်သွင်းနိုင်ပါတယ်။ Date, Gross Income, Produce Cost, Item Cost, Freight, Other စတဲ့ အချက်အလက်တွေကို ဖြည့်သွင်းရပါမယ်။</li>
+        <li><strong>Edit: </strong>Manager နဲ့ Admin Role များသည် "Edit" ခလုတ်ကို နှိပ်ပြီး COGS မှတ်တမ်းများကို ပြန်လည်ပြင်ဆင်နိုင်ပါတယ်။</li>
+        <li><strong>Delete: </strong>Admin Role သည် "Delete" ခလုတ်ကို နှိပ်ပြီး COGS မှတ်တမ်းများကို ဖျက်ပစ်နိုင်ပါတယ်။</li>
+        <li><strong>Totals: </strong>ဇယားရဲ့အောက်ဆုံးမှာ Gross Income, Produce Cost, Item Cost, Freight, Other, Gross Profit တို့ရဲ့ စုစုပေါင်းပမာဏကို ပြသပေးထားပါတယ်။</li>
+      </ul>
     </section>
 
     <section id="roles" class="card">
       <h2>7) Roles & Permissions</h2>
       <p>The app enforces permissions. Typical actions require “can add/edit/delete” depending on your role (e.g., admin or manager). If you see “No permission”, contact an admin to adjust your role.</p>
       <p class="mm">ခွင့်ပြုချက်စနစ် ရှိပါတယ်။ မည်သည့်လုပ်ဆောင်ချက်တွင်မဆို သင့်အခန်းကဏ္ဍအလိုက် add/edit/delete ခွင့်လိုအပ်နိုင်ပါတယ်။ “No permission” ပြပါက admin ကို ဆက်သွယ်ကာ အခန်းကဏ္ဍ ပြင်ဆင်ပေးရန် တောင်းဆိုပါ။</p>
+      <h3>Role (အခန်းကဏ္ဍ) လေးမျိုး</h3>
+      <ul>
+        <li><strong>User: </strong>အချက်အလက်များကို ကြည့်ရှုနိုင်သော်လည်း ထည့်သွင်းခြင်း၊ တည်းဖြတ်ခြင်း၊ ဖျက်ခြင်းတို့ကို လုပ်ဆောင်နိုင်မည်မဟုတ်ပါ။ (ပုံမှန် Role)</li>
+        <li><strong>Associate: </strong>အချက်အလက်များကို ကြည့်ရှုနိုင်သည်၊ အသစ်ထည့်သွင်းခြင်းကို လုပ်ဆောင်နိုင်သည်၊ သို့သော် တည်းဖြတ်ခြင်း၊ ဖျက်ခြင်းတို့ကို လုပ်ဆောင်နိုင်မည်မဟုတ်ပါ။</li>
+        <li><strong>Manager: </strong>အချက်အလက်များကို ကြည့်ရှုနိုင်သည်၊ အသစ်ထည့်သွင်းခြင်း နှင့် တည်းဖြတ်ခြင်းတို့ကို လုပ်ဆောင်နိုင်သည်၊ သို့သော် ဖျက်ခြင်းတို့ကို လုပ်ဆောင်နိုင်မည်မဟုတ်ပါ။</li>
+        <li><strong>Admin: </strong>အချက်အလက်အားလုံးကို ကြည့်ရှုခြင်း၊ ထည့်သွင်းခြင်း၊ တည်းဖြတ်ခြင်း၊ ဖျက်ခြင်း အစရှိသည့် လုပ်ဆောင်ချက်အားလုံးကို လုပ်ဆောင်နိုင်သော အမြင့်ဆုံး အခွင့်အရေးရှိသည့် Role ဖြစ်ပါသည်။</li>
+      </ul>
     </section>
 
     <section id="troubleshoot" class="card">
