@@ -983,7 +983,7 @@
         <div class="grid cols-3">
           <input id="inv-name" class="input" placeholder="Name"/>
           <input id="inv-code" class="input" placeholder="Code"/>
-          <select id="inv-type" class="input"><option>Raw</option><option>Cooked</option><option>Dry</option><option>Other</option></select>
+          <select id="inv-type" class="input"><option>Raw</option><option>Cooked</option><option>Dried</option><option>Utencils</option><option>Tools</option><option>Clothings</option><option>Jewellery</option><option>Docs</option><option>Transports</option><option>Other</option></select>
           <input id="inv-price" class="input" type="number" step="0.01" placeholder="Price"/>
           <input id="inv-stock" class="input" type="number" placeholder="Stock"/>
           <input id="inv-threshold" class="input" type="number" placeholder="Threshold"/>
@@ -1035,7 +1035,7 @@
             <input id="inv-name" class="input" placeholder="Name" value="${it.name||''}"/>
             <input id="inv-code" class="input" placeholder="Code" value="${it.code||''}"/>
             <select id="inv-type" class="input">
-              ${['Raw','Cooked','Dry','Other'].map(x=>`<option ${it.type===x?'selected':''}>${x}</option>`).join('')}
+              ${['Raw','Cooked','Dried', 'Utencils', 'Tools', 'Clothings', 'Jewellery', 'Docs', 'Transports', 'Other'].map(x=>`<option ${it.type===x?'selected':''}>${x}</option>`).join('')}
             </select>
             <input id="inv-price" class="input" type="number" step="0.01" placeholder="Price" value="${it.price||0}"/>
             <input id="inv-stock" class="input" type="number" placeholder="Stock" value="${it.stock||0}"/>
