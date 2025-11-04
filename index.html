@@ -8,6 +8,8 @@
     />
     <title>Inventory — SPA</title>
 
+    <!-- 1) Base href -->
+    <base href="./">
     <!-- PWA icons / manifest (home-screen icon) -->
     <link rel="manifest" href="./manifest.webmanifest" />
     <meta name="theme-color" content="#151311" />
@@ -73,7 +75,8 @@
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
           navigator.serviceWorker
-            .register("/service-worker.js")
+            .register("./service-worker.js",
+            { scope: './' })
             .catch(() => {});
         });
       }
