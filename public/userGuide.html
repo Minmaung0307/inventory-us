@@ -65,38 +65,19 @@
         <a href="#troubleshoot">Troubleshooting</a>
       </nav>
       <section class="card">
-        <p><strong>Goal:</strong> help your team add items/products, upload optional images (JPG/PNG), search quickly, and export CSV. This guide matches the features present in your current build.</p>
-        <p class="mm"><strong>ရည်ရွယ်ချက်:</strong> သင့်အသင်းက အရင်းအစာများ/ကုန်ပစ္စည်းများကို ထည့်သွင်း ပြင်ဆင်ရန်၊ ရုပ်ပုံကို (JPG/PNG) ထည့်ရန်၊ အမြန်ရှာရန်၊ CSV ထုတ်ယူရန် လွယ်ကူစေဖို့ ဒီလမ်းညွှန်ရေးထားတာ ဖြစ်ပါတယ်။</p>
+        <p><strong>Goal:</strong> help your team add items/products, search quickly, and export CSV. This guide matches the features present in your current build.</p>
+        <p class="mm"><strong>ရည်ရွယ်ချက်:</strong> သင့်အသင်းက စာရင်းများ/ကုန်ပစ္စည်းများကို ထည့်သွင်း ပြင်ဆင်ရန်၊ အမြန်ရှာရန်၊ CSV ထုတ်ယူရန် လွယ်ကူစေဖို့ ဒီလမ်းညွှန်ရေးထားတာ ဖြစ်ပါတယ်။</p>
       </section>
     </div>
 
     <section id="login" class="card">
       <h2>1) Login & Sign up</h2>
       <div class="twocol">
-        <div>
-          <ol>
-            <li>Enter your <em>Email</em> and <em>Password</em>, then press <kbd>Sign in</kbd>.</li>
-            <li>New user? Click <kbd>Sign up</kbd> to create an account (default password allowed by the app).</li>
-            <li>Forgot password? Use <kbd>Forgot?</kbd> to receive a reset email.</li>
-          </ol>
-          <p class="mm">အသစ်ဝင်ရောက်ရန် <em>Email</em> + <em>Password</em> ဖြည့်ပြီး <kbd>Sign in</kbd> နှိပ်ပါ။
-          အကောင့်မရှိသေးရင် <kbd>Sign up</kbd> နှိပ်ပြီး အကောင့်ဖန်တီးနိုင်ပါတယ်။ Password မေ့နေပါက <kbd>Forgot?</kbd> ကိုနှိပ်ပြီး Reset Email ရယူနိုင်ပါတယ်။</p>
-          <p class="pill">Tech: Firebase Auth (email/password)</p>
           <ul>
             <li><strong>Sign In: </strong>Email နဲ့ Password ဖြည့်ပြီးရင် "Sign In" ခလုတ်ကို နှိပ်ပါ။</li>
             <li><strong>Forgot Password: </strong>Password မေ့သွားပါက Email ဖြည့်ပြီး "Forgot password" ခလုတ်ကို နှိပ်ပါ၊ Password Reset Link ကို Email ထဲသို့ ပို့ပေးပါလိမ့်မယ်။</li>
             <li><strong>Sign Up: </strong>အကောင့်မရှိသေးပါက Email ဖြည့်ပြီး "Sign up" ခလုတ်ကို နှိပ်ကာ အကောင့်အသစ် ဖန်တီးနိုင်ပါတယ်။ ပုံမှန်အားဖြင့် admin123 ကို Default Password အဖြစ် သတ်မှတ်ပေးပါလိမ့်မယ်။ Admin Role ရဖို့အတွက် Admin Email (ဥပမာ: admin@inventory.com သို့မဟုတ် minmaung0307@gmail.com) ကို အသုံးပြုပြီး Sign Up လုပ်ရပါမယ်။</li>
           </ul>
-        </div>
-        <div>
-          <p class="badge ok">Under the hood</p>
-          <ul>
-            <li>Sign in via <code>auth.signInWithEmailAndPassword</code>.</li>
-            <li>Sign up creates a registry doc and sets role (admin if email is whitelisted).</li>
-            <li>Password reset uses <code>auth.sendPasswordResetEmail</code>.</li>
-          </ul>
-          <p class="mm">အထဲမှာ အကောင့်ဝင်ခြင်း၊ အကောင့်ဖန်တီးခြင်း၊ Password Reset စသည်များကို Firebase Auth နဲ့ ဆောင်ရွက်ပါတယ်။</p>
-        </div>
       </div>
     </section>
 
