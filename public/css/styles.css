@@ -17,6 +17,21 @@
   --shadow: 0 10px 30px rgba(0,0,0,.25);
 }
 
+/* ===== Light Theme ===== */
+html[data-theme="light"]{
+  --bg:#ffffff;
+  --panel:#f9f9f9;
+  --panel-2:#ffffff;
+  --text:#111111;
+  --muted:#666666;
+  --brand:#0fa7d9;   /* primary accent for light */
+  --brand-2:#60a5fa;
+  --ok:#16a34a;
+  --warn:#d97706;
+  --danger:#dc2626;
+  --border: rgba(0,0,0,.08);
+}
+
 html[data-theme="sunrise"]{
   --bg:#0e0d0c; --panel:#151311; --panel-2:#1b1916; --text:#fff3ea; --muted:#c9b8a8;
   --brand:#ff9d5c; --brand-2:#ffd1b0; --ok:#7bd88f; --warn:#ffb84d; --danger:#ff6b6b; --border:rgba(255,199,150,.18);
@@ -259,21 +274,25 @@ a:hover { text-decoration: underline; }
 
 /* ===== Intro Tabs (Dashboard) ===== */
 .tabs { display:block; }
-.tabs .tab-headers {
-  display:flex; gap:8px; border-bottom:1px solid var(--hairline,#ececec); margin-bottom:8px;
+.tabs .tab-headers{
+  display:flex; gap:8px; border-bottom:1px solid var(--border); margin-bottom:8px;
 }
-.tabs .tab-headers label {
+.tabs .tab-headers label{
   padding:6px 12px; border-radius:10px 10px 0 0; cursor:pointer;
-  background: #cacaca; color: var(--fg, #222); font-weight:600;
+  background: var(--panel-2); color: var(--text);
+  font-weight:600; border:1px solid var(--border); border-bottom:none;
+  transition: background .2s ease, color .2s ease, border-color .2s ease;
 }
 .tabs input#tab-en:checked ~ .tab-headers label[for="tab-en"],
 .tabs input#tab-mm:checked ~ .tab-headers label[for="tab-mm"]{
-  background: #e5e5e5; border:1px solid var(--hairline,#ececec); border-bottom:none;
+  background: var(--brand);
+  color: #0b0b0b; /* brand bg အပေါ်မှာ readable */
+  border-color: color-mix(in srgb, var(--brand) 60%, var(--border));
 }
-.tabs .tab-panels { padding-top:4px; }
-.tabs .panel { display:none; }
-.tabs input#tab-en:checked ~ .tab-panels .panel-en { display:block; }
-.tabs input#tab-mm:checked ~ .tab-panels .panel-mm { display:block; }
+.tabs .tab-panels{ padding-top:6px; }
+.tabs .panel{ display:none; }
+.tabs input#tab-en:checked ~ .tab-panels .panel-en{ display:block; }
+.tabs input#tab-mm:checked ~ .tab-panels .panel-mm{ display:block; }
 
 .tabs ul { margin:6px 0 0 18px; }
 .tabs li { margin:4px 0; }

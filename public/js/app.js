@@ -635,7 +635,7 @@
             <div>
               <label>Palette</label>
               <select id="theme-palette" class="input">
-                ${['sunrise','sky','mint','slate','dark'].map(x=>`<option value="${x}" ${theme.palette===x?'selected':''}>${x}</option>`).join('')}
+                ${['light','sunrise','sky','mint','slate','dark'].map(x=>`<option value="${x}" ${theme.palette===x?'selected':''}>${x}</option>`).join('')}
               </select>
             </div>
             <div>
