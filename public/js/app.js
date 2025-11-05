@@ -243,7 +243,8 @@
           <div class="footer" style="flex-direction:column;gap:8px;padding-bottom:16px">
             <div style="display:flex;gap:10px">
               <!-- 🔁 use computed guideUrl -->
-              <a href="${guideUrl}" target="_blank" rel="noopener">User Guide</a>
+              <!-- <a href="${guideUrl}" target="_blank" rel="noopener">User Guide</a> -->
+              <a href="/userGuide.html" target="_blank" rel="noopener">User Guide</a>
               <a href="https://youtube.com"  target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
               <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
               <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>

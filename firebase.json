@@ -14,6 +14,7 @@
     ],
     "rewrites": [
       { "source": "/service-worker.js", "destination": "/service-worker.js" },
+      { "source": "/userGuide.html", "destination": "/userGuide.html" }, 
       { "source": "**", "destination": "/index.html" }
     ],
     "cleanUrls": true
