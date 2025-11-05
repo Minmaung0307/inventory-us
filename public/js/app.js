@@ -207,6 +207,10 @@
 
   /* ---------- Layout ---------- */
   function layout(content){
+    // ✅ Always-correct base path (works on Firebase Hosting + GitHub Pages + SPA routes)
+    const base = location.origin + location.pathname.replace(/\/[^/]*$/, "/");
+    const guideUrl = base + "userGuide.html";
+
     return `
       <div class="app">
         <aside class="sidebar" id="sidebar">
@@ -238,7 +242,8 @@
 
           <div class="footer" style="flex-direction:column;gap:8px;padding-bottom:16px">
             <div style="display:flex;gap:10px">
-              <a href="../userGuide.html" target="_blank">User Guide</a>
+              <!-- 🔁 use computed guideUrl -->
+              <a href="${guideUrl}" target="_blank" rel="noopener">User Guide</a>
               <a href="https://youtube.com"  target="_blank" rel="noopener" title="YouTube"><i class="ri-youtube-fill"></i></a>
               <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook"><i class="ri-facebook-fill"></i></a>
               <a href="https://instagram.com" target="_blank" rel="noopener" title="Instagram"><i class="ri-instagram-line"></i></a>
