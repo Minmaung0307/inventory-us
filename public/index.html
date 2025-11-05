@@ -61,7 +61,8 @@
         authDomain: "inventory-us.firebaseapp.com",
         databaseURL: "https://inventory-us-default-rtdb.firebaseio.com",
         projectId: "inventory-us",
-        storageBucket: "inventory-us.firebasestorage.app",
+        // storageBucket: "inventory-us.firebasestorage.app",
+        storageBucket: "inventory-us.appspot.com",
         messagingSenderId: "685621968644",
         appId: "1:685621968644:web:a88ec978f1ab9b4f49da51",
         measurementId: "G-L6NRD0B1B6",
@@ -73,7 +74,7 @@
     <div id="root"></div>
 
     <!-- Service worker -->
-    <script>
+    <!-- <script>
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
           navigator.serviceWorker
@@ -82,8 +83,13 @@
             .catch(() => {});
         });
       }
-    </script>
-    <script src="./js/app.js"></script>
-    <!-- <script src="./js/app.js?v=1.0.3" defer></script> -->
+    </script> -->
+    <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./service-worker.js", { scope: "./" });
+    }
+  </script>
+    <!-- <script src="./js/app.js"></script> -->
+    <script src="./js/app.js?v=2" defer></script>
   </body>
 </html>
