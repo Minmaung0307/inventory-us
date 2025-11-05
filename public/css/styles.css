@@ -256,3 +256,24 @@ a:hover { text-decoration: underline; }
   object-fit: contain; /* no cropping */
   border-radius: 8px;
 }
+
+/* ===== Intro Tabs (Dashboard) ===== */
+.tabs { display:block; }
+.tabs .tab-headers {
+  display:flex; gap:8px; border-bottom:1px solid var(--hairline,#ececec); margin-bottom:8px;
+}
+.tabs .tab-headers label {
+  padding:6px 12px; border-radius:10px 10px 0 0; cursor:pointer;
+  background: var(--chip-bg, #f6f6f6); color: var(--fg, #222); font-weight:600;
+}
+.tabs input#tab-en:checked ~ .tab-headers label[for="tab-en"],
+.tabs input#tab-mm:checked ~ .tab-headers label[for="tab-mm"]{
+  background: var(--card, #fff); border:1px solid var(--hairline,#ececec); border-bottom:none;
+}
+.tabs .tab-panels { padding-top:4px; }
+.tabs .panel { display:none; }
+.tabs input#tab-en:checked ~ .tab-panels .panel-en { display:block; }
+.tabs input#tab-mm:checked ~ .tab-panels .panel-mm { display:block; }
+
+.tabs ul { margin:6px 0 0 18px; }
+.tabs li { margin:4px 0; }

@@ -325,6 +325,54 @@
     </div>`;
   }
 
+  function introTabsHTML(){
+    return `
+      <div class="card">
+        <div class="card-body">
+          <div class="tabs">
+            <input type="radio" id="tab-en" name="introTab" checked hidden>
+            <input type="radio" id="tab-mm" name="introTab" hidden>
+
+            <div class="tab-headers">
+              <label for="tab-en"><i class="ri-english-input"></i> English</label>
+              <label for="tab-mm"><i class="ri-translate-2"></i> မြန်မာ</label>
+            </div>
+
+            <div class="tab-panels">
+              <section class="panel panel-en">
+                <h3 style="margin:0 0 8px 0">Inventory — Simple, fast, and reliable stock management for small teams.</h3>
+                <p>Track items, prices, and stock levels in real time. Upload product photos, set low-stock alerts, and update counts with a tap—on desktop or phone.</p>
+                <ul>
+                  <li><strong>Quick updates:</strong> Increase/decrease stock with one click.</li>
+                  <li><strong>Photos on hover:</strong> See product images without leaving the list.</li>
+                  <li><strong>Smart thresholds:</strong> Color warnings when items run low.</li>
+                  <li><strong>Clear costs:</strong> COGS view to see margin at a glance.</li>
+                  <li><strong>Role-based access:</strong> Owner/Admin/Manager permissions.</li>
+                  <li><strong>Export anytime:</strong> Excel/PDF for sharing or backups.</li>
+                </ul>
+                <p><strong>How it works:</strong> Add items → attach image (JPG/PNG) → watch dashboard alerts → export when needed.</p>
+              </section>
+
+              <section class="panel panel-mm">
+                <h3 style="margin:0 0 8px 0">Inventory — အသင့်သုံး၊ လျင်မြန်ပြီး ယုံကြည်စိတ်ချရတဲ့ စတော့စီမံခန့်ခွဲမှု</h3>
+                <p>ပစ္စည်းအမျိုးအစား၊ စျေးနှုန်း၊ စတော့အခြေအနေကို အချိန်နှင့်တပြေးညီ ကြည့်ရှုနိုင်သည်။ ပစ္စည်းပုံတင်နိုင်ပြီး စတော့နည်းလာသော် အရောင်ဖြင့် သတိပေးသည်။</p>
+                <ul>
+                  <li><strong>လျင်မြန်:</strong> စတော့တိုး/လျှော့ တစ်ချက်တည်း။</li>
+                  <li><strong>ပုံကြည့်ရန် လွယ်ကူ:</strong> စာရင်းထဲကနေ Hover ဖြင့်ကြည့်နိုင်။</li>
+                  <li><strong>Threshold သတိပေး:</strong> စတော့နည်းလာသည့်အချိန် အရောင်သတိပေး။</li>
+                  <li><strong>ကုန်ကျစရိတ်မြင်နိုင်:</strong> COGS ကနေ အမြတ်နှုန်းမြန်မြန်မြင်နိုင်။</li>
+                  <li><strong>ခွင့်ပြုချက်:</strong> Owner/Admin/Manager Role များ။</li>
+                  <li><strong>Export:</strong> Excel/PDF အဖြစ် လွယ်ကူစွာ ထုတ်ယူနိုင်။</li>
+                </ul>
+                <p><strong>အသုံးပြုနည်း:</strong> ပစ္စည်းထည့် → ပုံတင်(၎င်း/လင့်ခ်) → Dashboard သတိပေးကြည့် → လိုသလို Export/Print လုပ်ပါ။</p>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   function viewDashboard(){
     const lowCt  = state.inventory.filter(i => i.stock <= i.threshold && i.stock > Math.max(1, Math.floor(i.threshold*0.6))).length;
     const critCt = state.inventory.filter(i => i.stock <= Math.max(1, Math.floor(i.threshold*0.6))).length;
@@ -350,6 +398,8 @@
         <div class="card clickable" data-go="inventory"><div class="card-body"><strong>Critical</strong><div class="badge danger" style="margin-top:8px">${critCt}</div></div></div>
         <div class="card clickable" data-go="cogs"><div class="card-body"><strong>G-Profit (YTD)</strong><div style="color:var(--muted)">${fmtUSD(gProfit)}</div></div></div>
       </div>
+
+      ${introTabsHTML()}
 
       <div class="card"><div class="card-body">
         <div style="display:flex;justify-content:space-between;align-items:center">
