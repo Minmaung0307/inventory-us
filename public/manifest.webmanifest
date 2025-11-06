@@ -1,8 +1,8 @@
 {
   "name": "Inventory — SPA",
   "short_name": "Inventory",
-  "id": "./",
-  "start_url": "./",
+  "id": "/",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#151311",
   "theme_color": "#151311",
